@@ -445,6 +445,190 @@ function createViewer3D(container, mode) {
     m.castShadow = true; m.receiveShadow = true;
     return m;
   }
+  // ----- Cable stations -----
+  // Built like real gym machines: steel frame, a selectorized weight stack on guide rods,
+  // pulleys, and a steel cable for each handle. The top plates rise as the cable is pulled.
+  const cableMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.4, metalness: 0.6 });
+  const ropeMat = new THREE.MeshStandardMaterial({ color: 0x2c2c2c, roughness: 0.9 });
+  const chrome = new THREE.MeshStandardMaterial({ color: 0xd8dadc, roughness: 0.18, metalness: 1 });
+  const unitCyl = new THREE.CylinderGeometry(1, 1, 1, 10);
+  function segment(mat, r) { const m = new THREE.Mesh(unitCyl, mat); m.userData.r = r; m.castShadow = true; equipment.add(m); return m; }
+  function setSeg(m, a, b) {
+    const d = b.clone().sub(a), len = d.length();
+    m.position.copy(a).add(b).multiplyScalar(0.5);
+    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), len > 1e-6 ? d.divideScalar(len) : new THREE.Vector3(0, 1, 0));
+    m.scale.set(m.userData.r, Math.max(len, 0.01), m.userData.r);
+  }
+  function box(w, h, d, mat, x, y, z, parent) {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true;
+    (parent || equipment).add(m); return m;
+  }
+  function wheel(r, parent, x, y, z, axis) {
+    const g = new THREE.Group(); g.position.set(x, y, z);
+    const w = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 1.4, 24), mats.plate); w.rotation.x = Math.PI / 2; g.add(w);
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.35, r * 0.35, 1.8, 12), chrome); hub.rotation.x = Math.PI / 2; g.add(hub);
+    if (axis) g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), axis);
+    parent.add(g); return g;
+  }
+  // A single tower. It is built in its own frame (+x faces the lifter) and placed at (x, z).
+  // Returns the world points the cable runs through and the moving part of the stack.
+  function tower(x, z, faceTo, pulleyY, opts = {}) {
+    const H = opts.height || Math.max(200, pulleyY + 26);
+    const g = new THREE.Group(); g.position.set(x, floor.position.y, z);
+    const dir = faceTo.clone().sub(new THREE.Vector3(x, 0, z)).setY(0).normalize();
+    g.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), dir);
+    equipment.add(g);
+    const py = pulleyY - floor.position.y;
+    box(40, 2.6, 34, mats.frame, -6, 1.3, 0, g);                                 // base plate
+    [-1, 1].forEach((s) => {
+      box(4.4, H, 4.4, mats.frame, -22, H / 2, s * 13, g);                       // rear uprights
+      box(4.4, H, 4.4, mats.frame, 6, H / 2, s * 13, g);                          // front uprights
+      box(30, 3.6, 3.6, mats.frame, -8, H - 1.8, s * 13, g);                      // top rails
+      const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, H - 16, 10), chrome);
+      rod.position.set(-8, 4 + (H - 16) / 2, s * 5.2); g.add(rod);               // guide rods
+    });
+    box(30, 3.6, 30, mats.frame, -8, H - 1.8, 0, g);                              // top plate
+    // Weight stack: 16 plates, the top six ride up when pulled.
+    const plateMat = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.55, metalness: 0.3 });
+    for (let i = 0; i < 10; i++) box(17, 2.5, 15, plateMat, -8, 5 + i * 2.65, 0, g);
+    const moving = new THREE.Group(); g.add(moving);
+    for (let i = 10; i < 16; i++) box(17, 2.5, 15, plateMat, -8, 5 + i * 2.65, 0, moving);
+    const head = 5 + 16 * 2.65;
+    box(18, 3.4, 16, chrome, -8, head + 0.6, 0, moving);                          // head plate
+    const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 18, 8), chrome); pin.rotation.x = Math.PI / 2;
+    pin.position.set(-8, 5 + 10 * 2.65, 0); moving.add(pin);                      // selector pin
+    // Pulley column at the front with an adjustable carriage.
+    if (!opts.noCarriage) {
+      box(5, H - 6, 5, chrome, 12, (H - 6) / 2 + 3, 0, g);
+      box(8, 11, 8, mats.frame, 12, py, 0, g);                                    // carriage
+      wheel(3.6, g, 16.5, py, 0);
+      wheel(3.2, g, 12, H - 6, 0);
+    }
+    wheel(3.2, g, -8, H - 6, 0);
+    const W = (v) => g.localToWorld(v.clone());
+    g.updateMatrixWorld(true);
+    const route = [
+      () => W(new THREE.Vector3(-8, head + 2.4 + moving.position.y, 0)),
+      () => W(new THREE.Vector3(-8, H - 3, 0)), () => W(new THREE.Vector3(12, H - 3, 0)),
+      () => W(new THREE.Vector3(14, py + 3, 0)), () => W(new THREE.Vector3(18.5, py, 0))
+    ];
+    return { g, moving, route, H, W };
+  }
+  function handleFor(kind) {
+    const g = new THREE.Group();
+    if (kind === "D") {
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(3.2, 0.55, 8, 24, Math.PI * 1.25), mats.frame);
+      ring.rotation.z = -Math.PI * 0.125 + Math.PI / 2; g.add(ring);
+      const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 8, 12), mats.rubber); grip.rotation.x = Math.PI / 2; g.add(grip);
+    }
+    equipment.add(g); return g;
+  }
+  function buildStation(fig) {
+    const st = fig.station, cables = [];
+    const hip = to3(solveSide(poseA).hip), person = new THREE.Vector3(hip.x, 0, 0);
+    const L = fig.load || {}, from = L.from ? to3(L.from) : new THREE.Vector3(0, 150, 0);
+    const pulleyY = st.pulleyY ?? from.y;
+    if (st.kind === "crossover") {
+      // Two towers, one each side, a cable to each hand.
+      const tx = hip.x + (st.back ?? -14);
+      [1, -1].forEach((side) => {
+        const t = tower(tx, side * 78, new THREE.Vector3(tx, 0, 0), pulleyY);
+        cables.push({ t, attach: side > 0 ? "R" : "L", handle: handleFor("D") });
+      });
+      // Overhead bar joining the towers.
+      const bar = segment(mats.frame, 2.2); setSeg(bar, new THREE.Vector3(tx - 8, cables[0].t.H + floor.position.y, 70), new THREE.Vector3(tx - 8, cables[0].t.H + floor.position.y, -70));
+      const pull = segment(chrome, 1.4); setSeg(pull, new THREE.Vector3(tx + 10, cables[0].t.H - 6, 60), new THREE.Vector3(tx + 10, cables[0].t.H - 6, -60));
+    } else if (st.kind === "pulldown") {
+      // Column behind the seat with an arm reaching over the head to the top pulley.
+      const cx = hip.x - 36, t = tower(cx, 0, person.clone().setX(hip.x + 50), 40, { height: 214 });
+      const top = new THREE.Vector3(from.x, 214 + floor.position.y - 10, 0);
+      box(top.x - cx + 6, 5, 6, mats.frame, (cx + top.x) / 2, top.y + 4, 0);
+      wheel(3.4, equipment, top.x, top.y, 0);
+      t.route.splice(3, 2, () => new THREE.Vector3(top.x - 3, top.y + 3, 0), () => new THREE.Vector3(top.x, top.y - 3, 0));
+      const bar = new THREE.Group(); equipment.add(bar);
+      const rod = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 96, 14), chrome); rod.rotation.x = Math.PI / 2; bar.add(rod);
+      [-1, 1].forEach((s) => { const end = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 14, 12), chrome); end.position.set(0, -3.5, s * 50); end.rotation.x = s * 0.5 + Math.PI / 2; bar.add(end); });
+      cables.push({ t, attach: "mid", bar });
+    } else if (st.kind === "press") {
+      // Selectorized chest press: weight stack behind the seat, two lever arms swinging
+      // from pivots above the shoulders down to upright handles.
+      const sh = to3(solveSide(poseA).shoulder);
+      const t = tower(hip.x - 40, 0, person.clone().setX(hip.x + 60), 60, { noCarriage: true, height: 190 });
+      const pivotX = hip.x - 14, pivotY = sh.y + 36;
+      box(6, 6, 78, mats.frame, pivotX, pivotY, 0);                                 // pivot shaft
+      box(t.g.position.x - pivotX + 18, 5, 6, mats.frame, (t.g.position.x + pivotX) / 2 - 4, pivotY, 0);
+      const levers = [1, -1].map((side) => {
+        const P = new THREE.Vector3(pivotX, pivotY, side * 37);
+        const arm = segment(mats.frame, 2.2), drop = segment(mats.frame, 1.8);
+        const grip = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.3, 11, 14), mats.rubber); grip.castShadow = true; equipment.add(grip);
+        return { side, P, arm, drop, grip };
+      });
+      // A cable from the stack runs up to the pivot so the plates rise as the arms move.
+      cables.push({ t, attach: "mid", levers, press: true });
+    } else {
+      // A single tower facing the lifter (front, or to the side for the Pallof press).
+      const at = st.at ? new THREE.Vector3(st.at[0] - 100, 0, st.at[1]) : new THREE.Vector3(from.x + (from.x > hip.x ? 22 : -22), 0, 0);
+      const t = tower(at.x, at.z, person, pulleyY);
+      cables.push({ t, attach: "mid", rope: st.handle === "rope", vbar: st.handle === "V", handle: st.handle === "D" ? handleFor("D") : null });
+    }
+    cables.forEach((c) => {
+      c.segs = c.t.route.slice(0, c.press ? 2 : undefined).map(() => segment(cableMat, 0.6));
+      if (c.rope) c.ropeSegs = [segment(ropeMat, 0.95), segment(ropeMat, 0.95)];
+      if (c.vbar) c.ropeSegs = [segment(mats.frame, 1.1), segment(mats.frame, 1.1)];
+    });
+    load.cables = cables;
+    // Rest length of each cable: the shortest it gets during the rep.
+    const samples = [0, 0.25, 0.5, 0.75, 1];
+    cables.forEach((c) => { c.rest = Infinity; });
+    samples.forEach((t) => {
+      pose(lerpPose(poseA, poseB, t), fig.ik ? t : null);
+      cables.forEach((c) => { c.rest = Math.min(c.rest, c.press ? cableEnd(c).x : cableEnd(c).distanceTo(c.t.route[c.t.route.length - 1]())); });
+    });
+  }
+  function cableEnd(c) {
+    const R = gripPoint("R"), Lh = gripPoint("L");
+    if (c.attach === "R") return R;
+    if (c.attach === "L") return Lh;
+    return R.add(Lh).multiplyScalar(0.5);
+  }
+  function updateCables() {
+    (load.cables || []).forEach((c) => {
+      const end = cableEnd(c), route = c.t.route;
+      if (c.press) {
+        c.levers.forEach((l) => {
+          const s = l.side > 0 ? "R" : "L", hp = gripPoint(s);
+          const up = new THREE.Vector3(0, 0, 1).applyQuaternion(handQ[s]);   // the grip runs along the hand's z
+          if (up.y < 0) up.negate();
+          l.grip.position.copy(hp); l.grip.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
+          const top = hp.clone().add(up.clone().multiplyScalar(5.5));
+          const elbow = top.clone().add(new THREE.Vector3(0, 6, 0)).setZ(top.z + l.side * 4);
+          setSeg(l.drop, top, elbow); setSeg(l.arm, elbow, l.P);
+        });
+        c.t.moving.position.y = Math.max(0, Math.min(40, (end.x - c.rest) * 0.8));
+        const pts = route.slice(0, 3).map((f) => f());
+        c.segs.forEach((m, i) => setSeg(m, pts[i], pts[i + 1]));
+        return;
+      }
+      const pulley = route[route.length - 1]();
+      const pullDir = pulley.clone().sub(end).normalize();
+      let knot = end;
+      if (c.rope || c.vbar) {
+        knot = end.clone().add(pullDir.clone().multiplyScalar(c.rope ? 9 : 6));
+        setSeg(c.ropeSegs[0], knot, gripPoint("R")); setSeg(c.ropeSegs[1], knot, gripPoint("L"));
+      }
+      if (c.bar) { c.bar.position.copy(end); }
+      if (c.handle) {
+        c.handle.position.copy(end);
+        if (c.attach !== "mid") c.handle.quaternion.copy(handQ[c.attach]);
+        knot = end.clone().add(pullDir.clone().multiplyScalar(4));
+      }
+      const lift = Math.max(0, Math.min(40, (knot.distanceTo(pulley) - c.rest) * 0.5));
+      c.t.moving.position.y = lift;
+      const pts = route.map((f) => f()).concat([knot]);
+      c.segs.forEach((m, i) => setSeg(m, pts[i], pts[i + 1]));
+    });
+  }
   function buildEquipment(fig) {
     clearEquipment();
     const props = fig.props || [];
@@ -486,6 +670,8 @@ function createViewer3D(container, mode) {
         equipment.add(rail);
         return;
       }
+      // A cable station replaces the plain tower post.
+      if (fig.station && Math.abs(x1 - x2) < 1 && Math.abs(y1 - y2) > 80) return;
       // Floor uprights under a pad become one steel leg with a wide stabilizer foot.
       const vertical = Math.abs(x1 - x2) < 1, bottom = Math.max(y1, y2), top = Math.min(y1, y2);
       const under = vertical && bottom >= 186 ? padTopAt(x1) : null;
@@ -546,7 +732,8 @@ function createViewer3D(container, mode) {
         equipment.add(g); return g;
       });
     }
-    if (L.type === "cable") {
+    if (fig.station) buildStation(fig);
+    else if (L.type === "cable") {
       const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
       load.cable = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: css("--equip", "#888") }));
       load.from = to3(L.from); load.from.z = (fig.props || []).some((p) => p.line && Math.abs(p.line[0] - p.line[2]) < 1 && Math.abs(p.line[1] - p.line[3]) > 80) ? -34 : 0;
@@ -711,6 +898,7 @@ function createViewer3D(container, mode) {
         load.dbs[i].quaternion.copy(handQ[i ? "L" : "R"]);
       });
     }
+    if (load.cables) updateCables();
     if (load.cable) {
       const pos = load.cable.geometry.attributes.position;
       pos.setXYZ(0, load.from.x, load.from.y, load.from.z); pos.setXYZ(1, handR.x, handR.y, (handR.z + handL.z) / 2); pos.needsUpdate = true;
@@ -840,6 +1028,13 @@ function createViewer3D(container, mode) {
     reachEnds = [poseA, poseB].map((q) => ({ j: solveSide(q), gz: q.gz }));
     frameCamera();
     buildEquipment(fig);
+    if (fig.station) {
+      // Widen the view to take in the machine.
+      const b = new THREE.Box3().setFromObject(equipment), c = b.getCenter(new THREE.Vector3()), sz = b.getSize(new THREE.Vector3());
+      const span = Math.max(sz.x * 0.85 + sz.z * 0.55, sz.y) + 20;
+      target.set((target.x + c.x) / 2, Math.max(target.y, sz.y / 2 + floor.position.y), 0);
+      dist = Math.max(dist, span / 2 / Math.tan((camera.fov * Math.PI) / 360) * 1.1);
+    }
     body.setHands(!fig.hand || fig.hand === "grip");
     setHighlights();
     resize();

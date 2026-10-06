@@ -52,7 +52,7 @@ const EXERCISES = [
     good: { cue: "Keep a soft, fixed bend in the elbows and hug the hands together in front of your chest.", highlight: ["elbow"] },
     bad: { cue: "Bending and straightening the elbows turns it into a press and takes the stretch off the chest.", highlight: ["elbow", "forearm"],
       b: { ua: 170, fa: 70 } },
-    figure3d: { ik: { grip: 30, pole: [-0.6, -0.5, 0.6] }, grip: "neutral", armsOut: true,
+    figure3d: { station: { kind: "crossover", pulleyY: 150 }, ik: { grip: 30, pole: [-0.6, -0.5, 0.6] }, grip: "neutral", armsOut: true,
       // Arms open wide at chest height, then hug the hands together in front.
       a: { ...STAND, x: 104, torso: 14, neck: 10, ua: 262, fa: 264, shin: 4, thigh: -4, gz: 48 },
       b: { ...STAND, x: 104, torso: 14, neck: 10, ua: 100, fa: 92, shin: 4, thigh: -4, gz: 4 } },
@@ -66,7 +66,7 @@ const EXERCISES = [
     good: { cue: "Handles level with mid-chest. Back and shoulders stay flat against the pad.", highlight: ["spine"] },
     bad: { cue: "Shoulders roll forward off the pad at lockout, shifting the work to the front delts.", highlight: ["shoulder", "spine"],
       b: { torso: 22, bend: 8, neck: 25 } },
-    figure3d: { ik: { grip: 21, pole: [-0.4, -0.7, 1] }, grip: "neutral" },
+    figure3d: { ik: { grip: 21, pole: [-0.4, -0.7, 1] }, grip: "neutral", station: { kind: "press" } },
     figure: { props: [...SEAT(76, 142), { line: [62, 140, 58, 70], w: 7 }],
       load: { type: "cable", from: [150, 96] },
       a: { x: 76, y: 136, anchor: "hip", shin: 10, thigh: -90, torso: -6, neck: -2, ua: 210, fa: 88 },
@@ -121,6 +121,7 @@ const EXERCISES = [
     good: { cue: "Sit tall with a slight lean back. Lead with the elbows and bring the bar to your upper chest.", highlight: ["arm"] },
     bad: { cue: "Leaning far back turns it into a row and takes the work off the lats.", highlight: ["spine", "hip"],
       b: { torso: -42, neck: -30 } },
+    figure3d: { station: { kind: "pulldown" } },
     figure: { armsOut: true, abd: 30, props: [...SEAT(84, 142), { rect: [96, 112, 20, 7] }], load: { type: "cable", from: [104, 0] },
       a: { x: 84, y: 136, anchor: "hip", shin: 0, thigh: -90, torso: -8, neck: -4, ua: 8, fa: 4 },
       b: { x: 84, y: 136, anchor: "hip", shin: 0, thigh: -90, torso: -14, neck: -6, ua: 200, fa: 18 } }
@@ -131,7 +132,7 @@ const EXERCISES = [
     good: { cue: "Chest up, back still. Pull the handle to your stomach and squeeze for one second.", highlight: ["spine"] },
     bad: { cue: "Rounding forward to reach, then yanking back with the lower back.", highlight: ["spine", "back"],
       a: { torso: 50, bend: 12, neck: 70, ua: 120, fa: 115 } },
-    figure3d: { grip: "neutral" },
+    figure3d: { station: { kind: "tower", handle: "V" }, grip: "neutral" },
     figure: { props: [{ rect: [40, 160, 60, 7] }, { line: [70, 167, 70, 188], w: 5 }, { line: [150, 150, 150, 188], w: 6 }],
       load: { type: "cable", from: [176, 140] },
       a: { x: 66, y: 154, anchor: "hip", shin: -72, thigh: -98, torso: 6, neck: 6, ua: 96, fa: 92 },
@@ -246,7 +247,7 @@ const EXERCISES = [
     good: { cue: "Rope at eye height. Pull it toward your face, elbows high, and pull the ends apart.", highlight: ["upperArm", "elbow"] },
     bad: { cue: "Elbows drop below the shoulders and it turns into a row.", highlight: ["upperArm", "elbow"],
       b: { ua: 205, fa: 70 } },
-    figure3d: { grip: "neutral" },
+    figure3d: { station: { kind: "tower", handle: "rope" }, grip: "neutral" },
     figure: { armsOut: true, abd: 40, props: [{ line: [184, 20, 184, 188], w: 6 }], load: { type: "cable", from: [184, 44] },
       a: { ...STAND, x: 86, torso: -6, neck: -2, ua: 82, fa: 84 },
       b: { ...STAND, x: 86, torso: -6, neck: -2, ua: 258, fa: 22 } }
@@ -295,7 +296,7 @@ const EXERCISES = [
     good: { cue: "Elbows tucked at your sides. Push down and spread the rope at the bottom.", highlight: ["forearm", "elbow"] },
     bad: { cue: "Leaning over the rope and letting the elbows travel, so the chest and shoulders push it.", highlight: ["spine", "upperArm"],
       a: { torso: 34, neck: 40, ua: 130, fa: 50 }, b: { torso: 34, neck: 40, ua: 175, fa: 165 } },
-    figure3d: { grip: "neutral" },
+    figure3d: { station: { kind: "tower", handle: "rope" }, grip: "neutral" },
     figure: { props: [{ line: [150, 10, 150, 188], w: 6 }], load: { type: "cable", from: [146, 18] },
       a: { ...STAND, x: 92, torso: 8, neck: 8, ua: 172, fa: 52 },
       b: { ...STAND, x: 92, torso: 8, neck: 8, ua: 172, fa: 172 } }
@@ -348,7 +349,7 @@ const EXERCISES = [
     good: { cue: "Hips stay still. Curl the ribs down toward the hips.", highlight: ["spine", "back"] },
     bad: { cue: "Sitting the hips back and pulling with the arms instead of curling the spine.", highlight: ["hip", "thigh"],
       b: { thigh: -42, torso: 62, bend: 0 } },
-    figure3d: { grip: "neutral" },
+    figure3d: { station: { kind: "tower", handle: "rope" }, grip: "neutral" },
     figure: { props: [{ line: [150, 6, 150, 188], w: 6 }], load: { type: "cable", from: [146, 12] },
       a: { x: 70, y: 185, anchor: "knee", foot: 190, shin: 100, thigh: 0, torso: 12, neck: 12, ua: 30, fa: -112 },
       b: { x: 70, y: 185, anchor: "knee", foot: 190, shin: 100, thigh: 0, torso: 80, bend: 10, neck: 112, ua: 118, fa: -26 } }
@@ -359,7 +360,7 @@ const EXERCISES = [
     good: { cue: "Stand side-on to the cable. Press the handle straight out and don't let it twist you.", highlight: ["spine"] },
     bad: { cue: "Leaning away from the cable and letting the hips shift.", highlight: ["spine", "hip"],
       b: { torso: -16, bend: -6, thigh: 4, shin: 4 } },
-    figure3d: { grip: "neutral" },
+    figure3d: { station: { kind: "tower", handle: "D", at: [100, -80], pulleyY: 118 }, grip: "neutral" },
     figure: { props: [{ line: [16, 20, 16, 188], w: 6 }], load: { type: "cable", from: [16, 96] },
       a: { ...STAND, shin: 10, thigh: -10, ua: 200, fa: 70 },
       b: { ...STAND, shin: 10, thigh: -10, ua: 92, fa: 90 } }
