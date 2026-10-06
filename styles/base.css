@@ -167,22 +167,31 @@ main > section:not([hidden]) { display: grid; gap: 20px; }
 .is-interactive .m:hover { fill: var(--m-secondary); }
 .is-interactive .m.is-primary:hover { fill: var(--m-primary); }
 
-/* ---------- Posture figure ---------- */
+/* ---------- Exercise character ---------- */
 .figure { display: block; width: 100%; height: auto; }
 .fig-floor { stroke: var(--equip); stroke-width: 2; }
 .fig-equip { stroke: var(--equip); stroke-linecap: round; fill: none; }
 .fig-equip-fill { fill: var(--equip); }
-.fig-body path, .fig-far path { fill: none; stroke: var(--figure); stroke-width: 8; stroke-linecap: round; stroke-linejoin: round; }
-.fig-body .fig-torso { stroke-width: 13; }
-.fig-body .fig-torso-front { stroke-width: 20; }
-.fig-far path { stroke: var(--figure-far); }
-.fig-head { fill: var(--figure); }
-.fig-plate { fill: var(--plate); stroke: var(--figure); stroke-width: 2; }
+.fig-plate { fill: var(--plate); stroke: var(--plate-edge); stroke-width: 1.5; }
 .fig-cable { stroke: var(--equip); stroke-width: 1.5; fill: none; }
-.fig-glow path { fill: none; stroke-width: 20; stroke-linecap: round; opacity: .28; }
-.fig-marks path { fill: none; stroke-width: 4.5; stroke-linecap: round; }
+/* Skin: an outline pass underneath, then the skin on top, so the body reads as one shape. */
+.fig-outline-path, .fig-head-outline { fill: var(--skin-line); stroke: var(--skin-line); stroke-width: 2.4; stroke-linejoin: round; }
+.fig-skin-fill, .fig-hand { fill: var(--skin); }
+.fig-hand { stroke: var(--skin-line); stroke-width: 1; }
+.fig-far-outline { fill: var(--skin-line); stroke: var(--skin-line); stroke-width: 2.4; stroke-linejoin: round; }
+.fig-far-skin { fill: var(--skin-far); }
+.fig-def-path { fill: var(--skin-shade); stroke: var(--skin-line); stroke-width: .5; stroke-opacity: .22; }
+.fig-mouth { fill: none; stroke: var(--skin-line); stroke-width: .8; stroke-linecap: round; }
+.fig-def-fill { fill: var(--skin-shade); }
+.fig-hair { fill: var(--hair); }
+.fig-eye { fill: var(--skin-line); }
+.fig-shorts-path { fill: var(--shorts); stroke: var(--skin-line); stroke-width: .8; }
+.fig-work-primary { fill: var(--m-primary); opacity: .85; stroke: var(--skin-line); stroke-width: .6; }
+.fig-work-secondary { fill: var(--m-secondary); opacity: .8; stroke: var(--skin-line); stroke-width: .6; }
+.fig-glow-path { fill: none; stroke-width: 11; stroke-linejoin: round; opacity: .32; }
+.fig-hl { fill: none; stroke-width: 2.6; stroke-linejoin: round; }
 .fig-ring-glow { opacity: .28; }
-.fig-ring { fill: none; stroke-width: 3; }
+.fig-ring { fill: none; stroke-width: 2.6; }
 
 /* ---------- Detail ---------- */
 .detail { display: grid; gap: 16px; }

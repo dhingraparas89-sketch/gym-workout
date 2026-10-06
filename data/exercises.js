@@ -17,8 +17,9 @@ const GROUPS = [
 
 // Common starting poses.
 const STAND = { x: 100, y: 186, shin: 0, thigh: 0, torso: 0, neck: 0, ua: 180, fa: 180 };
-const FLAT_BENCH = [{ rect: [62, 134, 100, 8] }, { line: [72, 142, 72, 188], w: 5 }, { line: [152, 142, 152, 188], w: 5 }];
-const LIE_ON_BENCH = { x: 40, y: 186, shin: 0, thigh: 70, torso: 90, neck: 95, bend: -2 };
+// Lying on the back: head on the left, knees bent, feet on the floor.
+const FLAT_BENCH = [{ rect: [36, 139, 100, 8] }, { line: [46, 147, 46, 188], w: 5 }, { line: [126, 147, 126, 188], w: 5 }];
+const LIE_ON_BENCH = { x: 158, y: 186, foot: 100, shin: 4, thigh: -70, torso: -90, neck: -96, bend: 2 };
 const SEAT = (x, y) => [{ rect: [x - 16, y, 34, 7] }, { line: [x, y + 7, x, 188], w: 5 }];
 
 const EXERCISES = [
@@ -27,21 +28,21 @@ const EXERCISES = [
     name: "Barbell bench press", group: "chest", equipment: "Barbell", sets: 4, reps: "6–8", rest: 150,
     primary: ["chest"], secondary: ["shoulders", "triceps"],
     good: { cue: "Shoulder blades pinned back, feet planted, bar touches the middle of your chest.", highlight: ["arm"] },
-    bad: { cue: "Hips lift off the bench. The lower back over-arches and the chest does less work.", highlight: ["hip", "spine"],
-      a: { thigh: 40, torso: 106 }, b: { thigh: 40, torso: 106 } },
+    bad: { cue: "Stopping halfway down. The chest never gets a full stretch, so it does much less work.", highlight: ["elbow", "upperArm"],
+      b: { ua: 45, fa: -10 } },
     figure: { props: FLAT_BENCH, load: { type: "barbell" },
-      a: { ...LIE_ON_BENCH, ua: 0, fa: 0 }, b: { ...LIE_ON_BENCH, ua: 245, fa: 25 } }
+      a: { ...LIE_ON_BENCH, ua: 0, fa: 0 }, b: { ...LIE_ON_BENCH, ua: 104, fa: -16 } }
   },
   {
     name: "Incline dumbbell press", group: "chest", equipment: "Dumbbells", sets: 3, reps: "8–10", rest: 90,
     primary: ["chest"], secondary: ["shoulders", "triceps"],
     good: { cue: "Bench at 30°. Lower until the dumbbells sit beside your upper chest, forearms vertical.", highlight: ["arm"] },
     bad: { cue: "Half reps. The dumbbells stop well above the chest, so the chest never gets a full stretch.", highlight: ["elbow"],
-      b: { ua: 310, fa: 15 } },
+      b: { ua: 70, fa: -20 } },
     figure: { props: [{ line: [76, 156, 104, 156], w: 7 }, { line: [74, 156, 40, 106], w: 7 }, { line: [86, 160, 86, 188], w: 5 }],
       load: { type: "dumbbell" },
       a: { x: 82, y: 150, anchor: "hip", shin: -8, thigh: -92, torso: -34, neck: -30, ua: 0, fa: 0 },
-      b: { x: 82, y: 150, anchor: "hip", shin: -8, thigh: -92, torso: -34, neck: -30, ua: 235, fa: 2 } }
+      b: { x: 82, y: 150, anchor: "hip", shin: -8, thigh: -92, torso: -34, neck: -30, ua: 160, fa: 10 } }
   },
   {
     name: "Cable fly", group: "chest", equipment: "Cable", sets: 3, reps: "12–15", rest: 60,
@@ -69,7 +70,7 @@ const EXERCISES = [
     primary: ["chest", "triceps"], secondary: ["shoulders", "abs"],
     good: { cue: "Body in one straight line from head to heels. Lower until your chest nearly touches the floor.", highlight: ["spine", "leg"] },
     bad: { cue: "Hips sag toward the floor, which loads the lower back instead of the chest.", highlight: ["hip", "spine"],
-      a: { thigh: 84, torso: 58 }, b: { thigh: 88, torso: 72 } },
+      a: { shin: 74, thigh: 74, torso: 54 }, b: { shin: 84, thigh: 84, torso: 66 } },
     figure: { load: { type: "none" },
       a: { x: 30, y: 180, foot: 165, shin: 68, thigh: 68, torso: 68, neck: 72, ua: 180, fa: 180 },
       b: { x: 30, y: 180, foot: 165, shin: 80, thigh: 80, torso: 80, neck: 84, ua: 235, fa: 126 } }
@@ -92,9 +93,9 @@ const EXERCISES = [
     good: { cue: "Start from a full hang and pull until your chin clears the bar.", highlight: ["arm"] },
     bad: { cue: "Kicking the legs and swinging for momentum. The lats only do part of the work.", highlight: ["hip", "thigh"],
       b: { thigh: -62, shin: 10, torso: -20 } },
-    figure: { noFloor: true, props: [{ line: [40, 14, 170, 14], w: 6 }], load: { type: "none" },
-      a: { x: 100, y: 14, anchor: "hand", shin: 70, thigh: -6, torso: -4, neck: 0, ua: 4, fa: 0 },
-      b: { x: 100, y: 14, anchor: "hand", shin: 70, thigh: -6, torso: -8, neck: 0, ua: 172, fa: -8 } }
+    figure: { noFloor: true, armsOut: true, props: [{ line: [40, 14, 170, 14], w: 6 }], load: { type: "none" },
+      a: { x: 100, y: 14, anchor: "hand", foot: 160, shin: 70, thigh: -6, torso: -4, neck: 0, ua: 4, fa: 0 },
+      b: { x: 100, y: 14, anchor: "hand", foot: 160, shin: 70, thigh: -6, torso: -8, neck: 0, ua: 172, fa: -8 } }
   },
   {
     name: "Barbell row", group: "back", equipment: "Barbell", sets: 4, reps: "8", rest: 120,
@@ -112,7 +113,7 @@ const EXERCISES = [
     good: { cue: "Sit tall with a slight lean back. Lead with the elbows and bring the bar to your upper chest.", highlight: ["arm"] },
     bad: { cue: "Leaning far back turns it into a row and takes the work off the lats.", highlight: ["spine", "hip"],
       b: { torso: -42, neck: -30 } },
-    figure: { props: [...SEAT(84, 142), { rect: [96, 112, 20, 7] }], load: { type: "cable", from: [104, 0] },
+    figure: { armsOut: true, props: [...SEAT(84, 142), { rect: [96, 112, 20, 7] }], load: { type: "cable", from: [104, 0] },
       a: { x: 84, y: 136, anchor: "hip", shin: 0, thigh: -90, torso: -8, neck: -4, ua: 8, fa: 4 },
       b: { x: 84, y: 136, anchor: "hip", shin: 0, thigh: -90, torso: -14, neck: -6, ua: 200, fa: 18 } }
   },
@@ -135,9 +136,9 @@ const EXERCISES = [
     good: { cue: "Brace, sit down until your hips reach knee height, chest up, knees track over the toes.", highlight: ["knee", "thigh"] },
     bad: { cue: "The chest drops and the back rounds at the bottom, so the lower back takes the load.", highlight: ["spine", "back"],
       b: { torso: 66, bend: 12, neck: 90 } },
-    figure: { load: { type: "barbell", at: "shoulder", offset: [-7, -1], r: 12 },
-      a: { ...STAND, x: 94, ua: 215, fa: 30 },
-      b: { ...STAND, x: 94, shin: 32, thigh: -80, torso: 40, neck: 30, ua: 250, fa: 70 } }
+    figure: { armsOut: true, load: { type: "barbell", at: "shoulder", offset: [-7, -1], r: 12 },
+      a: { ...STAND, x: 94, ua: 195, fa: -12 },
+      b: { ...STAND, x: 94, shin: 32, thigh: -80, torso: 40, neck: 30, ua: 235, fa: 28 } }
   },
   {
     name: "Romanian deadlift", group: "legs", equipment: "Barbell", sets: 3, reps: "8–10", rest: 120,
@@ -154,11 +155,11 @@ const EXERCISES = [
     primary: ["quads", "glutes"], secondary: ["hamstrings"],
     good: { cue: "Lower until the knees reach about 90°, lower back pressed into the seat.", highlight: ["knee"] },
     bad: { cue: "Going too deep so the hips curl off the seat and the lower back rounds.", highlight: ["hip", "spine"],
-      b: { torso: -18, bend: 10, neck: -10, thigh: 170, shin: 280 } },
+      b: { torso: -30, bend: 10, neck: -20, thigh: 178, shin: 285, foot: -40 } },
     figure: { props: [{ line: [70, 150, 34, 104], w: 7 }, { line: [64, 152, 100, 152], w: 7 }, { line: [80, 156, 80, 188], w: 5 }],
       load: { type: "footplate" },
-      a: { x: 76, y: 146, anchor: "hip", foot: 135, shin: 228, thigh: 228, torso: -40, neck: -30, ua: 170, fa: 120 },
-      b: { x: 76, y: 146, anchor: "hip", foot: 135, shin: 290, thigh: 200, torso: -40, neck: -30, ua: 170, fa: 120 } }
+      a: { x: 76, y: 146, anchor: "hip", foot: -42, shin: 228, thigh: 228, torso: -40, neck: -30, ua: 150, fa: 110 },
+      b: { x: 76, y: 146, anchor: "hip", foot: -45, shin: 280, thigh: 200, torso: -40, neck: -30, ua: 150, fa: 110 } }
   },
   {
     name: "Walking lunge", group: "legs", equipment: "Dumbbells", sets: 3, reps: "12 each leg", rest: 90,
@@ -178,8 +179,8 @@ const EXERCISES = [
       b: { thigh: 62, torso: 108 } },
     figure: { props: [{ rect: [34, 142, 128, 8] }, { line: [60, 150, 60, 188], w: 5 }, { line: [140, 150, 140, 188], w: 5 }],
       load: { type: "roller", at: "ankle", offset: [0, -7] },
-      a: { x: 92, y: 134, anchor: "hip", foot: 90, shin: 92, thigh: 92, torso: 92, neck: 85, ua: 165, fa: 150 },
-      b: { x: 92, y: 134, anchor: "hip", foot: 30, shin: 175, thigh: 92, torso: 92, neck: 85, ua: 165, fa: 150 } }
+      a: { x: 92, y: 134, anchor: "hip", foot: 176, shin: 92, thigh: 92, torso: 92, neck: 85, ua: 165, fa: 150 },
+      b: { x: 92, y: 134, anchor: "hip", foot: 262, shin: 175, thigh: 92, torso: 92, neck: 85, ua: 165, fa: 150 } }
   },
   {
     name: "Standing calf raise", group: "legs", equipment: "Machine", sets: 4, reps: "12–15", rest: 60,
@@ -187,9 +188,9 @@ const EXERCISES = [
     good: { cue: "Full stretch at the bottom, rise as high as you can on the toes, pause at the top.", highlight: ["foot", "shin"] },
     bad: { cue: "Bending the knees and bouncing. The calves get a fraction of the work.", highlight: ["knee"],
       b: { shin: 22, thigh: -24 } },
-    figure: { props: [{ rect: [96, 182, 40, 6] }], load: { type: "barbell", at: "shoulder", offset: [-2, -5], r: 8 },
-      a: { ...STAND, x: 112, y: 183, anchor: "toe", foot: 108, ua: 200, fa: 10 },
-      b: { ...STAND, x: 112, y: 183, anchor: "toe", foot: 145, ua: 200, fa: 10 } }
+    figure: { props: [{ rect: [96, 182, 40, 6] }], load: { type: "barbell", at: "shoulder", offset: [-1, -7], r: 7 },
+      a: { ...STAND, x: 112, y: 183, anchor: "toe", foot: 108, ua: 165, fa: 95 },
+      b: { ...STAND, x: 112, y: 183, anchor: "toe", foot: 145, ua: 165, fa: 95 } }
   },
 
   // ---------- Shoulders ----------
@@ -198,7 +199,7 @@ const EXERCISES = [
     primary: ["shoulders"], secondary: ["triceps", "traps", "abs"],
     good: { cue: "Squeeze glutes, ribs down, press straight up and finish with the bar over your mid-foot.", highlight: ["spine", "arm"] },
     bad: { cue: "Leaning back and arching the lower back to finish the press.", highlight: ["spine", "hip"],
-      b: { torso: -20, bend: -9, neck: -18, thigh: 8 } },
+      b: { torso: -20, bend: -9, neck: -18, shin: 4, thigh: 6 } },
     figure: { load: { type: "barbell", r: 16 },
       a: { ...STAND, ua: 160, fa: 8 },
       b: { ...STAND, ua: 2, fa: 0 } }
@@ -210,7 +211,7 @@ const EXERCISES = [
     bad: { cue: "Arching the back and leaning away to get the weight up.", highlight: ["spine"],
       b: { torso: -22, bend: -9, neck: -16 } },
     figure: { props: [...SEAT(84, 142), { line: [70, 140, 70, 80], w: 7 }], load: { type: "dumbbell" },
-      a: { x: 84, y: 136, anchor: "hip", shin: 0, thigh: -90, torso: 0, neck: 0, ua: 170, fa: 12 },
+      a: { x: 84, y: 136, anchor: "hip", shin: 0, thigh: -90, torso: 0, neck: 0, ua: 168, fa: 18 },
       b: { x: 84, y: 136, anchor: "hip", shin: 0, thigh: -90, torso: 0, neck: 0, ua: 4, fa: 0 } }
   },
   {
@@ -229,9 +230,9 @@ const EXERCISES = [
     good: { cue: "Rope at eye height. Pull it toward your face, elbows high, and pull the ends apart.", highlight: ["upperArm", "elbow"] },
     bad: { cue: "Elbows drop below the shoulders and it turns into a row.", highlight: ["upperArm", "elbow"],
       b: { ua: 205, fa: 70 } },
-    figure: { props: [{ line: [184, 20, 184, 188], w: 6 }], load: { type: "cable", from: [184, 44] },
+    figure: { armsOut: true, props: [{ line: [184, 20, 184, 188], w: 6 }], load: { type: "cable", from: [184, 44] },
       a: { ...STAND, x: 86, torso: -6, neck: -2, ua: 82, fa: 84 },
-      b: { ...STAND, x: 86, torso: -6, neck: -2, ua: 280, fa: 40 } }
+      b: { ...STAND, x: 86, torso: -6, neck: -2, ua: 258, fa: 22 } }
   },
   {
     name: "Rear delt fly", group: "shoulders", equipment: "Dumbbells", sets: 3, reps: "15", rest: 60,
@@ -280,9 +281,9 @@ const EXERCISES = [
     primary: ["triceps"], secondary: [],
     good: { cue: "Upper arms stay still, angled slightly back. Lower the bar to your forehead.", highlight: ["upperArm"] },
     bad: { cue: "Upper arms swing back and forth, turning it into a pullover.", highlight: ["upperArm", "shoulder"],
-      a: { ua: -30, fa: -10 }, b: { ua: 60, fa: 150 } },
+      a: { ua: 25, fa: 25 }, b: { ua: -60, fa: -170 } },
     figure: { props: FLAT_BENCH, load: { type: "barbell", r: 10 },
-      a: { ...LIE_ON_BENCH, ua: 10, fa: 8 }, b: { ...LIE_ON_BENCH, ua: 12, fa: 140 } }
+      a: { ...LIE_ON_BENCH, ua: -14, fa: -14 }, b: { ...LIE_ON_BENCH, ua: -14, fa: -128 } }
   },
   {
     name: "Dips", group: "arms", equipment: "Bodyweight", sets: 3, reps: "8–12", rest: 90,
@@ -291,8 +292,8 @@ const EXERCISES = [
     bad: { cue: "Sinking too deep with the shoulders rolling forward. Hard on the shoulder joint.", highlight: ["shoulder"],
       b: { torso: 30, neck: 40, ua: 275, fa: 150 } },
     figure: { noFloor: true, props: [{ line: [60, 104, 150, 104], w: 6 }, { line: [140, 104, 140, 188], w: 5 }], load: { type: "none" },
-      a: { x: 106, y: 104, anchor: "hand", shin: 80, thigh: 10, torso: 2, neck: 4, ua: 180, fa: 180 },
-      b: { x: 106, y: 104, anchor: "hand", shin: 80, thigh: 10, torso: 10, neck: 10, ua: 245, fa: 160 } }
+      a: { x: 106, y: 104, anchor: "hand", foot: 180, shin: 80, thigh: 10, torso: 2, neck: 4, ua: 180, fa: 180 },
+      b: { x: 106, y: 104, anchor: "hand", foot: 180, shin: 80, thigh: 10, torso: 10, neck: 10, ua: 245, fa: 160 } }
   },
 
   // ---------- Core ----------
@@ -301,7 +302,7 @@ const EXERCISES = [
     primary: ["abs"], secondary: ["obliques", "shoulders"],
     good: { cue: "Elbows under shoulders, ribs down, glutes tight. One straight line.", highlight: ["spine", "leg"] },
     bad: { cue: "Hips sag and the lower back arches.", highlight: ["hip", "spine"],
-      a: { thigh: 86, torso: 70 }, b: { thigh: 88, torso: 68 } },
+      a: { shin: 84, thigh: 84, torso: 64 }, b: { shin: 85, thigh: 85, torso: 63 } },
     figure: { load: { type: "none" },
       a: { x: 36, y: 182, foot: 165, shin: 78, thigh: 78, torso: 78, neck: 82, ua: 180, fa: 90 },
       b: { x: 36, y: 182, foot: 165, shin: 79, thigh: 79, torso: 79, neck: 83, ua: 180, fa: 90 } }
@@ -323,15 +324,15 @@ const EXERCISES = [
     bad: { cue: "Sitting the hips back and pulling with the arms instead of curling the spine.", highlight: ["hip", "thigh"],
       b: { thigh: -42, torso: 62, bend: 0 } },
     figure: { props: [{ line: [150, 6, 150, 188], w: 6 }], load: { type: "cable", from: [146, 12] },
-      a: { x: 70, y: 186, anchor: "knee", foot: 90, shin: 92, thigh: 0, torso: 12, neck: 12, ua: 40, fa: 200 },
-      b: { x: 70, y: 186, anchor: "knee", foot: 90, shin: 92, thigh: 0, torso: 80, bend: 10, neck: 120, ua: 120, fa: 280 } }
+      a: { x: 70, y: 185, anchor: "knee", foot: 190, shin: 100, thigh: 0, torso: 12, neck: 12, ua: 30, fa: -112 },
+      b: { x: 70, y: 185, anchor: "knee", foot: 190, shin: 100, thigh: 0, torso: 80, bend: 10, neck: 112, ua: 118, fa: -26 } }
   },
   {
     name: "Pallof press", group: "core", equipment: "Cable", sets: 3, reps: "12 each side", rest: 45,
     primary: ["obliques"], secondary: ["abs"],
     good: { cue: "Stand side-on to the cable. Press the handle straight out and don't let it twist you.", highlight: ["spine"] },
     bad: { cue: "Leaning away from the cable and letting the hips shift.", highlight: ["spine", "hip"],
-      b: { torso: -16, bend: -6, thigh: 10, shin: -6 } },
+      b: { torso: -16, bend: -6, thigh: 4, shin: 4 } },
     figure: { props: [{ line: [16, 20, 16, 188], w: 6 }], load: { type: "cable", from: [16, 96] },
       a: { ...STAND, shin: 10, thigh: -10, ua: 200, fa: 70 },
       b: { ...STAND, shin: 10, thigh: -10, ua: 92, fa: 90 } }
