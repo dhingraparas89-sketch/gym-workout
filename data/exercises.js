@@ -257,9 +257,10 @@ const EXERCISES = [
       a: { y: 186, ua: 170, fa: 172 },
       b: { y: 186, ua: 95, fa: 98 } },
     // In 3D the arms swing out to the side ("abd") instead of using the front view.
+    // The arms hang down here, so swinging them out is a negative turn about the chest's front axis.
     figure3d: { grip: "neutral", view: undefined, abd: 0,
-      a: { ...STAND, ua: 180, fa: 176, abd: 10 }, b: { ...STAND, ua: 180, fa: 176, abd: 86 } },
-    bad3d: { b: { abd: 128, fa: 160, neck: -6 } }
+      a: { ...STAND, ua: 180, fa: 176, abd: -10 }, b: { ...STAND, ua: 180, fa: 176, abd: -86 } },
+    bad3d: { b: { abd: -128, fa: 160, neck: -6 } }
   },
   {
     name: "Face pull", group: "shoulders", equipment: "Cable", sets: 3, reps: "15", rest: 60,

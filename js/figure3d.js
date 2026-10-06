@@ -12,7 +12,7 @@
 
 const VIEW3D = {
   near: 1,        // the near side of the body faces the camera (+z)
-  shoulderHalf: 15.5,
+  shoulderHalf: 17,
   hipHalf: 8.5,
   yaw: 0.62,      // default camera angle around the figure (radians from a pure side view)
   pitch: 0.12,
@@ -29,27 +29,297 @@ function css(name, fallback) {
   return v || fallback;
 }
 
-// ---------- Body parts ----------
-// Each body segment is ONE smooth mesh. It starts as a base shape (a lathe profile for the
-// trunk and limbs, an ellipsoid for the head, hands and feet) and each muscle is an ellipsoid
-// that pushes the skin outward with a smooth blend, so muscles swell out of the body instead
-// of sitting on top of it. Every vertex remembers how much each muscle shaped it; that weight
-// is used to color the worked muscles.
+// ---------- Body ----------
+// The body is ONE continuous skin, like an anatomical figure: each segment (pelvis, ribcage, neck,
+// head, arms, palms, legs, feet) is a base shape with its muscles lying on it, and all of them are
+// melted together into a single smooth surface, so muscles swell out of the body and flow into
+// each other instead of sitting on top of it. The skin is bound to the segment groups, which
+// act as bones. Every vertex remembers how much each muscle shapes it (to light worked muscles)
+// and which way that muscle's fibers run.
 
-// Smooth maximum: like Math.max, but rounds the crease where two shapes meet.
-function smax(a, b, k) {
-  const h = Math.max(k - Math.abs(a - b), 0) / k;
-  return Math.max(a, b) + h * h * k * 0.25;
+// ---------- Skin builder ----------
+// The math that turns the body's shapes into one continuous skin mesh (see makeBody3D).
+function skinLatheR(L, y) {
+  const u = ((y - L.y0) / (L.y1 - L.y0)) * L.N;
+  if (u <= 0 || u >= L.N) return 0;
+  const i = Math.floor(u), t = u - i;
+  return L.tab[i] + (L.tab[i + 1] - L.tab[i]) * t;
 }
-const smooth01 = (e0, e1, x) => { const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+// Approximate signed distance to an ellipsoid (negative inside).
+function skinEllDist(f, x, y, z) {
+  const dx = x - f.cx, dy = y - f.cy, dz = z - f.cz, m = f.m;
+  const ax = (m[0] * dx + m[1] * dy + m[2] * dz) / f.rx, ay = (m[3] * dx + m[4] * dy + m[5] * dz) / f.ry, az = (m[6] * dx + m[7] * dy + m[8] * dz) / f.rz;
+  const k0 = Math.sqrt(ax * ax + ay * ay + az * az);
+  const bx = ax / f.rx, by = ay / f.ry, bz = az / f.rz, k1 = Math.sqrt(bx * bx + by * by + bz * bz);
+  return k1 > 1e-9 ? (k0 * (k0 - 1)) / k1 : -Math.min(f.rx, f.ry, f.rz);
+}
+function skinLatheDist(L, x, y, z) {
+  const r = skinLatheR(L, y);
+  if (r < 0.3) {
+    const ey = y < L.y0 ? L.y0 - y : y > L.y1 ? y - L.y1 : 0;
+    return Math.sqrt(x * x + z * z + ey * ey) - r;
+  }
+  const A = r * L.depth, ax = x / A, az = z / r, k0 = Math.sqrt(ax * ax + az * az);
+  const bx = ax / A, bz = az / r, k1 = Math.sqrt(bx * bx + bz * bz);
+  return k1 > 1e-9 ? (k0 * (k0 - 1)) / k1 : -A;
+}
+function skinSmin(a, b, k) { const h = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - h * h * k * 0.25; }
+function skinSmooth(e0, e1, x) { const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); }
+// Field of one segment at a point in its own space; fd (optional) receives each muscle's distance.
+function skinSegDist(seg, x, y, z, fd) {
+  let d = seg.lathe ? skinLatheDist(seg.lathe, x, y, z) : skinEllDist(seg.ell, x, y, z);
+  for (let i = 0; i < seg.feats.length; i++) {
+    const f = seg.feats[i];
+    // A muscle too far away to change the blend is skipped (unless every distance is wanted).
+    if (!fd) { const dx = x - f.cx, dy = y - f.cy, dz = z - f.cz; if (Math.sqrt(dx * dx + dy * dy + dz * dz) - f.br > d + f.k + 1) continue; }
+    const e = skinEllDist(f, x, y, z);
+    if (fd) fd[i] = e;
+    d = skinSmin(d, e, f.k);
+  }
+  return d;
+}
+// Fiber coordinates of a point (in its segment's space): u = distance from the attachment, v = which fiber.
+function skinFiberUV(sp, x, y, z) {
+  const qx = x - sp.O[0], qy = y - sp.O[1], qz = z - sp.O[2], N = sp.N;
+  if (sp.t === "lin") return [Math.abs(qx * N[0] + qy * N[1] + qz * N[2]), (x * sp.C[0] + y * sp.C[1] + z * sp.C[2]) * sp.d];
+  const along = qx * N[0] + qy * N[1] + qz * N[2];
+  const ang = Math.atan2(qx * sp.B[0] + qy * sp.B[1] + qz * sp.B[2], qx * sp.R[0] + qy * sp.R[1] + qz * sp.R[2]); // 0 points into the muscle
+  return [sp.t === "fan" ? Math.sqrt(qx * qx + qy * qy + qz * qz) : Math.abs(along), ang * sp.d];
+}
+// Build the skin from the prepared segments (see prepSegment in makeBody3D). Pure math, no
+// three.js and no outside state, so it can also run in a background worker.
+function buildSkinData(segs) {
+  const S = segs.length, BIG = 1e3;
+  const local = (g, x, y, z, out) => {
+    const e = g.inv;
+    out[0] = e[0] * x + e[4] * y + e[8] * z + e[12]; out[1] = e[1] * x + e[5] * y + e[9] * z + e[13]; out[2] = e[2] * x + e[6] * y + e[10] * z + e[14];
+  };
+  const P = [0, 0, 0];
+  function field(x, y, z) {
+    let F = BIG;
+    for (let s = 0; s < S; s++) {
+      const g = segs[s], b = g.box;
+      if (x < b[0] || y < b[1] || z < b[2] || x > b[3] || y > b[4] || z > b[5]) continue;
+      local(g, x, y, z, P);
+      const d = skinSegDist(g, P[0], P[1], P[2]);
+      F = F === BIG ? d : skinSmin(F, d, g.k || 3);
+    }
+    return F;
+  }
+
+  // Sample the field on a grid: a coarse pass first, then fine samples only near the surface.
+  const all = { min: { x: Infinity, y: Infinity, z: Infinity }, max: { x: -Infinity, y: -Infinity, z: -Infinity } };
+  segs.forEach(({ box: b }) => {
+    all.min.x = Math.min(all.min.x, b[0]); all.min.y = Math.min(all.min.y, b[1]); all.min.z = Math.min(all.min.z, b[2]);
+    all.max.x = Math.max(all.max.x, b[3]); all.max.y = Math.max(all.max.y, b[4]); all.max.z = Math.max(all.max.z, b[5]);
+  });
+  const h = 0.85, C = 4, H = h * C;
+  const nx = Math.ceil((all.max.x - all.min.x) / H) * C + 1, ny = Math.ceil((all.max.y - all.min.y) / H) * C + 1, nz = Math.ceil((all.max.z - all.min.z) / H) * C + 1;
+  const ox = all.min.x, oy = all.min.y, oz = all.min.z;
+  const cx = (nx - 1) / C + 1, cy = (ny - 1) / C + 1, cz = (nz - 1) / C + 1;
+  const coarse = new Float32Array(cx * cy * cz);
+  for (let k = 0; k < cz; k++) for (let j = 0; j < cy; j++) for (let i = 0; i < cx; i++) coarse[(k * cy + j) * cx + i] = field(ox + i * H, oy + j * H, oz + k * H);
+  // Fine points start with their coarse cell's average (right sign far from the surface);
+  // coarse cells the surface may pass through are then sampled exactly.
+  const grid = new Float32Array(nx * ny * nz), done = new Uint8Array(nx * ny * nz), T = H * 1.4;
+  for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    const ci = Math.min(cx - 2, Math.floor(i / C)), cj = Math.min(cy - 2, Math.floor(j / C)), ck = Math.min(cz - 2, Math.floor(k / C));
+    let sum = 0;
+    for (let c = 0; c < 8; c++) sum += coarse[((ck + (c >> 2)) * cy + cj + ((c >> 1) & 1)) * cx + ci + (c & 1)];
+    grid[(k * ny + j) * nx + i] = sum / 8;
+  }
+  for (let ck = 0; ck < cz - 1; ck++) for (let cj = 0; cj < cy - 1; cj++) for (let ci = 0; ci < cx - 1; ci++) {
+    let lo = Infinity, neg = 0;
+    for (let c = 0; c < 8; c++) { const v = coarse[((ck + (c >> 2)) * cy + cj + ((c >> 1) & 1)) * cx + ci + (c & 1)]; lo = Math.min(lo, Math.abs(v)); if (v < 0) neg++; }
+    if (lo > T && neg % 8 === 0) continue;
+    for (let k = ck * C; k <= ck * C + C; k++) for (let j = cj * C; j <= cj * C + C; j++) for (let i = ci * C; i <= ci * C + C; i++) {
+      const g = (k * ny + j) * nx + i;
+      if (!done[g]) { done[g] = 1; grid[g] = field(ox + i * h, oy + j * h, oz + k * h); }
+    }
+  }
+
+  // Surface nets: one vertex per cell the surface passes through, one quad per crossing edge.
+  const gi = (i, j, k) => (k * ny + j) * nx + i;
+  const cellV = new Int32Array((nx - 1) * (ny - 1) * nz).fill(-1);
+  const ci3 = (i, j, k) => (k * (ny - 1) + j) * (nx - 1) + i;
+  const verts = [];
+  const corner = [[0, 0, 0], [1, 0, 0], [0, 1, 0], [1, 1, 0], [0, 0, 1], [1, 0, 1], [0, 1, 1], [1, 1, 1]];
+  const edges = [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]];
+  const val = new Float32Array(8);
+  for (let k = 0; k < nz - 1; k++) for (let j = 0; j < ny - 1; j++) for (let i = 0; i < nx - 1; i++) {
+    let inside = 0;
+    for (let c = 0; c < 8; c++) { val[c] = grid[gi(i + corner[c][0], j + corner[c][1], k + corner[c][2])]; if (val[c] < 0) inside++; }
+    if (inside === 0 || inside === 8) continue;
+    let sx = 0, sy = 0, sz = 0, n = 0;
+    edges.forEach(([a, b]) => {
+      if ((val[a] < 0) === (val[b] < 0)) return;
+      const t = val[a] / (val[a] - val[b]);
+      sx += corner[a][0] + (corner[b][0] - corner[a][0]) * t; sy += corner[a][1] + (corner[b][1] - corner[a][1]) * t; sz += corner[a][2] + (corner[b][2] - corner[a][2]) * t; n++;
+    });
+    cellV[ci3(i, j, k)] = verts.length / 3;
+    verts.push(ox + (i + sx / n) * h, oy + (j + sy / n) * h, oz + (k + sz / n) * h);
+  }
+  const quads = [];
+  const quad = (a, b, c, d, flip) => { if (a < 0 || b < 0 || c < 0 || d < 0) return; quads.push(flip ? [a, d, c, b] : [a, b, c, d]); };
+  for (let k = 1; k < nz - 1; k++) for (let j = 1; j < ny - 1; j++) for (let i = 1; i < nx - 1; i++) {
+    const v0 = grid[gi(i, j, k)] < 0;
+    if (v0 !== (grid[gi(i + 1, j, k)] < 0) && i < nx - 1)
+      quad(cellV[ci3(i, j - 1, k - 1)], cellV[ci3(i, j, k - 1)], cellV[ci3(i, j, k)], cellV[ci3(i, j - 1, k)], !v0);
+    if (v0 !== (grid[gi(i, j + 1, k)] < 0))
+      quad(cellV[ci3(i - 1, j, k - 1)], cellV[ci3(i - 1, j, k)], cellV[ci3(i, j, k)], cellV[ci3(i, j, k - 1)], !v0);
+    if (v0 !== (grid[gi(i, j, k + 1)] < 0))
+      quad(cellV[ci3(i - 1, j - 1, k)], cellV[ci3(i, j - 1, k)], cellV[ci3(i, j, k)], cellV[ci3(i - 1, j, k)], !v0);
+  }
+  const nv = verts.length / 3, pos = new Float32Array(verts);
+  const nbr = Array.from({ length: nv }, () => new Set());
+  quads.forEach((q) => q.forEach((a, i) => { nbr[a].add(q[(i + 1) % 4]); nbr[a].add(q[(i + 3) % 4]); }));
+  const nb = nbr.map((s) => [...s]);
+  // Relax the mesh a little, then settle every vertex exactly onto the surface.
+  const tmp = new Float32Array(pos.length);
+  for (let it = 0; it < 2; it++) {
+    for (let v = 0; v < nv; v++) {
+      let x = 0, y = 0, z = 0; nb[v].forEach((u) => { x += pos[u * 3]; y += pos[u * 3 + 1]; z += pos[u * 3 + 2]; });
+      const c = nb[v].length || 1;
+      tmp[v * 3] = pos[v * 3] * 0.5 + (x / c) * 0.5; tmp[v * 3 + 1] = pos[v * 3 + 1] * 0.5 + (y / c) * 0.5; tmp[v * 3 + 2] = pos[v * 3 + 2] * 0.5 + (z / c) * 0.5;
+    }
+    pos.set(tmp);
+  }
+  const e = 0.15, nor = new Float32Array(pos.length);
+  for (let v = 0; v < nv; v++) {
+    let x = pos[v * 3], y = pos[v * 3 + 1], z = pos[v * 3 + 2], gx = 0, gy = 0, gz = 0;
+    for (let it = 0; it < 3; it++) {
+      const f = field(x, y, z);
+      gx = (field(x + e, y, z) - f) / e; gy = (field(x, y + e, z) - f) / e; gz = (field(x, y, z + e) - f) / e;
+      const l2 = gx * gx + gy * gy + gz * gz;
+      if (l2 < 1e-8) break;
+      const st = Math.max(-h, Math.min(h, f / l2));
+      x -= gx * st; y -= gy * st; z -= gz * st;
+      if (Math.abs(f) < 0.02) break;
+    }
+    pos[v * 3] = x; pos[v * 3 + 1] = y; pos[v * 3 + 2] = z;
+    const l = Math.hypot(gx, gy, gz) || 1;
+    nor[v * 3] = gx / l; nor[v * 3 + 1] = gy / l; nor[v * 3 + 2] = gz / l;
+  }
+  // Even out the normals a little, so creases where several shapes meet shade smoothly.
+  for (let it = 0; it < 2; it++) {
+    tmp.set(nor);
+    for (let v = 0; v < nv; v++) {
+      let x = tmp[v * 3] * 2, y = tmp[v * 3 + 1] * 2, z = tmp[v * 3 + 2] * 2;
+      nb[v].forEach((u) => { x += tmp[u * 3]; y += tmp[u * 3 + 1]; z += tmp[u * 3 + 2]; });
+      const l = Math.hypot(x, y, z) || 1;
+      nor[v * 3] = x / l; nor[v * 3 + 1] = y / l; nor[v * 3 + 2] = z / l;
+    }
+  }
+  const index = [];
+  quads.forEach(([a, b, c, d]) => {
+    const d1 = (pos[a * 3] - pos[c * 3]) ** 2 + (pos[a * 3 + 1] - pos[c * 3 + 1]) ** 2 + (pos[a * 3 + 2] - pos[c * 3 + 2]) ** 2;
+    const d2 = (pos[b * 3] - pos[d * 3]) ** 2 + (pos[b * 3 + 1] - pos[d * 3 + 1]) ** 2 + (pos[b * 3 + 2] - pos[d * 3 + 2]) ** 2;
+    if (d1 < d2) index.push(a, b, c, a, c, d); else index.push(a, b, d, b, c, d);
+  });
+
+  // Per vertex: which muscles shape it (for activation), its fiber coordinates, and how much
+  // each segment moves it (skin weights: one segment away from the joints, a blend near them).
+  const weights = {}, fib = new Float32Array(nv * 4), bw = new Float32Array(nv * S);
+  segs.forEach((g) => g.feats.forEach((f) => { if (f.id && !weights[f.id]) weights[f.id] = new Float32Array(nv); }));
+  const fds = segs.map((g) => new Float32Array(g.feats.length)), ds = new Float32Array(S), L = [0, 0, 0];
+  for (let v = 0; v < nv; v++) {
+    const x = pos[v * 3], y = pos[v * 3 + 1], z = pos[v * 3 + 2];
+    let dmin = BIG, top = null, t1 = BIG, t2 = BIG, topSeg = 0;
+    for (let s = 0; s < S; s++) {
+      const g = segs[s], b = g.box;
+      if (x < b[0] || y < b[1] || z < b[2] || x > b[3] || y > b[4] || z > b[5]) { ds[s] = BIG; continue; }
+      local(g, x, y, z, L);
+      ds[s] = skinSegDist(g, L[0], L[1], L[2], fds[s]);
+      dmin = Math.min(dmin, ds[s]);
+      g.feats.forEach((f, i) => {
+        if (!f.id) return;
+        const e = fds[s][i];
+        weights[f.id][v] = Math.max(weights[f.id][v], 1 - skinSmooth(0.4, 3.2, e));
+        if (!top || e < t1) { if (top && f.group !== top.group) t2 = Math.min(t2, t1); top = f; t1 = e; topSeg = s; }
+        else if (f.group !== top.group) t2 = Math.min(t2, e);
+      });
+    }
+    let sum = 0;
+    for (let s = 0; s < S; s++) { const w = ds[s] >= BIG ? 0 : 1 - skinSmooth(0, segs[s].tau, ds[s] - dmin); bw[v * S + s] = w; sum += w; }
+    for (let s = 0; s < S; s++) bw[v * S + s] /= sum || 1;
+    // Two different muscles meeting near the surface: a faint groove between them.
+    const sep = t2 < BIG ? (1 - skinSmooth(0, 1.4, t2 - t1)) * (1 - skinSmooth(0.8, 2.6, t2)) : 0;
+    fib[v * 4 + 3] = sep;
+    if (top && top.spec) {
+      local(segs[topSeg], x, y, z, L);
+      const [u, w] = skinFiberUV(top.spec, L[0], L[1], L[2]);
+      fib[v * 4] = u; fib[v * 4 + 1] = w; fib[v * 4 + 2] = 1 - skinSmooth(0.3, 2.8, t1);
+    }
+    pos[v * 3] -= nor[v * 3] * 0.2 * sep; pos[v * 3 + 1] -= nor[v * 3 + 1] * 0.2 * sep; pos[v * 3 + 2] -= nor[v * 3 + 2] * 0.2 * sep;
+  }
+  // Smooth the skin weights over the surface so joints bend in a soft band, then keep the top four.
+  const bw2 = new Float32Array(bw.length);
+  for (let it = 0; it < 4; it++) {
+    for (let v = 0; v < nv; v++) {
+      const n = nb[v], c = n.length;
+      for (let s = 0; s < S; s++) {
+        let acc = 0; for (let q = 0; q < c; q++) acc += bw[n[q] * S + s];
+        bw2[v * S + s] = c ? bw[v * S + s] * 0.4 + (acc / c) * 0.6 : bw[v * S + s];
+      }
+    }
+    bw.set(bw2);
+  }
+  // Forearm and palm: the hand's turn (palm up, palm down) is spread along the forearm by two
+  // twist bones (after the segments: S + 0/1 for the right arm, S + 2/3 for the left), the way the
+  // forearm bones roll over each other, so the wrist never twists like a candy wrapper.
+  const B = S + 4, wb = new Float32Array(nv * B), names = segs.map((g) => g.name);
+  for (let v = 0; v < nv; v++) for (let s = 0; s < S; s++) wb[v * B + s] = bw[v * S + s];
+  ["R", "L"].forEach((side, n) => {
+    const fa = names.indexOf("forearm" + side), hd = names.indexOf("hand" + side), chain = [fa, S + n * 2, S + n * 2 + 1, hd], at = [3, 12, 20, 28.5];
+    for (let v = 0; v < nv; v++) {
+      const w = wb[v * B + fa] + wb[v * B + hd];
+      if (w <= 0) continue;
+      local(segs[fa], pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2], L);
+      const y = Math.min(at[3], Math.max(at[0], L[1]));
+      let i = 0; while (i < 2 && y > at[i + 1]) i++;
+      const t = (y - at[i]) / (at[i + 1] - at[i]);
+      chain.forEach((b) => { wb[v * B + b] = 0; });
+      wb[v * B + chain[i]] += w * (1 - t); wb[v * B + chain[i + 1]] += w * t;
+    }
+  });
+  const skinIndex = new Uint16Array(nv * 4), skinWeight = new Float32Array(nv * 4);
+  for (let v = 0; v < nv; v++) {
+    const order = [...Array(B).keys()].sort((a, b) => wb[v * B + b] - wb[v * B + a]).slice(0, 4);
+    const tot = order.reduce((t, s) => t + wb[v * B + s], 0) || 1;
+    order.forEach((s, i) => { skinIndex[v * 4 + i] = s; skinWeight[v * 4 + i] = wb[v * B + s] / tot; });
+  }
+  return { pos, nor, index: new Uint32Array(index), fib, weights, skinIndex, skinWeight };
+}
+
+// Built once per page and shared by every viewer: in a background worker when the browser allows
+// it, so the page stays responsive while the body is made, otherwise right here.
+const SKIN = { data: null, waiting: [], started: false };
+const SKIN_HELPERS = [skinLatheR, skinEllDist, skinLatheDist, skinSmin, skinSmooth, skinSegDist, skinFiberUV, buildSkinData];
+function requestSkin(segs, done) {
+  if (SKIN.data) { Promise.resolve().then(() => done(SKIN.data)); return; }
+  SKIN.waiting.push(done);
+  if (SKIN.started) return;
+  SKIN.started = true;
+  const finish = (data) => { if (SKIN.data) return; SKIN.data = data; SKIN.waiting.splice(0).forEach((cb) => cb(data)); };
+  const here = () => setTimeout(() => finish(buildSkinData(segs)), 0);
+  let worker = null;
+  try {
+    const src = SKIN_HELPERS.map(String).join("\n") + "\nonmessage = (e) => { const d = buildSkinData(e.data); postMessage(d, [d.pos.buffer, d.nor.buffer, d.index.buffer, d.fib.buffer, d.skinIndex.buffer, d.skinWeight.buffer, ...Object.values(d.weights).map((w) => w.buffer)]); };";
+    worker = new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
+  } catch (err) { worker = null; }
+  if (!worker) { here(); return; }
+  const fallback = setTimeout(() => { worker.terminate(); here(); }, 20000);
+  worker.onmessage = (e) => { clearTimeout(fallback); worker.terminate(); finish(e.data); };
+  worker.onerror = (e) => { if (e.preventDefault) e.preventDefault(); clearTimeout(fallback); worker.terminate(); here(); };
+  worker.postMessage(segs);
+}
 
 function makeBody3D(THREE, mats) {
   const parts = {};      // segment name -> THREE.Group
   const skinMeshes = {}; // highlight key -> skin meshes in that body part
   const skinList = [];   // every skin mesh (vertex-colored)
 
-  // Feature: [muscleId|null, x, y, z, rx, ry, rz, rot?, k?, fiber?]
-  // fiber says which way the muscle's fibers run (all in the segment's own space):
+  // Muscle fibers: each muscle's fiber spec says which way the muscle's fibers run (all in the segment's own space):
   //   { t: "fan",  o, n, r }  fibers converge on the attachment point o, spreading around axis n
   //                           (chest, delts, quads...); r points from o into the muscle.
   //   { t: "long", o, n, r }  fibers run parallel to axis n through o (biceps, triceps, forearms).
@@ -72,138 +342,12 @@ function makeBody3D(THREE, mats) {
     if (spec.t === "long") spec.d = Math.round(spec.d * 2 * Math.PI) / (2 * Math.PI); // seamless all the way round
     return spec;
   }
-  // Fiber coordinates of a point: u = distance from the attachment, v = which fiber (stripe).
-  const FQ = new THREE.Vector3();
-  function fiberUV(spec, P) {
-    FQ.copy(P).sub(spec.O);
-    if (spec.t === "lin") return [Math.abs(FQ.dot(spec.N)), P.dot(spec.C) * spec.d];
-    const along = FQ.dot(spec.N);
-    const ang = Math.atan2(FQ.dot(spec.B), FQ.dot(spec.R)); // 0 points into the muscle; the seam is behind it
-    return [spec.t === "fan" ? FQ.length() : Math.abs(along), ang * spec.d];
-  }
-  function prepFeatures(list) {
-    return list.map(([id, x, y, z, rx, ry, rz, rot, k, fiber]) => {
-      const m = new THREE.Matrix4().compose(new THREE.Vector3(x, y, z),
-        new THREE.Quaternion().setFromEuler(new THREE.Euler(...(rot || [0, 0, 0]))), new THREE.Vector3(rx, ry, rz));
-      const inv = m.clone().invert().elements;
-      const spec = prepFiber(fiber, new THREE.Vector3(x, y, z), (rx + ry + rz) / 3);
-      return { id, inv, k: k || 1.6, spec, group: id && id + ":" + ((fiber && fiber.g) || "") };
-    });
-  }
-  // Distance along the ray O + t*d at which it leaves the ellipsoid (or -1).
-  function exitT(f, ox, oy, oz, dx, dy, dz) {
-    const e = f.inv;
-    const px = e[0] * ox + e[4] * oy + e[8] * oz + e[12], py = e[1] * ox + e[5] * oy + e[9] * oz + e[13], pz = e[2] * ox + e[6] * oy + e[10] * oz + e[14];
-    const ux = e[0] * dx + e[4] * dy + e[8] * dz, uy = e[1] * dx + e[5] * dy + e[9] * dz, uz = e[2] * dx + e[6] * dy + e[10] * dz;
-    const a = ux * ux + uy * uy + uz * uz, b = 2 * (px * ux + py * uy + pz * uz), c = px * px + py * py + pz * pz - 1;
-    const disc = b * b - 4 * a * c;
-    if (disc < 0) return -1;
-    return (-b + Math.sqrt(disc)) / (2 * a);
-  }
-  // Push every vertex out along a ray from its origin until it clears all features.
-  // Also records, per vertex, the fiber coordinates of the muscle on top and how close it
-  // is to the boundary with a neighbouring muscle (where a shallow groove is cut).
-  function sculpt(geo, origin, features, offset) {
-    const pos = geo.attributes.position, n = pos.count, O = new THREE.Vector3(), V = new THREE.Vector3();
-    const weights = {}, fib = new Float32Array(n * 4);
-    features.forEach((f) => { if (f.id && !weights[f.id]) weights[f.id] = new Float32Array(n); });
-    for (let i = 0; i < n; i++) {
-      V.fromBufferAttribute(pos, i);
-      origin(V, O);
-      const d = V.clone().sub(O); const base = d.length(); if (base < 1e-6) continue; d.divideScalar(base);
-      let r = base, top = null, t1 = -1, t2 = -1;
-      features.forEach((f) => {
-        const t = exitT(f, O.x, O.y, O.z, d.x, d.y, d.z);
-        if (t <= 0) return;
-        r = smax(r, t, f.k);
-        if (!f.id) return;
-        weights[f.id][i] = Math.max(weights[f.id][i], smooth01(base - 3.2, base + 1.4, t));
-        if (!top || t > t1) { if (top && f.group !== top.group) t2 = Math.max(t2, t1); top = f; t1 = t; }
-        else if (f.group !== top.group) t2 = Math.max(t2, t);
-      });
-      // Boundary: two different muscles' surfaces meet here (both above the base shape).
-      const sep = t2 > 0 ? (1 - smooth01(0, 1.3, t1 - t2)) * smooth01(base - 1.5, base + 0.5, t2) : 0;
-      r += (offset || 0) - 0.45 * sep;
-      pos.setXYZ(i, O.x + d.x * r, O.y + d.y * r, O.z + d.z * r);
-      if (top && top.spec) {
-        V.fromBufferAttribute(pos, i);
-        const [u, v] = fiberUV(top.spec, V);
-        fib[i * 4] = u; fib[i * 4 + 1] = v; fib[i * 4 + 2] = smooth01(base - 1.8, base + 1.2, t1);
-      }
-      fib[i * 4 + 3] = sep;
-    }
-    geo.computeVertexNormals();
-    weldNormals(geo);
-    geo.setAttribute("fib", new THREE.BufferAttribute(fib, 4));
-    return weights;
-  }
-  // Average normals of vertices that share a position (lathe and sphere seams, poles).
-  function weldNormals(geo) {
-    const pos = geo.attributes.position, nor = geo.attributes.normal, map = new Map();
-    for (let i = 0; i < pos.count; i++) {
-      const key = `${Math.round(pos.getX(i) * 200)},${Math.round(pos.getY(i) * 200)},${Math.round(pos.getZ(i) * 200)}`;
-      (map.get(key) || map.set(key, []).get(key)).push(i);
-    }
-    const s = new THREE.Vector3(), t = new THREE.Vector3();
-    map.forEach((ids) => {
-      if (ids.length < 2) return;
-      s.set(0, 0, 0); ids.forEach((i) => s.add(t.fromBufferAttribute(nor, i))); s.normalize();
-      ids.forEach((i) => nor.setXYZ(i, s.x, s.y, s.z));
-    });
-  }
-  function latheGeo(profile, depth, phiStart) {
-    const curve = new THREE.SplineCurve(profile.map(([y, r]) => new THREE.Vector2(r, y)));
-    const pts = curve.getPoints(Math.max(36, profile.length * 9));
-    pts[0].x = 0.001; pts[pts.length - 1].x = 0.001;
-    const geo = new THREE.LatheGeometry(pts, 56, phiStart || 0);
-    geo.scale(depth, 1, 1);
-    const y0 = profile[0][0], y1 = profile[profile.length - 1][0];
-    const r0 = profile[1][1] * 0.6, r1 = profile[profile.length - 2][1] * 0.6;
-    // Rays leave from the axis; near the ends they fan out from a point inside so caps round off.
-    const origin = (v, O) => O.set(0, Math.min(Math.max(v.y, y0 + r0), y1 - r1), 0);
-    return { geo, origin };
-  }
-  function ellipsoidGeo(cx, cy, cz, rx, ry, rz) {
-    const geo = new THREE.SphereGeometry(1, 48, 34);
-    geo.scale(rx, ry, rz); geo.translate(cx, cy, cz);
-    return { geo, origin: (v, O) => O.set(cx, cy, cz) };
-  }
   // Per-vertex data the skin shader reads: tone (color), fibers and activation (act).
   function skinAttrs(geo) {
     const n = geo.attributes.position.count;
     if (!geo.attributes.color) geo.setAttribute("color", new THREE.Float32BufferAttribute(new Float32Array(n * 3).fill(1), 3));
     if (!geo.attributes.fib) geo.setAttribute("fib", new THREE.Float32BufferAttribute(new Float32Array(n * 4), 4));
     if (!geo.attributes.act) geo.setAttribute("act", new THREE.Float32BufferAttribute(new Float32Array(n), 1));
-  }
-  function finish(group, key, shape, featureList, opts = {}) {
-    const weights = sculpt(shape.geo, shape.origin, prepFeatures(featureList), opts.offset);
-    const mat = opts.mat || mats.skin;
-    const m = new THREE.Mesh(shape.geo, mat);
-    m.castShadow = true; m.receiveShadow = true;
-    group.add(m);
-    if (mat === mats.skin) {
-      skinAttrs(shape.geo);
-      m.userData.weights = weights; m.userData.tone = opts.tone || 1;
-      skinList.push(m); (skinMeshes[key] = skinMeshes[key] || []).push(m);
-    }
-    return m;
-  }
-  // A vein: a thin tube laid just over the skin of a finished segment.
-  function vein(group, key, mesh, path, radius) {
-    const ray = new THREE.Raycaster(); const out = [];
-    mesh.updateMatrixWorld(true);
-    path.forEach(([y, ang]) => {
-      const dir = new THREE.Vector3(Math.cos(ang), 0, Math.sin(ang));
-      ray.set(new THREE.Vector3(0, y, 0).add(dir.clone().multiplyScalar(30)), dir.clone().negate());
-      const hit = ray.intersectObject(mesh, false)[0];
-      if (hit) out.push(hit.point.clone().add(dir.multiplyScalar(radius * 0.35)));
-    });
-    if (out.length < 3) return;
-    const geo = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(out), out.length * 6, radius, 8, false);
-    const m = new THREE.Mesh(geo, mats.skin);
-    skinAttrs(geo);
-    m.userData.weights = {}; m.userData.tone = 0.93;
-    group.add(m); skinList.push(m); (skinMeshes[key] = skinMeshes[key] || []).push(m);
   }
   function seg(name) { const g = new THREE.Group(); parts[name] = g; return g; }
   function addSkin(group, key, geo) {
@@ -213,19 +357,15 @@ function makeBody3D(THREE, mats) {
     group.add(m); skinList.push(m); (skinMeshes[key] = skinMeshes[key] || []).push(m);
     return m;
   }
-  // Hand: a sculpted palm with four three-jointed fingers and a two-jointed thumb.
+  // Hand: four three-jointed fingers and a two-jointed thumb on the palm (which is part of the skin).
   // The palm faces local -x (the a side); fingers curl toward it around local z.
   const hands = {};
   function capsule(r, len) { const geo = new THREE.CapsuleGeometry(r, len, 4, 12); geo.translate(0, len / 2, 0); return geo; }
   // The hand hangs from a wrist pivot so it can turn (overhand, underhand, neutral) or bend flat.
   // Hand frame: palm faces -x, fingers point +y, thumb on the +side z edge (a right hand for side +1).
   function makeHand(fa, side, a) {
+    // The palm is part of the body's skin (see skinDefs); the fingers hang from this pivot.
     const pivot = new THREE.Group(); pivot.position.y = 27; fa.add(pivot);
-    finish(pivot, "forearm", ellipsoidGeo(0, 4.2, 0, 1.45, 4.6, 3.5), [
-      [null, a * 0.7, 1.6, side * 2.3, 1.4, 2.8, 1.7, null, 1.0],     // thumb pad
-      [null, a * 0.5, 2.4, -side * 2.3, 1.2, 3.2, 1.4, null, 1.0],    // little-finger side pad
-      [null, 0, 7.6, 0, 1.6, 1.2, 3.8, null, 0.8]                      // knuckles
-    ]);
     const fingers = [];
     // [z offset (index first, on the thumb side), y of knuckle, phalanx lengths, radius]
     [[2.75, 8.2, [4.0, 2.5, 1.9], 0.92], [0.9, 8.6, [4.4, 2.8, 2.0], 0.95], [-0.95, 8.3, [4.1, 2.6, 1.9], 0.9], [-2.7, 7.6, [3.3, 2.0, 1.7], 0.8]]
@@ -253,110 +393,226 @@ function makeBody3D(THREE, mats) {
     h.thumb[1].rotation.set(0, 0, grip ? 0.55 : 0.1);
   }
 
+  // ----- One continuous skin -----
+  // The trunk, neck, head, arms and legs are ONE surface. Each segment is described by a base
+  // shape (a lathe profile, or an ellipsoid for the head and feet) and the muscles lying on it;
+  // all of them are combined into a single smooth field (a smooth union, so the shoulder flows
+  // into the arm and the hip into the thigh), turned into a mesh once, and bound to the segment
+  // groups as bones, so the skin bends at the joints instead of showing separate pieces.
+  //
   // Segments are built pointing up their local +y; on the trunk local +x is the front.
-  // Pelvis, belly and lower back (hip -> middle of the spine, 26 units before scaling).
-  {
-    const g = seg("lowerTorso");
-    // Glute max: from the pelvis and sacrum down and out to the top of the thigh bone.
-    const glutes = [1, -1].map((s) => ["glutes", -5.2, 0.8, s * 6.2, 5.6, 7.4, 6.6, null, 2.2,
-      { t: "fan", o: [-1, -3, s * 12], n: [-1, 0, s * 0.5], g: s }]);
-    // Rectus abdominis: vertical fibers up to the ribs, split into blocks by tendons.
-    const abs = [];
-    [[19.6, 2.5], [14.4, 2.5], [9.2, 2.6]].forEach(([y, ry]) => [-1, 1].forEach((s) =>
-      abs.push(["abs", 5.6, y, s * 2.45, 2.6, ry, 2.25, null, 0.7, { t: "lin", o: [5.6, 24, 0], n: [0, 1, 0], c: [0, 0, 1], g: y * s }])));
-    abs.push(["abs", 5.8, 3.8, 0, 2.6, 3.6, 4.2, null, 1.4, { t: "lin", o: [5.6, 24, 0], n: [0, 1, 0], c: [0, 0, 1], g: "low" }]);
-    // External obliques run down and forward ("hands in pockets"); erectors run straight up the spine.
-    const oblique = (s) => ({ t: "lin", o: [6, 2, s * 6], n: [0.7, -0.7, 0], c: [0.7, 0.7, 0], g: s });
-    const erector = (s) => ({ t: "lin", o: [-5, -2, s * 3], n: [0, 1, 0], c: [0, 0, 1], g: s });
-    finish(g, "spine", latheGeo([[-7, 3], [-5, 9], [-1, 13], [4, 13.4], [10, 12.2], [16, 11.6], [22, 11.8], [27, 12.2], [30, 9]], 0.66), [
-      ...abs,
-      ["obliques", 1.6, 12.5, 9.6, 4.4, 9.5, 3.2, [0.12, 0, 0], 2.4, oblique(1)], ["obliques", 1.6, 12.5, -9.6, 4.4, 9.5, 3.2, [-0.12, 0, 0], 2.4, oblique(-1)],
-      ["lower-back", -5.4, 14, 3.2, 2.6, 10, 3, null, 1.2, erector(1)], ["lower-back", -5.4, 14, -3.2, 2.6, 10, 3, null, 1.2, erector(-1)],
-      ...glutes
-    ]);
-  }
-  // Ribcage, chest, lats and upper back (middle of the spine -> shoulders).
-  {
-    const g = seg("upperTorso");
-    const F = [];
-    [1, -1].forEach((s) => {
-      // Pec major: fibers fan out from the upper arm bone toward the collarbone, sternum and ribs.
-      const pec = { t: "fan", o: [3, 22, s * 15], n: [1, 0, 0], r: [0, -3, -s * 8], g: s };
-      F.push(
-        ["chest", 7.2, 17.2, s * 7.6, 2.4, 4.6, 7.3, [-s * 0.22, 0, 0], 2.0, pec],     // sternal head
-        ["chest", 6.4, 21.6, s * 8.0, 2.0, 2.8, 6.8, [s * 0.15, 0, 0], 2.4, pec],      // clavicular (upper) head
-        ["chest", 4.8, 19.8, s * 12.4, 2.3, 3.4, 3.6, [-s * 0.4, 0, 0], 2.4, pec],     // toward the armpit
-        ["chest", 3.6, 21.5, s * 14.4, 2.2, 2.8, 2.4, null, 2.4, pec],                 // blends into the front delt
-        ["chest", 7.4, 13.6, s * 6.8, 2.2, 1.7, 6.6, [-s * 0.25, 0, 0], 0.8, pec],     // firm lower border
+  // Muscles are placed ON the base surface: [muscleId|null, y, th, h, [rn, ry, rt], spin?, k?, fiber?]
+  //   y   height on the segment, th  angle around it in degrees (0 = local +x, 90 = local +z),
+  //   h   how far the muscle rises above the base surface, [rn, ry, rt] its radii across the
+  //       surface (depth), along the segment and around it, spin turns it on the surface (radians),
+  //   k   how softly it blends into the surface around it.
+  // Absolute ellipsoids (for bones and landmarks) use the older form: { abs: [id, x, y, z, rx, ry, rz, rot?, k?, fiber?] }.
+  const SKIN_DEFS = skinDefs();
+  function skinDefs() {
+    const SH = VIEW3D.shoulderHalf, HH = VIEW3D.hipHalf;
+    const M = (pos, q) => new THREE.Matrix4().compose(new THREE.Vector3(...pos), q || new THREE.Quaternion(), new THREE.Vector3(1, 1, 1));
+    const Q = (x, z) => new THREE.Quaternion().setFromEuler(new THREE.Euler(x, 0, z, "XYZ"));
+    const armOut = 0.35, legOut = 0.16; // rest pose: arms and legs held a little away from the body
+    const defs = [];
+    const add = (name, base, feats, rest, k, tau) => defs.push({ name, base, feats, rest, k, tau });
+
+    // Pelvis, belly and lower back (hip -> middle of the spine, 26 units).
+    add("lowerTorso", { lathe: [[-9, 3], [-6.5, 10.4], [-2.5, 13.8], [2, 14.2], [7, 13.5], [12, 12.4], [17, 12.0], [22, 12.3], [26, 12.7], [29, 11], [31, 7]], depth: 0.75 }, [
+      // Rectus abdominis: one long strap each side of the midline, lying flat on the abdominal wall.
+      ...[1, -1].map((s) => ["abs", 13, s * 14, 0.9, [1.6, 11.5, 3.2], 0, 2.8, { t: "lin", o: [10, 26, 0], n: [0, 1, 0], c: [0, 0, 1], g: s }]),
+      // External obliques run down and forward ("hands in pockets").
+      ...[1, -1].map((s) => ["obliques", 9, s * 72, 0.6, [2.0, 8, 6], s * 0.25, 3.2, { t: "lin", o: [6, 2, s * 6], n: [0.7, -0.7, 0], c: [0.7, 0.7, 0], g: s }]),
+      // Erectors run straight up beside the spine.
+      ...[1, -1].map((s) => ["lower-back", 14, s * 164, 1.2, [2.0, 11, 2.8], 0, 2.6, { t: "lin", o: [-5, -2, s * 3], n: [0, 1, 0], c: [0, 0, 1], g: s }]),
+      // Glute max: from the pelvis and sacrum down and out to the top of the thigh bone; glute med above it at the side.
+      ...[1, -1].map((s) => ["glutes", -0.5, s * 142, 2.4, [4.4, 8, 6.4], s * 0.2, 3.6, { t: "fan", o: [-1, -3, s * 12], n: [-1, 0, s * 0.5], g: s }]),
+      ...[1, -1].map((s) => ["glutes", 7, s * 112, 0.7, [2.2, 5, 5], 0, 3, { t: "fan", o: [-1, -3, s * 12], n: [-1, 0, s * 0.5], g: s }])
+    ], M([0, 0, 0]), 0, 6);
+
+    // Ribcage, chest, lats and upper back (middle of the spine -> shoulders).
+    const pec = (s) => ({ t: "fan", o: [3, 22, s * 15], n: [1, 0, 0], r: [0, -3, -s * 8], g: s });
+    add("upperTorso", { lathe: [[-5, 9.5], [-2, 12.3], [1, 13.0], [6, 14.2], [12, 15.0], [17, 15.3], [21, 15.0], [23.5, 14.0], [25.5, 11.5], [27, 8.5], [28.5, 6.4], [30, 3]], depth: 0.72 }, [
+      ...[1, -1].flatMap((s) => [
+        // Pec major: a flat, curved plate over the ribs that narrows into a tendon at the armpit.
+        ["chest", 16.5, s * 27, 1.3, [2.4, 5.0, 6.6], s * -0.12, 2.4, pec(s)],
+        ["chest", 21.2, s * 32, 1.0, [2.0, 2.8, 6.2], s * 0.1, 2.8, pec(s)],
+        ["chest", 20.4, s * 60, 0.9, [2.0, 2.4, 3.6], s * 0.3, 2.8, pec(s)],
+        // Upper rectus abdominis, over the lower ribs up to the chest.
+        ["abs", 4, s * 14, 0.8, [1.5, 6, 3.0], 0, 2.8, { t: "lin", o: [10, 0, 0], n: [0, 1, 0], c: [0, 0, 1], g: s }],
         // Serratus: slips running up and back toward the shoulder blade.
-        ["obliques", 3.8, 7, s * 11.6, 3.6, 5, 2.2, null, 1.0, { t: "lin", o: [-3, 14, s * 12], n: [-0.6, 0.8, 0], c: [0.8, 0.6, 0], g: s }],
-        // Lats: from the low back and pelvis up to the front of the upper arm, under the armpit.
-        ["lats", -3, 11, s * 12.4, 5.6, 11, 3.4, [-s * 0.25, 0, 0], 2.2, { t: "fan", o: [0, 21, s * 13.5], n: [-1, 0, s * 0.6], g: s }],
+        ["obliques", 8, s * 80, 0.5, [1.6, 5, 3.4], s * 0.5, 2.6, { t: "lin", o: [-3, 14, s * 12], n: [-0.6, 0.8, 0], c: [0.8, 0.6, 0], g: s }],
+        // Lats: from the low back and pelvis up under the armpit to the front of the upper arm.
+        ["lats", 12, s * 128, 1.4, [2.6, 11, 6.2], s * -0.2, 3.2, { t: "fan", o: [0, 21, s * 13.5], n: [-1, 0, s * 0.6], g: s }],
         // Rhomboids and mid back: from the spine down and out to the shoulder blade.
-        ["upper-back", -6.8, 17, s * 5.4, 3, 7, 5.4, null, 1.4, { t: "lin", o: [-7, 22, 0], n: [0, -0.45, s * 0.9], c: [0, s * 0.9, 0.45], g: s }],
-        // Traps: upper fibers from the neck out to the shoulder tip; middle and lower fibers to the shoulder blade spine.
-        ["traps", -2.2, 25, s * 6.6, 4.4, 4.2, 7.4, [s * 0.35, 0, 0], 2.2, { t: "fan", o: [-1, 27, s * 14], n: [-0.5, 1, 0], r: [0, 0, -s], g: s }],
-        ["traps", -6.4, 21.5, s * 2.3, 2.6, 7.4, 3.2, null, 1.6, { t: "fan", o: [-4, 25, s * 12], n: [-1, 0, 0], r: [0, -4, -s * 8], g: s }]
-      );
-    });
-    finish(g, "spine", latheGeo([[-4, 11.8], [2, 12.2], [8, 13.4], [14, 14.6], [19, 15.4], [23, 14.6], [26, 11.4], [28.5, 6.5], [30, 0.1]], 0.64), F);
-  }
-  // Neck and head.
-  {
-    const g = seg("neck");
-    finish(g, "neck", latheGeo([[-3, 6], [2, 5], [6, 4.7], [9, 4.9], [11, 4]], 0.95), [
-      [null, 2.2, 4.4, 2.2, 1.5, 5.8, 1.4, [0.35, 0, -0.25], 1.0], [null, 2.2, 4.4, -2.2, 1.5, 5.8, 1.4, [-0.35, 0, -0.25], 1.0],
-      ["traps", -3, 1, 0, 3, 5, 5.6, null, 2, { t: "lin", o: [-3, -3, 0], n: [0, 1, 0], c: [0, 0, 1] }]
-    ]);
+        ["upper-back", 17, s * 158, 0.9, [2.0, 7, 4.6], 0, 2.8, { t: "lin", o: [-7, 22, 0], n: [0, -0.45, s * 0.9], c: [0, s * 0.9, 0.45], g: s }],
+        // Middle and lower traps toward the shoulder blade spine.
+        ["traps", 18, s * 172, 0.7, [1.8, 8, 2.8], 0, 2.8, { t: "fan", o: [-4, 25, s * 12], n: [-1, 0, 0], r: [0, -4, -s * 8], g: s }],
+        // Upper traps: the slope from the neck out to the shoulder tip.
+        { abs: ["traps", -1.6, 24.6, s * 7.4, 3.8, 3.0, 7.0, [s * 0.42, 0, 0], 3, { t: "fan", o: [-1, 27, s * 14], n: [-0.5, 1, 0], r: [0, 0, -s], g: s }] },
+        // Shoulder girdle: collarbone, shoulder blade spine and acromion carry the slope out to the arm.
+        { abs: [null, -0.6, 22.6, s * 14.4, 4.2, 2.6, 4.8, [s * 0.25, 0, 0], 3.2] }
+      ])
+    ], M([0, 26, 0]), 3, 6);
+
+    // Neck (the head rides on it).
+    add("neck", { lathe: [[-4, 6.0], [0, 5.5], [4, 5.1], [8, 5.0], [11, 4.8], [14, 3]], depth: 1.05 }, [
+      ...[1, -1].map((s) => [null, 6, s * 42, 0.7, [1.4, 6, 1.5], s * 0.55, 1.8]), // sternocleidomastoids
+      ["traps", 2, 180, 1, [2.6, 5, 5.6], 0, 2.6, { t: "lin", o: [-3, -3, 0], n: [0, 1, 0], c: [0, 0, 1] }],
+      // Upper traps climb the sides of the neck, so the shoulders slope down from it.
+      ...[1, -1].map((s) => ["traps", 2.5, s * 125, 1.6, [2.6, 4.6, 3.6], 0, 3, { t: "fan", o: [-1, -24, s * 14], n: [0.3, 1, 0], r: [0, 0, s], g: s }])
+    ], M([0, 51, 0]), 3.5, 4);
     // Head: a plain oval, like an anatomy mannequin.
-    const head = new THREE.Group(); head.position.y = 15.5; g.add(head); parts.head = head;
-    finish(head, "head", ellipsoidGeo(0.4, 0.6, 0, 7.4, 9.6, 6.9), []);
+    add("head", { ell: [0.5, 1.6, 0, 8.6, 10.6, 7.4] }, [], M([0, 66.5, 0]), 3, 2);
+
+    [1, -1].forEach((side) => {
+      const s = side > 0 ? "R" : "L";
+      // Limbs hang down (local -x is the front of the body, th = 180), side * 90 is the outer side.
+      const armQ = Q(-side * armOut, Math.PI), sh = new THREE.Vector3(0, 49, side * SH);
+      const elbow = new THREE.Vector3(0, 30, 0).applyQuaternion(armQ).add(sh);
+      add("upperArm" + s, { lathe: [[-1.5, 2.2], [0, 4.2], [2.5, 5.0], [6, 5.0], [12, 4.4], [20, 4.1], [27, 3.7], [31, 3.4], [33.5, 1.4]], depth: 0.95 }, [
+        // Deltoid: front, side and rear heads wrap the joint and converge halfway down the outer arm.
+        ["shoulders", 5, side * 140, 1.3, [2.4, 7.6, 4.4], side * 0.25, 3.2, { t: "fan", o: [0, 14, side * 3.6], n: [0, -14, -side * 3.6], r: [0, 0, side] }],
+        ["shoulders", 6.5, side * 90, 1.7, [2.6, 7.6, 4.8], 0, 3.2, { t: "fan", o: [0, 14, side * 3.6], n: [0, -14, -side * 3.6], r: [0, 0, side] }],
+        ["rear-delts", 5, side * 30, 1.2, [2.4, 7.4, 4.4], side * 0.25, 3.2, { t: "fan", o: [0, 14, side * 3.6], n: [0, -14, -side * 3.6], r: [0, 0, side] }],
+        // Biceps in front, triceps behind: long fibers down to their tendons at the elbow.
+        ["biceps", 16, 180, 1.2, [2.4, 8.6, 3.0], 0, 2.6, { t: "long", o: [0, 30, 0], n: [0, 1, 0], r: [-1, 0, 0] }],
+        ["triceps", 12.5, side * 35, 1.0, [2.2, 9, 2.8], 0, 2.6, { t: "long", o: [0, 31, 0], n: [0, 1, 0], r: [1, 0, 0], g: "lat" }],
+        ["triceps", 15.5, -side * 25, 0.9, [2.2, 8.5, 2.6], 0, 2.6, { t: "long", o: [0, 31, 0], n: [0, 1, 0], r: [1, 0, 0], g: "long" }],
+        { abs: [null, 0, 30, 0, 3.3, 3.3, 3.3, null, 1.8] } // elbow
+      ], M(sh.toArray(), armQ), 2.6, 3);
+      add("forearm" + s, { lathe: [[-2.5, 3.0], [0, 3.9], [4, 4.3], [9, 4.0], [16, 3.2], [22, 2.5], [27, 2.2], [29.5, 1.6], [30.5, 0.1]], depth: 0.85 }, [
+        ["forearms", 7, side * 115, 1.0, [2.0, 8, 2.6], 0, 2.6, { t: "long", o: [0, 27, 0], n: [0, 1, 0], g: "ext" }],
+        ["forearms", 8, -side * 135, 0.9, [2.0, 8, 2.6], 0, 2.6, { t: "long", o: [0, 27, 0], n: [0, 1, 0], g: "flex" }]
+      ], M(elbow.toArray(), armQ), 2.6, 3);
+      // Palm (faces local -x, thumb toward side * z), joined to the forearm at the wrist.
+      const wrist = new THREE.Vector3(0, 27, 0).applyQuaternion(armQ).add(elbow);
+      add("hand" + s, { ell: [0, 4.2, 0, 1.45, 4.6, 3.5] }, [
+        { abs: [null, -0.7, 1.6, side * 2.3, 1.4, 2.8, 1.7, null, 1.4] },  // thumb pad
+        { abs: [null, -0.5, 2.4, -side * 2.3, 1.2, 3.2, 1.4, null, 1.4] }, // little-finger side pad
+        { abs: [null, 0, 7.6, 0, 1.6, 1.2, 3.8, null, 1.0] }               // knuckles
+      ], M(wrist.toArray(), armQ), 2, 2);
+
+      const legQ = Q(-side * legOut, Math.PI), hip = new THREE.Vector3(0, 0, side * HH);
+      const knee = new THREE.Vector3(0, 42, 0).applyQuaternion(legQ).add(hip);
+      const ankle = new THREE.Vector3(0, 42, 0).applyQuaternion(legQ).add(knee);
+      const quad = (g) => ({ t: "fan", o: [-2.6, 41.5, 0], n: [-1, 0, 0], r: [0, -1, 0], g });
+      add("thigh" + s, { lathe: [[-8, 3], [-5, 8.4], [-1, 9.4], [6, 9.1], [16, 8.2], [26, 7.0], [34, 6.0], [40, 5.5], [44, 5.1], [46.5, 2]], depth: 0.98 }, [
+        // Quads: all four heads converge on the kneecap.
+        ["quads", 19, 180, 1.1, [3.0, 15, 3.8], 0, 3.2, quad("rf")],
+        ["quads", 22, side * 128, 1.2, [3.0, 14, 4.2], 0, 3.2, quad("vl")],   // outer sweep
+        ["quads", 33.5, -side * 140, 1.3, [2.8, 6.2, 3.4], 0, 2.8, quad("vm")], // teardrop above the knee
+        [null, 10, -side * 90, 0.6, [2.6, 10, 4.2], 0, 3.2],                    // adductors
+        // Hamstrings: down the back of the thigh to the knee, two bellies side by side.
+        ["hamstrings", 20, side * 28, 1.1, [3.0, 14, 3.8], 0, 3.2, { t: "fan", o: [3, 62, 0], n: [1, 0, 0], r: [0, -1, 0], g: "bf" }],
+        ["hamstrings", 21, -side * 30, 1.0, [3.0, 14, 3.6], 0, 3.2, { t: "fan", o: [3, 62, 0], n: [1, 0, 0], r: [0, -1, 0], g: "st" }],
+        { abs: [null, -2.6, 41.5, 0, 2.0, 2.7, 3.0, null, 2.0] }                // kneecap
+      ], M(hip.toArray(), legQ), 3.2, 3.5);
+      add("shin" + s, { lathe: [[-3.5, 4.6], [-1, 5.2], [3, 5.3], [8, 5.4], [14, 4.9], [21, 3.8], [28, 3.0], [35, 2.6], [40, 2.5], [43, 2.3], [45, 1.0]], depth: 0.95 }, [
+        // Calves: both heads of the gastrocnemius converge on the Achilles tendon; soleus underneath.
+        ["calves", 10, -side * 28, 1.5, [2.5, 9, 3.0], 0, 2.8, { t: "fan", o: [2, 37, 0], n: [1, 0, 0], r: [0, -1, 0], g: 1 }],
+        ["calves", 9.5, side * 30, 1.2, [2.4, 8.2, 2.8], 0, 2.8, { t: "fan", o: [2, 37, 0], n: [1, 0, 0], r: [0, -1, 0], g: 2 }],
+        ["calves", 20, 0, 0.6, [2.2, 9, 3.6], 0, 3, { t: "fan", o: [2, 37, 0], n: [1, 0, 0], r: [0, -1, 0], g: 3 }],
+        [null, 12, side * 150, 0.5, [1.8, 10, 2.0], 0, 3],                       // tibialis anterior
+        { abs: [null, 0, 42, side * 2.4, 1.4, 1.6, 1.2, null, 1.2] }, { abs: [null, 0, 42, -side * 2.4, 1.4, 1.6, 1.2, null, 1.2] } // ankle bones
+      ], M(knee.toArray(), legQ), 3, 3);
+      add("foot" + s, { ell: [-1.2, 6.6, 0, 2.3, 7.4, 3.4] }, [
+        { abs: [null, -0.6, 0.8, 0, 2.9, 3.4, 2.9, null, 1.4] },                // heel
+        { abs: [null, -0.9, 12.2, 0, 1.6, 2.6, 3.4, null, 1.2] }                // toes
+      ], M(ankle.toArray(), Q(-side * legOut, -Math.PI / 2)), 2.6, 2.5);
+    });
+    return defs;
   }
-  // Arms and legs, one set per side (side = +1 near the camera, -1 far).
-  [1, -1].forEach((side) => {
-    const s = side > 0 ? "R" : "L", a = -1; // limbs hang down, so local -x is the front of the body
-    const ua = seg("upperArm" + s);
-    finish(ua, "upperArm", latheGeo([[-3, 4], [0, 5.6], [6, 5.2], [14, 4.4], [22, 4], [28, 3.6], [32, 3]], 0.95), [
-      // Deltoid: front, side and rear fibers all converge on the tuberosity halfway down the outer arm.
-      ["shoulders", 0.2, 4, 0, 6.4, 8.8, 6.8, null, 2.2, { t: "fan", o: [0, 14, side * 3.6], n: [0, -14, -side * 3.6], r: [0, 0, side] }],
-      ["rear-delts", -a * 2.8, 4.6, 0, 3.8, 7.4, 5.4, null, 1.6, { t: "fan", o: [0, 14, side * 3.6], n: [0, -14, -side * 3.6], r: [0, 0, side] }],
-      // Biceps and triceps: long fibers down the arm to their tendons at the elbow.
-      ["biceps", a * 2.2, 17, 0, 3.3, 8.4, 3.8, null, 1.2, { t: "long", o: [0, 30, 0], n: [0, 1, 0], r: [a, 0, 0] }],
-      ["triceps", -a * 2.2, 13, side * 1.2, 3.2, 9.5, 3.4, null, 1.0, { t: "long", o: [0, 31, 0], n: [0, 1, 0], r: [-a, 0, 0], g: "lat" }],
-      ["triceps", -a * 2.4, 16, -side * 1.4, 3.2, 8.5, 3.2, null, 1.0, { t: "long", o: [0, 31, 0], n: [0, 1, 0], r: [-a, 0, 0], g: "long" }],
-      [null, 0, 30, 0, 3.4, 3.4, 3.4, null, 1.6]
-    ]);
-    const fa = seg("forearm" + s);
-    const faMesh = finish(fa, "forearm", latheGeo([[-1.5, 3.4], [3, 4.1], [8, 4], [16, 3.1], [23, 2.4], [27, 2.2], [29.5, 1.8], [30.5, 0.1]], 0.82), [
-      ["forearms", -a * 0.8, 7, side * 1.3, 3.4, 8.4, 3.4, null, 1.4, { t: "long", o: [0, 27, 0], n: [0, 1, 0], g: "ext" }],
-      ["forearms", a * 0.6, 8, -side * 1.2, 3.2, 8, 3.2, null, 1.4, { t: "long", o: [0, 27, 0], n: [0, 1, 0], g: "flex" }]
-    ]);
-    hands[s] = makeHand(fa, side, a);
-    vein(fa, "forearm", faMesh, [[3, 2.6], [8, 2.9], [13, 2.5], [18, 2.8], [23, 2.6]].map(([y, ang]) => [y, side > 0 ? ang : -ang + Math.PI * 0]), 0.3);
-    const th = seg("thigh" + s);
-    finish(th, "thigh", latheGeo([[-7, 3.5], [-4, 7.6], [0, 8.8], [8, 8.2], [18, 7.2], [30, 5.8], [38, 4.8], [43, 4.4]], 0.94), [
-      // Quads: all four heads converge on the kneecap. Hamstrings: down the back of the thigh to the knee.
-      ["quads", a * 3.2, 19, 0, 5, 16, 6, null, 1.6, { t: "fan", o: [a * 2.6, 41.5, 0], n: [a, 0, 0], r: [0, -1, 0], g: "rf" }],
-      ["quads", a * 2, 33.5, -side * 2.8, 3.4, 6, 3.6, null, 1.2, { t: "fan", o: [a * 2.6, 41.5, 0], n: [a, 0, 0], r: [0, -1, 0], g: "vm" }], // teardrop above the knee
-      ["quads", a * 2, 23, side * 4, 3.6, 13, 3.4, null, 1.2, { t: "fan", o: [a * 2.6, 41.5, 0], n: [a, 0, 0], r: [0, -1, 0], g: "vl" }],    // outer sweep
-      ["hamstrings", -a * 3.6, 18, 0, 4.6, 15, 5.6, null, 1.6, { t: "fan", o: [-a * 3, 62, 0], n: [-a, 0, 0], r: [0, -1, 0] }],
-      [null, a * 2.6, 41.5, 0, 2.2, 2.8, 3.2, null, 1.0]                // kneecap
-    ]);
-    const sh = seg("shin" + s);
-    finish(sh, "shin", latheGeo([[-3, 3.6], [-1, 4.4], [4, 4.2], [12, 3.8], [22, 3.1], [34, 2.4], [42, 2.5], [44, 1.6]], 0.92), [
-      // Calves: both heads converge on the Achilles tendon.
-      ["calves", -a * 3, 11, 1.6, 3.2, 9.5, 3.2, null, 1.2, { t: "fan", o: [-a * 2, 37, 0], n: [-a, 0, 0], r: [0, -1, 0], g: 1 }],
-      ["calves", -a * 2.8, 12.5, -1.8, 3.2, 9, 3.2, null, 1.2, { t: "fan", o: [-a * 2, 37, 0], n: [-a, 0, 0], r: [0, -1, 0], g: 2 }],
-      [null, a * 2.6, 14, 0, 1.8, 14, 2.2, null, 1.4],                  // shin bone ridge
-      [null, 0, 42, side * 2.4, 1.4, 1.6, 1.2, null, 0.8], [null, 0, 42, -side * 2.4, 1.4, 1.6, 1.2, null, 0.8] // ankle bones
-    ]);
-    const ft = seg("foot" + s);
-    finish(ft, "foot", ellipsoidGeo(-1.2, 6.6, 0, 2.3, 7.4, 3.4), [
-      [null, -0.6, 0.8, 0, 2.9, 3.4, 2.9, null, 1.2],                   // heel
-      [null, -0.9, 12.2, 0, 1.6, 2.6, 3.4, null, 1.0]                   // toes
-    ]);
+
+  // Prepare a segment: its base shape, and every muscle as an ellipsoid in the segment's space.
+  function prepSegment(d) {
+    const seg = { name: d.name, k: d.k, tau: d.tau, inv: d.rest.clone().invert().elements };
+    if (d.base.lathe) {
+      const prof = d.base.lathe, curve = new THREE.SplineCurve(prof.map(([y, r]) => new THREE.Vector2(r, y)));
+      const pts = curve.getPoints(prof.length * 40);
+      // Open ends are closed with a rounded cap, so no flat disc ever shows inside a joint.
+      const c0 = prof[0][1] * 0.85, c1 = prof[prof.length - 1][1] * 0.85;
+      const ya = prof[0][0], yb = prof[prof.length - 1][0], y0 = ya - c0, y1 = yb + c1, N = 640, tab = new Float32Array(N + 1);
+      for (let i = 0, j = 0; i <= N; i++) {
+        const y = y0 + ((y1 - y0) * i) / N;
+        if (y < ya) { const t = (ya - y) / c0; tab[i] = prof[0][1] * Math.sqrt(Math.max(0, 1 - t * t)); continue; }
+        if (y > yb) { const t = (y - yb) / c1; tab[i] = prof[prof.length - 1][1] * Math.sqrt(Math.max(0, 1 - t * t)); continue; }
+        while (j < pts.length - 2 && pts[j + 1].y < y) j++;
+        const a = pts[j], b = pts[j + 1], t = b.y > a.y ? Math.min(1, Math.max(0, (y - a.y) / (b.y - a.y))) : 0;
+        tab[i] = Math.max(0, a.x + (b.x - a.x) * t);
+      }
+      seg.lathe = { y0, y1, N, tab, depth: d.base.depth };
+    } else seg.ell = ellipsoid(null, ...d.base.ell, null, 1);
+    seg.feats = d.feats.map((f) => {
+      if (f.abs) {
+        const [id, x, y, z, rx, ry, rz, rot, k, fiber] = f.abs;
+        return ellipsoid(id, x, y, z, rx, ry, rz, new THREE.Quaternion().setFromEuler(new THREE.Euler(...(rot || [0, 0, 0]))), k, fiber);
+      }
+      // On the surface: find the base surface point at (y, th) and its outward normal there.
+      const [id, y, th, h, [rn, ry, rt], spin, k, fiber] = f;
+      const a = (th * Math.PI) / 180, r = skinLatheR(seg.lathe, y), A = r * seg.lathe.depth;
+      const n = new THREE.Vector3(Math.cos(a) / A, 0, Math.sin(a) / r).normalize();
+      const c = new THREE.Vector3(A * Math.cos(a), y, r * Math.sin(a)).addScaledVector(n, h - rn);
+      const up = new THREE.Vector3(0, 1, 0), t = new THREE.Vector3().crossVectors(n, up).normalize();
+      const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(n, up, t));
+      if (spin) q.premultiply(new THREE.Quaternion().setFromAxisAngle(n, spin));
+      return ellipsoid(id, c.x, c.y, c.z, rn, ry, rt, q, k, fiber);
+    });
+    // World-space bounds (in the rest pose), so far-away segments are skipped quickly. Wider than
+    // any blend, so skipping a segment never cuts a blend off.
+    const box = new THREE.Box3(), r = seg.lathe ? Math.max(...seg.lathe.tab) : seg.ell.br, e = seg.ell;
+    if (seg.lathe) box.set(new THREE.Vector3(-r, seg.lathe.y0, -r), new THREE.Vector3(r, seg.lathe.y1, r));
+    else box.set(new THREE.Vector3(e.cx - r, e.cy - r, e.cz - r), new THREE.Vector3(e.cx + r, e.cy + r, e.cz + r));
+    seg.feats.forEach((f) => { box.expandByPoint(new THREE.Vector3(f.cx - f.br, f.cy - f.br, f.cz - f.br)); box.expandByPoint(new THREE.Vector3(f.cx + f.br, f.cy + f.br, f.cz + f.br)); });
+    box.expandByScalar(10).applyMatrix4(d.rest);
+    seg.box = [box.min.x, box.min.y, box.min.z, box.max.x, box.max.y, box.max.z];
+    return seg;
+  }
+  function ellipsoid(id, x, y, z, rx, ry, rz, q, k, fiber) {
+    const m = new THREE.Matrix4().makeRotationFromQuaternion(q || new THREE.Quaternion()).elements;
+    return { id, cx: x, cy: y, cz: z, rx, ry, rz, br: Math.max(rx, ry, rz), k: k || 2.4, m: [m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10]],
+      spec: plainFiber(prepFiber(fiber, new THREE.Vector3(x, y, z), (rx + ry + rz) / 3)), group: id && id + ":" + ((fiber && fiber.g) || "") };
+  }
+  const plainFiber = (sp) => sp && { t: sp.t, d: sp.d, O: sp.O.toArray(), N: sp.N.toArray(), C: sp.C && sp.C.toArray(), R: sp.R && sp.R.toArray(), B: sp.B && sp.B.toArray() };
+
+  // Segment groups act as the skin's bones; the head rides on the neck.
+  SKIN_DEFS.forEach((d) => { if (d.name !== "head" && !d.name.startsWith("hand")) seg(d.name); });
+  const head = new THREE.Group(); head.position.y = 15.5; parts.neck.add(head); parts.head = head;
+  // Hands keep their own jointed fingers, hung from each forearm; each palm is a bone of the skin.
+  [1, -1].forEach((side) => { const s = side > 0 ? "R" : "L"; hands[s] = makeHand(parts["forearm" + s], side, -1); });
+  const boneOf = (name) => (name.startsWith("hand") ? hands[name.slice(4)].pivot : parts[name]);
+  const twistRest = [];
+  ["R", "L"].forEach((s) => {
+    hands[s].twist = [1, 2].map(() => { const g = new THREE.Group(); parts["forearm" + s].add(g); return g; });
+    twistRest.push(...hands[s].twist.map(() => SKIN_DEFS.find((d) => d.name === "forearm" + s).rest.clone().invert()));
   });
-  return { parts, skinMeshes, skinList, hands, handQ: { R: new THREE.Quaternion(), L: new THREE.Quaternion() }, setHands: (grip) => Object.values(hands).forEach((h) => setHand(h, grip)) };
+  // The fingers show once the skin they belong to is ready.
+  skinList.forEach((m) => { m.visible = false; });
+  const body = { parts, skin: null, skinMeshes, skinList, hands, handQ: { R: new THREE.Quaternion(), L: new THREE.Quaternion() },
+    setHands: (grip) => Object.values(hands).forEach((h) => setHand(h, grip)),
+    // cb(skin) runs once the skin mesh exists (later in the same frame at the soonest).
+    onSkin(cb) { if (body.skin) Promise.resolve().then(() => cb(body.skin)); else skinWaiting.push(cb); } };
+  const skinWaiting = [];
+  requestSkin(SKIN_DEFS.map(prepSegment), (data) => {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(data.pos, 3));
+    geo.setAttribute("normal", new THREE.BufferAttribute(data.nor, 3));
+    geo.setAttribute("skinIndex", new THREE.BufferAttribute(data.skinIndex, 4));
+    geo.setAttribute("skinWeight", new THREE.BufferAttribute(data.skinWeight, 4));
+    geo.setAttribute("fib", new THREE.BufferAttribute(data.fib, 4));
+    geo.setIndex(new THREE.BufferAttribute(data.index, 1));
+    skinAttrs(geo);
+    const skin = new THREE.SkinnedMesh(geo, mats.skin);
+    skin.bind(new THREE.Skeleton([...SKIN_DEFS.map((d) => boneOf(d.name)), ...hands.R.twist, ...hands.L.twist],
+      [...SKIN_DEFS.map((d) => d.rest.clone().invert()), ...twistRest]), new THREE.Matrix4());
+    skin.castShadow = true; skin.receiveShadow = true; skin.frustumCulled = false;
+    skin.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e4); // posed anywhere: never cull, raycast against triangles
+    skin.userData.weights = data.weights; skin.userData.tone = 1;
+    skinList.forEach((m) => { m.visible = true; });
+    skinList.unshift(skin); skinMeshes.body = [skin];
+    body.skin = skin;
+    skinWaiting.splice(0).forEach((cb) => cb(skin));
+  });
+  return body;
 }
 
 // ---------- Viewer ----------
@@ -439,11 +695,13 @@ function createViewer3D(container, mode) {
             float wob = 0.5 + 0.5 * sin(vFib.x * (0.35 + 0.3 * rnd) + id * 2.17);
             float lineW = 0.09 + 0.09 * wob;
             float groove = 1.0 - smoothstep(lineW - fw, lineW + fw, edge);
-            float vis = vFib.z * (1.0 - smoothstep(0.3, 0.6, fw));
+            // Fibers sit inside the muscle: faint at rest, fading out toward its edges.
+            float vis = smoothstep(0.35, 0.9, vFib.z) * (1.0 - smoothstep(0.3, 0.6, fw));
             float sep = vFib.w;
-            diffuseColor.rgb *= (1.0 - 0.3 * groove * vis) * (1.0 + vis * (0.1 * rnd - 0.04)) * (1.0 - 0.55 * sep);
             // act > 0: a worked muscle; act < 0: a muscle taking over the work in a mistake.
             float a = abs(vAct) * uEffort * uActScale;
+            // At rest the fibers are only a faint grain under the skin; they stand out as the muscle works.
+            diffuseColor.rgb *= (1.0 - (0.05 + 0.22 * min(a, 1.0)) * groove * vis) * (1.0 + vis * (0.03 * rnd - 0.015)) * (1.0 - 0.2 * sep);
             vec3 actColor = vAct < 0.0 ? uCompColor : uActColor;
             if (a > 0.001) {
               // A soft wave of contraction runs along each fiber toward its attachment (u = 0);
@@ -474,8 +732,8 @@ function createViewer3D(container, mode) {
   }
   const mats = {
     // Matte graphite skin: the shader below draws the muscle fibers, boundaries and activation.
-    skin: patchSkin(new THREE.MeshPhysicalMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.64, metalness: 0,
-      sheen: 0.12, sheenColor: new THREE.Color(0xb8c2d0), sheenRoughness: 0.7, clearcoat: 0.05, clearcoatRoughness: 0.6,
+    skin: patchSkin(new THREE.MeshPhysicalMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.74, metalness: 0,
+      sheen: 0.06, sheenColor: new THREE.Color(0xb8c2d0), sheenRoughness: 0.85, clearcoat: 0,
       envMapIntensity: 0.75, bumpMap: skinNoise(), bumpScale: 0.25 })),
     lips: new THREE.MeshStandardMaterial({ color: col("--skin-shade", "#c48a65").lerp(new THREE.Color(0x9a4a3c), 0.4), roughness: 0.5 }),
     eye: new THREE.MeshStandardMaterial({ color: 0xf2eee8, roughness: 0.2 }),
@@ -508,6 +766,8 @@ function createViewer3D(container, mode) {
 
   const body = makeBody3D(THREE, mats);
   Object.values(body.parts).forEach((g) => { if (g !== body.parts.head) scene.add(g); });
+  // The skin may arrive a moment later (it is built in the background): show it with the scan-in.
+  body.onSkin((skin) => { scene.add(skin); if (ex) setActivation(); shownAt = 0; });
   const equipment = new THREE.Group();
   scene.add(equipment);
 
@@ -932,6 +1192,12 @@ function createViewer3D(container, mode) {
     const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
     handQOf()[side > 0 ? "R" : "L"].copy(q);
     h.pivot.quaternion.copy(fa.quaternion).invert().multiply(q);
+    // Spread the hand's roll about the forearm over the two twist bones (a third and two thirds).
+    if (h.twist) {
+      const p = h.pivot.quaternion, tw = new THREE.Quaternion(0, p.y, 0, p.w);
+      if (tw.lengthSq() < 1e-8) tw.identity(); else { if (tw.w < 0) tw.set(0, -tw.y, 0, -tw.w); tw.normalize(); }
+      h.twist[0].quaternion.identity().slerp(tw, 1 / 3); h.twist[1].quaternion.identity().slerp(tw, 2 / 3);
+    }
   }
   function gripPoint(s) {
     const fa = cur.parts["forearm" + s];
@@ -1050,12 +1316,24 @@ function createViewer3D(container, mode) {
   function makeGhost() {
     const mat = new THREE.ShaderMaterial({
       uniforms: { color: { value: GOOD.clone() }, opacity: { value: 0 } },
-      vertexShader: "varying float vRim; void main(){ vec3 n = normalize(normalMatrix * normal); vec4 mv = modelViewMatrix * vec4(position, 1.0); vRim = 1.0 - abs(dot(n, normalize(-mv.xyz))); gl_Position = projectionMatrix * mv; }",
+      vertexShader: `#include <common>
+        #include <skinning_pars_vertex>
+        varying float vRim;
+        void main() {
+          #include <beginnormal_vertex>
+          #include <skinbase_vertex>
+          #include <skinnormal_vertex>
+          #include <begin_vertex>
+          #include <skinning_vertex>
+          vec3 n = normalize(normalMatrix * objectNormal); vec4 mv = modelViewMatrix * vec4(transformed, 1.0);
+          vRim = 1.0 - abs(dot(n, normalize(-mv.xyz))); gl_Position = projectionMatrix * mv;
+        }`,
       fragmentShader: "uniform vec3 color; uniform float opacity; varying float vRim; void main(){ gl_FragColor = vec4(color, opacity * (0.08 + 0.92 * pow(vRim, 2.0))); }",
       transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: 3, polygonOffsetUnits: 3
     });
     const g = makeBody3D(THREE, { ...mats, skin: mat });
     Object.values(g.parts).forEach((part) => { if (part !== g.parts.head) scene.add(part); });
+    g.onSkin((skin) => { scene.add(skin); skin.castShadow = false; skin.receiveShadow = false; skin.renderOrder = 4; });
     g.skinList.forEach((m) => { m.castShadow = false; m.receiveShadow = false; m.renderOrder = 4; });
     g.mat = mat;
     return g;
@@ -1427,8 +1705,9 @@ function createViewer3D(container, mode) {
     // Breathing: the ribcage swells a little.
     const breath = 1 + 0.018 * Math.sin(now / 650);
     body.parts.upperTorso.scale.x = breath; body.parts.upperTorso.scale.z = 1 + 0.009 * Math.sin(now / 650);
-    camera.position.set(target.x + Math.sin(yaw) * Math.cos(pitch) * dist, target.y + Math.sin(pitch) * dist, target.z + Math.cos(yaw) * Math.cos(pitch) * dist);
-    camera.lookAt(target);
+    const aim = closeUp ? closeUp.at : target, d = closeUp ? dist / closeUp.zoom : dist;
+    camera.position.set(aim.x + Math.sin(yaw) * Math.cos(pitch) * d, aim.y + Math.sin(pitch) * d, aim.z + Math.cos(yaw) * Math.cos(pitch) * d);
+    camera.lookAt(aim);
     camera.updateMatrixWorld();
     updateFeedback(now, k);
     if (hoverAt && frame % 3 === 0) {
@@ -1440,7 +1719,7 @@ function createViewer3D(container, mode) {
     renderer.render(scene, camera);
   }
 
-  let bodyTop = 180;
+  let bodyTop = 180, closeUp = null;
   function setExercise(next) {
     ex = next;
     form = (typeof FORM !== "undefined" ? FORM : {})[ex.name] || null;
@@ -1481,6 +1760,9 @@ function createViewer3D(container, mode) {
     setExercise,
     analysis: null, // after setExercise on a mistake: { label, your, optimal } for the biggest difference
     resetView() { yaw = VIEW3D.yaw; pitch = VIEW3D.pitch; },
+    // Turn the camera to a given angle (radians around the body, and up/down).
+    // zoom > 1 moves in on a point atY above the framed center (for close-ups of the body).
+    setView(y, p, zoom, atY) { yaw = y; if (p != null) pitch = p; closeUp = zoom > 1 ? { zoom, at: new THREE.Vector3(target.x, target.y + (atY || 0), target.z) } : null; },
     // Show one muscle on its own (null for all the exercise's muscles).
     focusMuscle(id) { focusId = id || null; if (ex) setActivation(); },
     // Show or hide the optimal-form ghost over a mistake.
