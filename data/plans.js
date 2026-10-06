@@ -33,6 +33,7 @@ const PLANS = [
 
 // The three visual styles. Each id matches a block in styles/themes.css.
 const STYLES = [
+  { id: "lab", name: "Biomech Lab" },
   { id: "plate", name: "Iron Plate" },
   { id: "chalk", name: "Chalkboard" },
   { id: "clean", name: "Clean Studio" }

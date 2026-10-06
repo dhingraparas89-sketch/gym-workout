@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rep Sheet</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@400;600;700&family=Big+Shoulders+Display:wght@700;900&family=Barlow:wght@400;500;600&family=Familjen+Grotesk:wght@500;700&family=Manrope:wght@400;500;700&family=IBM+Plex+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@400;600;700&family=Big+Shoulders+Display:wght@700;900&family=Barlow:wght@400;500;600&family=Familjen+Grotesk:wght@500;700&family=Manrope:wght@400;500;700&family=IBM+Plex+Mono:wght@500&family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@500;600;700&family=JetBrains+Mono:wght@500&display=swap">
 <link rel="stylesheet" href="styles/base.css">
 <link rel="stylesheet" href="styles/themes.css">
 </head>
-<body data-style="plate">
+<body data-style="lab">
 <!-- APP START -->
 <div class="page">
   <header class="topbar">
@@ -25,10 +25,10 @@
   <section class="hero">
     <div class="hero-text">
       <h1>Lift it right</h1>
-      <p>Every exercise shows the muscles it works and how it should look. Green is correct form. Red is the mistake to avoid.</p>
+      <p>Every exercise analyzed on a 3D anatomical model: optimal form, the exact correction for the common mistake, and the muscles at work along their fibers.</p>
       <div class="legend">
-        <span><i class="sw sw-good"></i>Correct form</span>
-        <span><i class="sw sw-bad"></i>Common mistake</span>
+        <span><i class="sw sw-good"></i>Optimal form</span>
+        <span><i class="sw sw-bad"></i>Correction</span>
         <span><i class="sw sw-primary"></i>Main muscles</span>
         <span><i class="sw sw-secondary"></i>Helping muscles</span>
       </div>
@@ -74,6 +74,7 @@
 </div>
 <!-- APP END -->
 <script src="data/exercises.js"></script>
+<script src="data/form.js"></script>
 <script src="data/plans.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 <script src="js/figure.js"></script>

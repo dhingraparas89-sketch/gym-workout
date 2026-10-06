@@ -16,10 +16,12 @@ const VIEW3D = {
   hipHalf: 8.5,
   yaw: 0.62,      // default camera angle around the figure (radians from a pure side view)
   pitch: 0.12,
-  skin: "#45484d",     // matte charcoal mannequin
-  active: "#33b4ff",   // muscle activation (main movers full strength, helpers softer)
-  good: "#1fe36a",     // bright highlight colors, independent of the page style
-  bad: "#ff2d2d"
+  skin: "#45484d",       // matte charcoal mannequin
+  active: "#2ee6c4",     // muscle activation on the optimal form (main movers full, helpers softer)
+  activeBad: "#4aa8ff",  // muscle activation on the mistake
+  compensate: "#ffad33", // muscles taking over the work in a mistake
+  good: "#2be0a8",       // optimal form: teal-green
+  bad: "#ff5a3c"         // corrections: red-orange
 };
 
 function css(name, fallback) {
@@ -354,7 +356,7 @@ function makeBody3D(THREE, mats) {
       [null, -0.9, 12.2, 0, 1.6, 2.6, 3.4, null, 1.0]                   // toes
     ]);
   });
-  return { parts, skinMeshes, skinList, hands, setHands: (grip) => Object.values(hands).forEach((h) => setHand(h, grip)) };
+  return { parts, skinMeshes, skinList, hands, handQ: { R: new THREE.Quaternion(), L: new THREE.Quaternion() }, setHands: (grip) => Object.values(hands).forEach((h) => setHand(h, grip)) };
 }
 
 // ---------- Viewer ----------
@@ -405,15 +407,28 @@ function createViewer3D(container, mode) {
   const col = (name, fb) => new THREE.Color(css(name, fb));
   // Skin shader: fine fiber striations along each muscle's fiber direction, darker grooves where
   // muscles meet, and activation light that pulses along the fibers toward the attachment.
-  const fiberUniforms = { uTime: { value: 0 }, uEffort: { value: 1 }, uActColor: { value: new THREE.Color(VIEW3D.active) } };
+  // Per viewer: activation color (teal on the optimal form, blue on the mistake), the color of
+  // muscles that take over in a mistake, the energy rim around a correct body, and the scan band
+  // that sweeps up the body when an exercise is first analyzed.
+  const fiberUniforms = {
+    uTime: { value: 0 }, uEffort: { value: 1 }, uActScale: { value: 0 },
+    uActColor: { value: new THREE.Color(mode === "bad" ? VIEW3D.activeBad : VIEW3D.active) },
+    uCompColor: { value: new THREE.Color(VIEW3D.compensate) },
+    uRim: { value: 0 }, uRimColor: { value: new THREE.Color(mode === "bad" ? VIEW3D.bad : VIEW3D.good) },
+    uScanY: { value: -999 }, uScanColor: { value: new THREE.Color(mode === "bad" ? VIEW3D.bad : VIEW3D.good) }
+  };
   function patchSkin(mat) {
     mat.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, fiberUniforms);
       shader.vertexShader = shader.vertexShader
-        .replace("#include <common>", "#include <common>\nattribute vec4 fib;\nattribute float act;\nvarying vec4 vFib;\nvarying float vAct;")
-        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFib = fib; vAct = act;");
+        .replace("#include <common>", "#include <common>\nattribute vec4 fib;\nattribute float act;\nvarying vec4 vFib;\nvarying float vAct;\nvarying float vWorldY;")
+        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFib = fib; vAct = act;")
+        .replace("#include <project_vertex>", "#include <project_vertex>\nvWorldY = (modelMatrix * vec4(transformed, 1.0)).y;");
       shader.fragmentShader = shader.fragmentShader
-        .replace("#include <common>", "#include <common>\nvarying vec4 vFib;\nvarying float vAct;\nuniform float uTime;\nuniform float uEffort;\nuniform vec3 uActColor;")
+        .replace("#include <common>", `#include <common>
+          varying vec4 vFib; varying float vAct; varying float vWorldY;
+          uniform float uTime, uEffort, uActScale, uRim, uScanY;
+          uniform vec3 uActColor, uCompColor, uRimColor, uScanColor;`)
         .replace("#include <emissivemap_fragment>", `#include <emissivemap_fragment>
           {
             // vFib: x = distance from the attachment, y = fiber index, z = how much muscle is on top, w = muscle boundary.
@@ -427,16 +442,24 @@ function createViewer3D(container, mode) {
             float vis = vFib.z * (1.0 - smoothstep(0.3, 0.6, fw));
             float sep = vFib.w;
             diffuseColor.rgb *= (1.0 - 0.3 * groove * vis) * (1.0 + vis * (0.1 * rnd - 0.04)) * (1.0 - 0.55 * sep);
-            float a = vAct * uEffort;
+            // act > 0: a worked muscle; act < 0: a muscle taking over the work in a mistake.
+            float a = abs(vAct) * uEffort * uActScale;
+            vec3 actColor = vAct < 0.0 ? uCompColor : uActColor;
             if (a > 0.001) {
               // A soft wave of contraction runs along each fiber toward its attachment (u = 0);
               // neighbouring fibers fire slightly out of step.
               float wave = 0.5 + 0.5 * sin(vFib.x * 0.22 + uTime * 3.0 + rnd * 1.2);
               float ridge = 1.0 - 0.85 * groove * vis;
               float e = a * (0.45 + 0.55 * wave) * ridge * (0.8 + 0.3 * rnd * vis) * (1.0 - 0.75 * sep);
-              diffuseColor.rgb = mix(diffuseColor.rgb, uActColor * 0.3, min(1.0, a * 0.5));
-              totalEmissiveRadiance += uActColor * e * 1.05;
+              diffuseColor.rgb = mix(diffuseColor.rgb, actColor * 0.3, min(1.0, a * 0.5));
+              totalEmissiveRadiance += actColor * e * 1.05;
             }
+            // Energy rim: a soft edge light around the whole body.
+            float rim = pow(1.0 - abs(dot(normal, normalize(vViewPosition))), 3.0);
+            totalEmissiveRadiance += uRimColor * rim * uRim;
+            // Scan band sweeping up the body.
+            float band = exp(-pow((vWorldY - uScanY) / 3.5, 2.0));
+            totalEmissiveRadiance += uScanColor * band * (0.35 + 0.65 * rim) * 0.9;
           }`);
     };
     return mat;
@@ -488,24 +511,17 @@ function createViewer3D(container, mode) {
   const equipment = new THREE.Group();
   scene.add(equipment);
 
-  const highlightColor = new THREE.Color(mode === "bad" ? VIEW3D.bad : VIEW3D.good);
-  const rings = [], outlines = [];
-  // A glowing shell just outside a highlighted body part.
-  const outlineMat = new THREE.ShaderMaterial({
-    uniforms: { color: { value: highlightColor }, opacity: { value: 0.55 } },
-    vertexShader: "varying float vRim; void main(){ vec3 n = normalize(normalMatrix * normal); vec4 mv = modelViewMatrix * vec4(position + normal * 0.9, 1.0); vRim = 1.0 - abs(dot(n, normalize(-mv.xyz))); gl_Position = projectionMatrix * mv; }",
-    fragmentShader: "uniform vec3 color; uniform float opacity; varying float vRim; void main(){ gl_FragColor = vec4(color, opacity * (0.35 + 0.65 * vRim)); }",
-    transparent: true, depthWrite: false, side: THREE.BackSide, blending: THREE.AdditiveBlending
-  });
-  let ex = null, poseA = null, poseB = null, load = {}, glowSegs = [], glowJoints = [], focusId = null;
+  const GOOD = new THREE.Color(VIEW3D.good), BAD = new THREE.Color(VIEW3D.bad);
+  let ex = null, poseA = null, poseB = null, load = {}, focusId = null, form = null;
+  let ghostA = null, ghostB = null, ghostEnds = null, period = 4600, shownAt = 0, ghostOn = true;
   let lastT = 0, lastNow = 0, effort = 0.7;
   let yaw = VIEW3D.yaw, pitch = VIEW3D.pitch, target = new THREE.Vector3(0, 90, 0), dist = 400;
   let raf = 0, disposed = false, fig3 = {};
 
   // ----- Interaction -----
-  let drag = null;
+  let drag = null, downAt = null;
   const el = renderer.domElement;
-  el.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, y: e.clientY, yaw, pitch }; el.setPointerCapture(e.pointerId); });
+  el.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, y: e.clientY, yaw, pitch }; downAt = [e.clientX, e.clientY]; el.setPointerCapture(e.pointerId); });
   el.addEventListener("pointermove", (e) => {
     if (!drag) return;
     yaw = drag.yaw - (e.clientX - drag.x) * 0.01;
@@ -705,7 +721,7 @@ function createViewer3D(container, mode) {
       if (c.press) {
         c.levers.forEach((l) => {
           const s = l.side > 0 ? "R" : "L", hp = gripPoint(s);
-          const up = new THREE.Vector3(0, 0, 1).applyQuaternion(handQ[s]);   // the grip runs along the hand's z
+          const up = new THREE.Vector3(0, 0, 1).applyQuaternion(body.handQ[s]);   // the grip runs along the hand's z
           if (up.y < 0) up.negate();
           l.grip.position.copy(hp); l.grip.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
           const top = hp.clone().add(up.clone().multiplyScalar(5.5));
@@ -727,7 +743,7 @@ function createViewer3D(container, mode) {
       if (c.bar) { c.bar.position.copy(end); }
       if (c.handle) {
         c.handle.position.copy(end);
-        if (c.attach !== "mid") c.handle.quaternion.copy(handQ[c.attach]);
+        if (c.attach !== "mid") c.handle.quaternion.copy(body.handQ[c.attach]);
         knot = end.clone().add(pullDir.clone().multiplyScalar(4));
       }
       const lift = Math.max(0, Math.min(40, (knot.distanceTo(pulley) - c.rest) * 0.5));
@@ -889,7 +905,9 @@ function createViewer3D(container, mode) {
   }
   // Turn the hand for the grip: overhand (thumbs in), underhand (thumbs out), neutral (palms in),
   // or flat on the floor with the fingers pointing toward the head.
-  const handQ = { R: new THREE.Quaternion(), L: new THREE.Quaternion() };
+  // The body being posed: the character, or the "optimal form" ghost drawn over a mistake.
+  let cur = null, curEnds = null;
+  const handQOf = () => cur.handQ;
   const Z = new THREE.Vector3(0, 0, 1);
   function orientHand(h, fa, side, torsoQ) {
     const y = new THREE.Vector3(0, 1, 0).applyQuaternion(fa.quaternion);
@@ -912,20 +930,20 @@ function createViewer3D(container, mode) {
       z.normalize(); x = new THREE.Vector3().crossVectors(y, z);
     }
     const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
-    handQ[side > 0 ? "R" : "L"].copy(q);
+    handQOf()[side > 0 ? "R" : "L"].copy(q);
     h.pivot.quaternion.copy(fa.quaternion).invert().multiply(q);
   }
   function gripPoint(s) {
-    const fa = body.parts["forearm" + s];
+    const fa = cur.parts["forearm" + s];
     const wrist = new THREE.Vector3(0, 27, 0).applyQuaternion(fa.quaternion).add(fa.position);
     const off = (fig3.hand === "flat") ? new THREE.Vector3(-1.6, 4.5, 0) : new THREE.Vector3(-2.6, 6, 0);
-    return wrist.add(off.applyQuaternion(handQ[s]));
+    return wrist.add(off.applyQuaternion(handQOf()[s]));
   }
   // For reaching moves the hand travels on an arc around the shoulder between its start and end
   // positions, instead of following the 2D joint angles (which can swing the arm the long way round).
   let reachEnds = null;
   function reachTarget(pz, side) {
-    const ends = reachEnds.map(({ j, gz }) => ({
+    const ends = curEnds.map(({ j, gz }) => ({
       S: to3(j.shoulder).add(new THREE.Vector3(0, 0, side * VIEW3D.shoulderHalf)),
       H: to3(j.hand).setZ(side * (gz ?? fig3.ik.grip ?? 22))
     }));
@@ -935,20 +953,21 @@ function createViewer3D(container, mode) {
     const dir = ra.clone().normalize().applyQuaternion(new THREE.Quaternion().slerp(q, pz));
     return dir.multiplyScalar(len);
   }
-  function pose(p, t) {
+  function pose(p, t, target = body, ends = reachEnds) {
+    cur = target; curEnds = ends;
     const j = solveSide(p);
     const hip = to3(j.hip), shoulderC = to3(j.shoulder), mid = to3(j.spineMid);
     const lowerA = Math.atan2(mid.x - hip.x, mid.y - hip.y) * 180 / Math.PI;
     const upperA = Math.atan2(shoulderC.x - mid.x, shoulderC.y - mid.y) * 180 / Math.PI;
-    placeAngle(body.parts.lowerTorso, hip, lowerA);
+    placeAngle(cur.parts.lowerTorso, hip, lowerA);
     const lowLen = hip.distanceTo(mid);
-    body.parts.lowerTorso.scale.set(1, lowLen / 26, 1);
-    placeAngle(body.parts.upperTorso, mid, upperA);
-    body.parts.upperTorso.scale.set(1, shoulderC.distanceTo(mid) / 26, 1);
+    cur.parts.lowerTorso.scale.set(1, lowLen / 26, 1);
+    placeAngle(cur.parts.upperTorso, mid, upperA);
+    cur.parts.upperTorso.scale.set(1, shoulderC.distanceTo(mid) / 26, 1);
     const neckBase = shoulderC.clone().add(dir2(upperA).multiplyScalar(-1));
-    placeAngle(body.parts.neck, neckBase, p.neck ?? p.torso);
+    placeAngle(cur.parts.neck, neckBase, p.neck ?? p.torso);
 
-    const torsoQ = body.parts.upperTorso.quaternion;
+    const torsoQ = cur.parts.upperTorso.quaternion;
     const ik = fig3.ik, handMode = fig3.hand || "grip";
     const lateral = new THREE.Vector3(0, 0, 1);
     const abd = ((p.abd || 0) * Math.PI) / 180;
@@ -962,7 +981,7 @@ function createViewer3D(container, mode) {
         extra = new THREE.Quaternion().setFromAxisAngle(axis.normalize(), side * (p.abdAxis === "spine" ? -abd : abd));
       }
       const uaLen = ik ? 30 : 30 * (p.armsOut && !abd ? 0.8 : 1);
-      body.parts["upperArm" + s].scale.set(1, uaLen / 30, 1);
+      cur.parts["upperArm" + s].scale.set(1, uaLen / 30, 1);
       if (ik) {
         // Two-bone reach: the hand goes where the 2D pose puts it, at the grip width,
         // and the elbow bends toward the pole (out to the side, like a real press).
@@ -970,26 +989,27 @@ function createViewer3D(container, mode) {
           : to3(j.shoulder).add(new THREE.Vector3(0, 0, side * VIEW3D.shoulderHalf)).add(reachTarget(t, side));
         if (handMode === "flat") H.y = Math.max(H.y, 2.6);
         const pole = new THREE.Vector3(...(ik.pole || [-0.5, -0.6, 1])); pole.z *= side; pole.applyQuaternion(torsoQ);
-        solveArm(body.parts["upperArm" + s], body.parts["forearm" + s], sh, H, pole, handMode === "flat" ? 27 : 33);
+        solveArm(cur.parts["upperArm" + s], cur.parts["forearm" + s], sh, H, pole, handMode === "flat" ? 27 : 33);
       } else {
-        placeAngle(body.parts["upperArm" + s], sh, p.ua, extra);
-        const elbow = endOf(body.parts["upperArm" + s], uaLen);
-        placeAngle(body.parts["forearm" + s], elbow, p.fa, extra);
+        placeAngle(cur.parts["upperArm" + s], sh, p.ua, extra);
+        const elbow = endOf(cur.parts["upperArm" + s], uaLen);
+        placeAngle(cur.parts["forearm" + s], elbow, p.fa, extra);
       }
-      orientHand(body.hands[s], body.parts["forearm" + s], side, torsoQ);
+      orientHand(cur.hands[s], cur.parts["forearm" + s], side, torsoQ);
       const hip3 = hip.clone().add(lateral.clone().multiplyScalar(side * VIEW3D.hipHalf));
       const far = side < 0 && p.t2 != null;
       const thighDir = far ? p.t2 : p.thigh + 180;
       const shinDir = far ? p.s2 : p.shin + 180;
       const footDir = far ? (p.f2 ?? 90) : (p.foot ?? 90);
-      const legOut = fig3.legAbd ? new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0).applyQuaternion(body.parts.lowerTorso.quaternion), (-side * fig3.legAbd * Math.PI) / 180) : null;
-      placeAngle(body.parts["thigh" + s], hip3, thighDir, legOut);
-      const knee = endOf(body.parts["thigh" + s], 42);
-      placeAngle(body.parts["shin" + s], knee, shinDir, legOut);
-      const ankle = endOf(body.parts["shin" + s], 42);
-      placeAngle(body.parts["foot" + s], ankle, footDir, legOut);
+      const legOut = fig3.legAbd ? new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0).applyQuaternion(cur.parts.lowerTorso.quaternion), (-side * fig3.legAbd * Math.PI) / 180) : null;
+      placeAngle(cur.parts["thigh" + s], hip3, thighDir, legOut);
+      const knee = endOf(cur.parts["thigh" + s], 42);
+      placeAngle(cur.parts["shin" + s], knee, shinDir, legOut);
+      const ankle = endOf(cur.parts["shin" + s], 42);
+      placeAngle(cur.parts["foot" + s], ankle, footDir, legOut);
     });
 
+    if (target !== body) return;
     // Equipment that moves with the body.
     const handR = gripPoint("R"), handL = gripPoint("L");
     const L = ex.figure.load || {};
@@ -1002,7 +1022,7 @@ function createViewer3D(container, mode) {
     if (load.dbs) {
       [handR, handL].forEach((h, i) => {
         load.dbs[i].position.copy(h);
-        load.dbs[i].quaternion.copy(handQ[i ? "L" : "R"]);
+        load.dbs[i].quaternion.copy(body.handQ[i ? "L" : "R"]);
       });
     }
     if (load.cables) updateCables();
@@ -1011,73 +1031,331 @@ function createViewer3D(container, mode) {
       pos.setXYZ(0, load.from.x, load.from.y, load.from.z); pos.setXYZ(1, handR.x, handR.y, (handR.z + handL.z) / 2); pos.needsUpdate = true;
       load.handle.position.set(handR.x, handR.y, (handR.z + handL.z) / 2);
     }
-    if (load.roller) { const a = endOf(body.parts.shinR, 42); load.roller.position.set(a.x, a.y + 5, 0); }
+    if (load.roller) { const a = endOf(cur.parts.shinR, 42); load.roller.position.set(a.x, a.y + 5, 0); }
     if (load.plate) {
-      const ft = body.parts.footR, toe = endOf(ft, 9);
+      const ft = cur.parts.footR, toe = endOf(ft, 9);
       load.plate.position.copy(toe).add(new THREE.Vector3(-3, 0, 0).applyQuaternion(ft.quaternion)).setZ(0);
       load.plate.quaternion.copy(ft.quaternion);
     }
 
-    // Joint rings for the posture highlight.
-    const jointPos = {
-      knee: endOf(body.parts.thighR, 42), hip: hip.clone().setZ(VIEW3D.hipHalf), elbow: endOf(body.parts.upperArmR, uaLenOf(p)),
-      shoulder: body.parts.upperArmR.position, ankle: endOf(body.parts.shinR, 42), hand: handR,
-      spineMid: mid.clone().setZ(0), head: endOf(body.parts.neck, 15.5)
-    };
-    rings.forEach((r) => { const q = jointPos[r.userData.joint]; if (q) r.position.copy(q).setZ(q.z + 4); });
   }
-  const uaLenOf = (p) => 30 * (p.armsOut && !p.abd ? 0.8 : 1);
 
-  function setHighlights() {
-    // Reset.
-    body.skinList.forEach((m) => { m.material = mats.skin; });
-    rings.splice(0).forEach((r) => scene.remove(r));
-    glowSegs = []; glowJoints = [];
-    const hl = (mode === "bad" ? ex.bad.highlight : ex.good.highlight) || [];
-    const segMap = { spine: ["spine"], neck: ["neck"], upperArm: ["upperArm"], forearm: ["forearm"], arm: ["upperArm", "forearm"],
-      thigh: ["thigh"], shin: ["shin"], foot: ["foot"], leg: ["thigh", "shin"] };
-    const glowMat = patchSkin(mats.skin.clone());
-    glowMat.emissive = highlightColor.clone(); glowMat.emissiveIntensity = 0.55;
-    glowMat.color = new THREE.Color(1, 1, 1).lerp(highlightColor, 0.55);
-    hl.forEach((h) => (segMap[h] || []).forEach((sname) => glowSegs.push(sname)));
-    outlines.splice(0).forEach((o) => o.parent && o.parent.remove(o));
-    glowSegs.forEach((sname) => (body.skinMeshes[sname] || []).forEach((m) => {
-      m.material = glowMat;
-      const o = new THREE.Mesh(m.geometry, outlineMat); o.renderOrder = 5; m.add(o); outlines.push(o);
-    }));
-    hl.filter((h) => ["knee", "hip", "elbow", "shoulder", "ankle", "hand", "back", "head"].includes(h)).forEach((h) => {
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(9, 1.9, 14, 48),
-        new THREE.MeshBasicMaterial({ color: highlightColor, transparent: true, opacity: 1, depthTest: false, toneMapped: false }));
-      ring.renderOrder = 10; ring.userData.joint = h === "back" ? "spineMid" : h;
-      scene.add(ring); rings.push(ring);
-      const halo = new THREE.Mesh(new THREE.SphereGeometry(10, 20, 14),
-        new THREE.MeshBasicMaterial({ color: highlightColor, transparent: true, opacity: 0.3, depthWrite: false, toneMapped: false }));
-      ring.add(halo);
-      glowJoints.push(ring);
+  // ----- Form feedback -----
+  // Optimal form: a soft teal energy rim, the key joint line held correctly, muscles lit along their fibers.
+  // Mistake: a translucent "optimal form" ghost moves in sync over the body, and guides show exactly
+  // what is off: the joint line yours vs optimal, an arrow toward the correct position, motion
+  // paths for range errors, a motion trail and tempo meter for speed errors, and muscles that take
+  // over the work in amber.
+  const ghost = mode === "bad" ? makeGhost() : null;
+  function makeGhost() {
+    const mat = new THREE.ShaderMaterial({
+      uniforms: { color: { value: GOOD.clone() }, opacity: { value: 0 } },
+      vertexShader: "varying float vRim; void main(){ vec3 n = normalize(normalMatrix * normal); vec4 mv = modelViewMatrix * vec4(position, 1.0); vRim = 1.0 - abs(dot(n, normalize(-mv.xyz))); gl_Position = projectionMatrix * mv; }",
+      fragmentShader: "uniform vec3 color; uniform float opacity; varying float vRim; void main(){ gl_FragColor = vec4(color, opacity * (0.08 + 0.92 * pow(vRim, 2.0))); }",
+      transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: 3, polygonOffsetUnits: 3
     });
-    setActivation();
+    const g = makeBody3D(THREE, { ...mats, skin: mat });
+    Object.values(g.parts).forEach((part) => { if (part !== g.parts.head) scene.add(part); });
+    g.skinList.forEach((m) => { m.castShadow = false; m.receiveShadow = false; m.renderOrder = 4; });
+    g.mat = mat;
+    return g;
   }
+
+  const guides = new THREE.Group();
+  scene.add(guides);
+  const guideCyl = new THREE.CylinderGeometry(1, 1, 1, 12, 1, true).translate(0, 0.5, 0);
+  const dotGeo = new THREE.SphereGeometry(1, 16, 12);
+  const coneGeo = new THREE.ConeGeometry(1, 1, 18).translate(0, 0.5, 0);
+  const guideMat = (color, opacity) => new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthTest: false, depthWrite: false, toneMapped: false });
+  function segTo(m, a, b, r) {
+    const d = b.clone().sub(a), len = d.length();
+    m.position.copy(a);
+    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), len > 1e-6 ? d.divideScalar(len) : new THREE.Vector3(0, 1, 0));
+    m.scale.set(r, Math.max(len, 0.001), r);
+  }
+  // A joint line: thin bars between joints with a dot on each joint.
+  function makeChain(n, color, opacity, r) {
+    const mat = guideMat(color, 0);
+    const segs = [...Array(n - 1)].map(() => new THREE.Mesh(guideCyl, mat));
+    const dots = [...Array(n)].map(() => new THREE.Mesh(dotGeo, mat));
+    [...segs, ...dots].forEach((m) => { m.renderOrder = 12; guides.add(m); });
+    return {
+      mat, base: opacity,
+      set(pts) {
+        segs.forEach((sg, i) => segTo(sg, pts[i], pts[i + 1], r));
+        dots.forEach((d, i) => { d.position.copy(pts[i]); d.scale.setScalar(r * (i === 1 ? 3 : 2.2)); });
+      }
+    };
+  }
+  // Joint positions of the near (right) side, in world space.
+  function jointsOf(B) {
+    const P = B.parts, ua = P.upperArmR;
+    return {
+      hip: P.thighR.position.clone(), knee: endOf(P.thighR, 42), ankle: endOf(P.shinR, 42), toe: endOf(P.footR, 10),
+      shoulder: ua.position.clone(), elbow: endOf(ua, 30 * ua.scale.y), hand: endOf(P.forearmR, 29),
+      pelvis: P.lowerTorso.position.clone(), spine: P.upperTorso.position.clone(), neck: P.neck.position.clone(), head: endOf(P.neck, 15.5)
+    };
+  }
+  // The joint line that tells whether the form is right, per joint.
+  const CHAINS = {
+    knee: ["hip", "knee", "ankle"], ankle: ["knee", "ankle", "toe"], hip: ["neck", "pelvis", "knee"],
+    spine: ["pelvis", "spine", "neck", "head"], head: ["spine", "neck", "head"],
+    shoulder: ["spine", "shoulder", "elbow"], elbow: ["shoulder", "elbow", "hand"], hand: ["shoulder", "elbow", "hand"]
+  };
+  const KEY_POINT = { spine: "spine", head: "head", hand: "hand" };
+  const angleAt = (a, m, c) => THREE.MathUtils.radToDeg(a.clone().sub(m).angleTo(c.clone().sub(m)));
+  const METRIC = { knee: "Knee angle", ankle: "Ankle angle", hip: "Hip angle", shoulder: "Shoulder angle", elbow: "Elbow angle", hand: "Elbow angle", head: "Neck angle" };
+  function measure(J, joint) {
+    if (joint === "spine") {
+      return [["Trunk angle", THREE.MathUtils.radToDeg(J.neck.clone().sub(J.pelvis).angleTo(new THREE.Vector3(0, 1, 0)))],
+        ["Spine curve", 180 - angleAt(J.pelvis, J.spine, J.head)]];
+    }
+    const c = CHAINS[joint];
+    return [[METRIC[joint], angleAt(J[c[0]], J[c[1]], J[c[2]])]];
+  }
+
+  // HTML overlay: labels pinned to 3D points, the tempo meter and the muscle tooltip.
+  const hud = document.createElement("div");
+  hud.className = "v3-hud";
+  container.appendChild(hud);
+  function tag(text, kind) {
+    const t = document.createElement("span");
+    t.className = "v3-tag v3-tag-" + kind; t.textContent = text;
+    hud.appendChild(t);
+    return t;
+  }
+  const tip = document.createElement("div");
+  tip.className = "v3-tip"; tip.hidden = true;
+  hud.appendChild(tip);
+
+  let fb = null; // the guides built for the current exercise
+  function clearFeedback() {
+    while (guides.children.length) guides.remove(guides.children[0]);
+    hud.querySelectorAll(".v3-tag, .v3-tempo").forEach((n) => n.remove());
+    fb = null;
+  }
+  function tubeFor(points, color, r) {
+    const geo = new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), Math.max(24, points.length * 4), r, 8, false);
+    const m = new THREE.Mesh(geo, guideMat(color, 0));
+    m.renderOrder = 11; m.userData.count = geo.index.count; geo.setDrawRange(0, 0);
+    guides.add(m);
+    return m;
+  }
+
+  function setFeedback() {
+    clearFeedback();
+    const err = form && form.error;
+    if (!err) return;
+    const joint = CHAINS[err.joint] ? err.joint : "spine", chain = CHAINS[joint];
+    fb = { joint, chain, type: err.type, chains: [], tubes: [], tags: [] };
+    if (mode === "good") {
+      // The joint line that goes wrong in the mistake, shown held correctly.
+      fb.mine = makeChain(chain.length, GOOD, 0.75, 0.42);
+      return;
+    }
+    fb.mine = makeChain(chain.length, BAD, 0.95, 0.5);
+    fb.ideal = makeChain(chain.length, GOOD, 0.85, 0.42);
+    if (err.type !== "range") fb.tags.push([tag("Your form", "bad"), () => fb.yourAt], [tag("Optimal", "good"), () => fb.idealAt]);
+    // Arrow from where the joint is toward where it should be.
+    const arrowMat = guideMat(GOOD, 0);
+    fb.arrow = { shaft: new THREE.Mesh(guideCyl, arrowMat), head: new THREE.Mesh(coneGeo, arrowMat), mat: arrowMat };
+    fb.arrow.shaft.renderOrder = fb.arrow.head.renderOrder = 13;
+    guides.add(fb.arrow.shaft, fb.arrow.head);
+    // A gently pulsing ring around the joint at fault.
+    const ringMat = guideMat(BAD, 0);
+    fb.ring = new THREE.Mesh(new THREE.TorusGeometry(6.5, 0.55, 12, 48), ringMat);
+    fb.halo = new THREE.Mesh(dotGeo, guideMat(BAD, 0));
+    fb.ring.renderOrder = 14; fb.halo.renderOrder = 10;
+    guides.add(fb.ring, fb.halo);
+
+    // Sample the whole rep, yours and optimal: the biggest difference becomes the headline number,
+    // and the point that travels furthest becomes the motion path.
+    const cands = ["hand", "knee", "hip", "ankle", "head", "elbow"];
+    const yourPath = {}, idealPath = {};
+    cands.forEach((c) => { yourPath[c] = []; idealPath[c] = []; });
+    let best = null;
+    for (let i = 0; i <= 32; i++) {
+      const t = i / 32;
+      pose(lerpPose(ghostA, ghostB, t), fig3.ik ? t : null, ghost, ghostEnds);
+      const G = jointsOf(ghost);
+      pose(lerpPose(poseA, poseB, t), fig3.ik ? t : null);
+      const Y = jointsOf(body);
+      cands.forEach((c) => { yourPath[c].push(Y[c]); idealPath[c].push(G[c]); });
+      const g = measure(G, joint), y = measure(Y, joint);
+      g.forEach(([label, gv], k) => {
+        const d = Math.abs(y[k][1] - gv);
+        if (!best || d > best.d) best = { d, label, your: Math.round(y[k][1]), optimal: Math.round(gv) };
+      });
+    }
+    const pathLen = (pts) => pts.reduce((sum, q, i) => sum + (i ? q.distanceTo(pts[i - 1]) : 0), 0);
+    const trace = cands.reduce((a, c) => (pathLen(idealPath[c]) > pathLen(idealPath[a]) ? c : a), cands[0]);
+    fb.trace = trace;
+    viewer.analysis = err.type === "tempo"
+      ? { label: "Time for one rep", your: (period / 1000).toFixed(1) + " s", optimal: "4.6 s" }
+      : best && { label: best.label + " at the point of biggest difference", your: best.your + "°", optimal: best.optimal + "°" };
+
+    if (err.type === "range") {
+      const ideal = idealPath[trace], mine = yourPath[trace];
+      fb.tubes.push(tubeFor(ideal, GOOD, 0.75), tubeFor(mine, BAD, 0.85));
+      const endDot = (q, color) => { const d = new THREE.Mesh(dotGeo, guideMat(color, 0)); d.position.copy(q); d.scale.setScalar(1.9); d.renderOrder = 13; guides.add(d); fb.tubes.push(d); };
+      // End of range: the point of each path farthest from where the rep starts.
+      const far = (pts) => pts.reduce((a, q) => (q.distanceTo(pts[0]) > a.distanceTo(pts[0]) ? q : a), pts[0]);
+      const idealEnd = far(ideal), myEnd = far(mine);
+      endDot(idealEnd, GOOD); endDot(myEnd, BAD);
+      const shortRange = myEnd.distanceTo(mine[0]) < idealEnd.distanceTo(ideal[0]);
+      fb.tags.push([tag(shortRange ? "Stops early" : "Too far", "bad"), () => myEnd], [tag("Full range", "good"), () => idealEnd]);
+    }
+    if (err.type === "tempo") {
+      fb.trail = [...Array(16)].map(() => { const d = new THREE.Mesh(dotGeo, guideMat(BAD, 0)); d.renderOrder = 11; guides.add(d); return d; });
+      fb.trailPts = [];
+      const meter = document.createElement("div");
+      meter.className = "v3-tempo";
+      meter.innerHTML = `<span>Tempo</span><div class="v3-tempo-bar"><i></i><b></b></div><em>${err.tempo === "slow" ? "Too slow" : "Too fast"}</em>`;
+      hud.appendChild(meter);
+      fb.meter = meter.querySelector("b");
+      fb.maxSpeed = Math.max(...idealPath[trace].map((q, i, a) => (i ? q.distanceTo(a[i - 1]) : 0))) * 32 / 1.5;
+    }
+  }
+
+  // Per frame: move the guides with the bodies and fade them in after the scan.
+  const smooth = (x) => { const v = Math.min(1, Math.max(0, x)); return v * v * (3 - 2 * v); };
+  function updateFeedback(now, k) {
+    if (!fb) return;
+    const show = smooth((k - 650) / 450);
+    const Y = jointsOf(body);
+    fb.mine.set(fb.chain.map((n) => Y[n])); fb.mine.mat.opacity = fb.mine.base * show;
+    if (mode === "good") return;
+    const G = jointsOf(ghost);
+    fb.ideal.set(fb.chain.map((n) => G[n])); fb.ideal.mat.opacity = fb.ideal.base * show * (ghostOn ? 1 : 0.6);
+    const key = KEY_POINT[fb.joint] || fb.chain[1];
+    const at = Y[key], to = G[key];
+    fb.yourAt = Y[fb.chain[fb.chain.length - 1]]; fb.idealAt = G[fb.chain[fb.chain.length - 1]];
+    // Ring, gently breathing (no flashing).
+    const pulse = 0.5 + 0.5 * Math.sin(now / 520);
+    fb.ring.position.copy(at); fb.ring.lookAt(camera.position); fb.ring.scale.setScalar(1 + 0.07 * pulse);
+    fb.ring.material.opacity = (0.65 + 0.3 * pulse) * show;
+    fb.halo.position.copy(at); fb.halo.scale.setScalar(7.5 + pulse); fb.halo.material.opacity = (0.08 + 0.1 * pulse) * show;
+    // Correction arrow.
+    const d = to.clone().sub(at), len = d.length();
+    const vis = smooth((len - 2) / 3) * show;
+    fb.arrow.mat.opacity = 0.95 * vis;
+    if (len > 0.01) {
+      const L = Math.min(len, 20), dir = d.divideScalar(len), from = at.clone().add(dir.clone().multiplyScalar(2.5));
+      const tipAt = from.clone().add(dir.clone().multiplyScalar(Math.max(L - 2.5, 0.5)));
+      const neck = tipAt.clone().sub(dir.clone().multiplyScalar(3.2));
+      segTo(fb.arrow.shaft, from, neck, 0.45);
+      fb.arrow.head.position.copy(neck);
+      fb.arrow.head.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+      fb.arrow.head.scale.set(1.5, 3.2, 1.5);
+    }
+    // Motion paths draw themselves.
+    const draw = smooth((k - 700) / 900);
+    fb.tubes.forEach((m) => {
+      if (m.userData.count) m.geometry.setDrawRange(0, Math.floor(m.userData.count * draw / 3) * 3);
+      m.material.opacity = (m.userData.count ? 0.9 : 1) * smooth((k - 700) / 300);
+    });
+    // Motion trail and tempo meter.
+    if (fb.trail) {
+      const p = Y[fb.trace];
+      const speed = fb.trailPts.length ? p.distanceTo(fb.trailPts[0]) / Math.max(1, now - (fb.lastNow || now)) * 1000 : 0;
+      fb.lastNow = now;
+      fb.trailPts.unshift(p);
+      fb.trailPts.length = Math.min(fb.trailPts.length, fb.trail.length * 2);
+      fb.trail.forEach((dot, i) => {
+        const q = fb.trailPts[i * 2];
+        dot.visible = !!q;
+        if (q) { dot.position.copy(q); dot.scale.setScalar(1.3 * (1 - i / fb.trail.length)); dot.material.opacity = 0.75 * (1 - i / fb.trail.length) * show; }
+      });
+      fb.speed = (fb.speed || 0) + (speed - (fb.speed || 0)) * 0.15;
+      fb.meter.style.left = (100 * Math.min(1, fb.speed / (fb.maxSpeed * 2.2 || 1))).toFixed(1) + "%";
+    }
+    // Labels pinned to 3D points.
+    const w = container.clientWidth, h = container.clientHeight;
+    const placed = [];
+    fb.tags.forEach(([el, at3]) => {
+      const q = at3();
+      if (!q) return;
+      const v = q.clone().project(camera);
+      const x = (v.x + 1) / 2 * w;
+      let y = (1 - v.y) / 2 * h;
+      // Keep labels from sitting on top of each other.
+      placed.forEach(([px, py]) => { if (Math.abs(px - x) < 80 && Math.abs(py - y) < 22) y = py + (y >= py ? 24 : -24); });
+      placed.push([x, y]);
+      el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -150%)`;
+      el.style.opacity = show;
+    });
+  }
+
   // The body stays charcoal; worked muscles light up along their fibers. Main movers get full
-  // activation, helpers a softer one. focusId (from a muscle chip) shows just that muscle.
+  // activation, helpers a softer one. On a mistake the main movers do less and the muscles that
+  // take over glow amber. focusId (a picked muscle) shows just that muscle.
+  function levelOf(id) {
+    const err = form && form.error;
+    let lv = ex.primary.includes(id) ? 1 : ex.secondary.includes(id) ? 0.42 : 0;
+    if (mode === "bad" && err) {
+      lv *= err.type === "activation" ? 0.4 : 0.75;
+      if ((err.compensate || []).includes(id)) lv = -0.9;
+    }
+    if (focusId) return id === focusId ? (lv < 0 ? lv : Math.max(lv, 0.8)) : lv * 0.12;
+    return lv;
+  }
   function setActivation() {
     const skin = new THREE.Color(VIEW3D.skin), c = new THREE.Color();
-    const level = (id) => {
-      const lv = ex.primary.includes(id) ? 1 : ex.secondary.includes(id) ? 0.42 : 0;
-      return focusId ? (id === focusId ? Math.max(lv, 0.8) : lv * 0.12) : lv;
-    };
     body.skinList.forEach((m) => {
       const colors = m.geometry.attributes.color, act = m.geometry.attributes.act, w = m.userData.weights, tone = m.userData.tone;
-      const ids = Object.keys(w).map((id) => [w[id], level(id)]).filter(([, lv]) => lv > 0);
+      const ids = Object.keys(w).map((id) => [w[id], levelOf(id)]).filter(([, lv]) => lv !== 0);
       c.copy(skin).multiplyScalar(tone);
       for (let i = 0; i < colors.count; i++) {
         let a = 0;
-        ids.forEach(([wt, lv]) => { a = Math.max(a, wt[i] * lv); });
+        ids.forEach(([wt, lv]) => { const v = wt[i] * lv; if (Math.abs(v) > Math.abs(a)) a = v; });
         act.setX(i, a);
         colors.setXYZ(i, c.r, c.g, c.b);
       }
       colors.needsUpdate = true; act.needsUpdate = true;
     });
   }
+
+  // ----- Muscle hover and pick -----
+  const ray = new THREE.Raycaster(), mouse = new THREE.Vector2();
+  let hoverAt = null, pinned = null, hoverMiss = 0;
+  function muscleAt(clientX, clientY) {
+    const r = el.getBoundingClientRect();
+    mouse.set(((clientX - r.left) / r.width) * 2 - 1, -((clientY - r.top) / r.height) * 2 + 1);
+    ray.setFromCamera(mouse, camera);
+    const hit = ray.intersectObjects(body.skinList, false)[0];
+    if (!hit || !hit.face) return null;
+    const w = hit.object.userData.weights;
+    let best = null, bw = 0.35;
+    Object.keys(w).forEach((id) => {
+      const v = Math.max(w[id][hit.face.a], w[id][hit.face.b], w[id][hit.face.c]);
+      if (v > bw) { bw = v; best = id; }
+    });
+    return best;
+  }
+  function roleOf(id) {
+    const err = form && form.error;
+    if (mode === "bad" && err && (err.compensate || []).includes(id)) return "Taking over";
+    return ex.primary.includes(id) ? "Main mover · strong" : ex.secondary.includes(id) ? "Helper · moderate" : "Not targeted";
+  }
+  function showTip(id, x, y, full) {
+    if (!id) { tip.hidden = true; return; }
+    const r = container.getBoundingClientRect();
+    const info = typeof MUSCLE_INFO !== "undefined" ? MUSCLE_INFO[id] : null;
+    tip.innerHTML = `<b>${MUSCLES[id]}</b><span>${roleOf(id)}</span>${full && info ? `<p>${info.action}.</p><p class="v3-tip-fiber">${info.fibers}.</p>` : ""}`;
+    tip.hidden = false;
+    tip.classList.toggle("is-pinned", !!full);
+    tip.style.left = Math.min(Math.max(8, x - r.left + 14), r.width - 200) + "px";
+    tip.style.top = Math.max(8, y - r.top + 14) + "px";
+  }
+  el.addEventListener("pointermove", (e) => { if (!drag && !pinned) hoverAt = [e.clientX, e.clientY]; });
+  el.addEventListener("pointerleave", () => { hoverAt = null; if (!pinned) tip.hidden = true; });
+  el.addEventListener("pointerup", (e) => {
+    if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5) return;
+    const id = muscleAt(e.clientX, e.clientY);
+    pinned = id && id !== pinned ? id : null;
+    showTip(pinned, e.clientX, e.clientY, true);
+    container.dispatchEvent(new CustomEvent("muscle-pick", { bubbles: true, detail: { id: pinned } }));
+  });
 
   function frameCamera() {
     // Fit the whole rep: sample the motion and take its bounds.
@@ -1092,14 +1370,14 @@ function createViewer3D(container, mode) {
     floor.position.y = ex.figure.noFloor ? Math.min(0, Math.min(...ys) - 40) : 0;
     target.set((minX + maxX) / 2, (minY + maxY) / 2, 0);
     const size = Math.max(maxX - minX, maxY - minY, 120);
-    dist = size / 2 / Math.tan((camera.fov * Math.PI) / 360) * 1.25;
+    dist = size / 2 / Math.tan((camera.fov * Math.PI) / 360) * 1.12;
   }
 
   // Rep tempo like a real lifter: pause, controlled move to b, brief hold, slower return.
   const TEMPO = [[0.1, 0, 0], [0.42, 0, 1], [0.54, 1, 1], [1, 1, 0]]; // [end of phase, from, to]
   const smoother = (x) => x * x * x * (x * (x * 6 - 15) + 10);
-  function easeT(now) {
-    const raw = (now % 4600) / 4600;
+  function easeT(now, len = 4600) {
+    const raw = (now % len) / len;
     let start = 0;
     for (const [end, from, to] of TEMPO) {
       if (raw <= end) return from + (to - from) * smoother((raw - start) / (end - start));
@@ -1109,38 +1387,75 @@ function createViewer3D(container, mode) {
   }
   const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+  // Stage colors follow the page style (a dark lab stage or a light studio).
+  let frame = 0, stageDark = null, stageAt = -1e9;
+  function readStage() {
+    const dark = getComputedStyle(container).getPropertyValue("--stage").trim() === "dark";
+    if (dark === stageDark) return;
+    stageDark = dark;
+    mats.floor.color.set(dark ? 0x23272d : 0xe9e9e6);
+    rim.intensity = dark ? 2.2 : 1.3;
+    renderer.toneMappingExposure = dark ? 1.15 : 1.05;
+  }
+
   function tick(now) {
     if (disposed) return;
     raf = requestAnimationFrame(tick);
     if (!ex || !container.isConnected) return;
-    const t = reduce ? 1 : easeT(now);
+    frame++;
+    if (now - stageAt > 400) { stageAt = now; readStage(); }
+    if (!shownAt) shownAt = now;
+    const k = reduce ? 5000 : now - shownAt; // time since this exercise appeared
+    const t = reduce ? 1 : easeT(now, period);
+    if (ghost) {
+      const gt = reduce ? 1 : easeT(now);
+      pose(lerpPose(ghostA, ghostB, gt), fig3.ik ? gt : null, ghost, ghostEnds);
+      ghost.mat.uniforms.opacity.value = (ghostOn ? 0.42 : 0) * smooth((k - 450) / 650);
+    }
     pose(lerpPose(poseA, poseB, t), fig3.ik ? t : null);
     // Activation follows the effort of the rep: strongest while the weight is moving.
     const speed = lastNow ? Math.abs(t - lastT) / Math.max(1, now - lastNow) : 0;
     effort += ((reduce ? 1 : 0.55 + 0.45 * Math.min(1, speed / 0.0009)) - effort) * 0.08;
     lastT = t; lastNow = now;
-    fiberUniforms.uTime.value = reduce ? 0 : now / 1000; fiberUniforms.uEffort.value = effort;
+    const u = fiberUniforms;
+    u.uTime.value = reduce ? 0 : now / 1000; u.uEffort.value = effort;
+    // Appear: a scan band sweeps up the body, then the muscles fill with activation and,
+    // on correct form, a soft energy rim settles around the body.
+    u.uScanY.value = k < 1100 ? floor.position.y - 10 + (k / 1000) * (bodyTop - floor.position.y + 20) : -999;
+    u.uActScale.value = smooth((k - 350) / 700);
+    u.uRim.value = mode === "good" ? 0.22 + 0.5 * Math.exp(-Math.pow((k - 1100) / 450, 2)) * smooth(k / 900) + 0.1 * smooth((k - 900) / 600) : 0;
     // Breathing: the ribcage swells a little.
     const breath = 1 + 0.018 * Math.sin(now / 650);
     body.parts.upperTorso.scale.x = breath; body.parts.upperTorso.scale.z = 1 + 0.009 * Math.sin(now / 650);
-    const pulse = 0.4 + 0.25 * Math.sin(now / 260);
-    glowJoints.forEach((r) => { r.material.opacity = 0.75 + 0.25 * pulse; r.scale.setScalar(1 + 0.08 * pulse); r.lookAt(camera.position); });
-    outlineMat.uniforms.opacity.value = 0.45 + 0.3 * pulse;
     camera.position.set(target.x + Math.sin(yaw) * Math.cos(pitch) * dist, target.y + Math.sin(pitch) * dist, target.z + Math.cos(yaw) * Math.cos(pitch) * dist);
     camera.lookAt(target);
+    camera.updateMatrixWorld();
+    updateFeedback(now, k);
+    if (hoverAt && frame % 3 === 0) {
+      // The body is moving under the pointer, so keep the name up briefly between hits.
+      const [x, y] = hoverAt, id = muscleAt(x, y);
+      hoverMiss = id ? 0 : hoverMiss + 1;
+      if (id || hoverMiss > 8) showTip(id, x, y, false);
+    }
     renderer.render(scene, camera);
   }
 
+  let bodyTop = 180;
   function setExercise(next) {
     ex = next;
+    form = (typeof FORM !== "undefined" ? FORM : {})[ex.name] || null;
     const fig = { ...ex.figure, ...(ex.figure3d || {}) };
     fig3 = fig;
     const fault = mode === "bad" ? { ...ex.bad, ...(ex.bad3d || {}) } : null;
     const extra = { armsOut: fig.armsOut, abd: fig.abd, abdAxis: fig.abdAxis };
     poseA = { ...extra, ...fig.a, ...(fault && fault.a) };
     poseB = { ...extra, ...fig.b, ...(fault && fault.b) };
-    poseA.view = poseB.view = undefined;
+    ghostA = { ...extra, ...fig.a }; ghostB = { ...extra, ...fig.b };
+    poseA.view = poseB.view = ghostA.view = ghostB.view = undefined;
     reachEnds = [poseA, poseB].map((q) => ({ j: solveSide(q), gz: q.gz }));
+    ghostEnds = [ghostA, ghostB].map((q) => ({ j: solveSide(q), gz: q.gz }));
+    const err = form && form.error;
+    period = mode === "bad" && err && err.type === "tempo" ? (err.tempo === "slow" ? 8000 : 2300) : 4600;
     frameCamera();
     buildEquipment(fig);
     if (fig.station) {
@@ -1150,21 +1465,31 @@ function createViewer3D(container, mode) {
       target.set((target.x + c.x) / 2, Math.max(target.y, sz.y / 2 + floor.position.y), 0);
       dist = Math.max(dist, span / 2 / Math.tan((camera.fov * Math.PI) / 360) * 1.1);
     }
+    bodyTop = target.y + dist * Math.tan((camera.fov * Math.PI) / 360);
     body.setHands(!fig.hand || fig.hand === "grip");
-    setHighlights();
+    if (ghost) ghost.setHands(!fig.hand || fig.hand === "grip");
+    viewer.analysis = null;
+    pinned = null; tip.hidden = true; focusId = null;
+    setFeedback();
+    setActivation();
+    shownAt = 0;
     resize();
   }
 
   raf = requestAnimationFrame(tick);
-  return {
+  const viewer = {
     setExercise,
+    analysis: null, // after setExercise on a mistake: { label, your, optimal } for the biggest difference
     resetView() { yaw = VIEW3D.yaw; pitch = VIEW3D.pitch; },
     // Show one muscle on its own (null for all the exercise's muscles).
     focusMuscle(id) { focusId = id || null; if (ex) setActivation(); },
+    // Show or hide the optimal-form ghost over a mistake.
+    setGhost(on) { ghostOn = !!on; },
     dispose() {
       disposed = true; cancelAnimationFrame(raf); if (ro) ro.disconnect();
       renderer.dispose(); if (renderer.forceContextLoss) renderer.forceContextLoss();
-      el.remove();
+      el.remove(); hud.remove();
     }
   };
+  return viewer;
 }
