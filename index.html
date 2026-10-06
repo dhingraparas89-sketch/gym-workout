@@ -22,14 +22,23 @@
     </div>
   </header>
 
-  <section class="intro">
-    <h1>What to lift today</h1>
-    <p>Pick a weekly plan and follow the day you're on, or browse exercises by muscle group. Tick off each exercise as you finish it.</p>
+  <section class="hero">
+    <div class="hero-text">
+      <h1>Lift it right</h1>
+      <p>Every exercise shows the muscles it works and how it should look. Green is correct form. Red is the mistake to avoid.</p>
+      <div class="legend">
+        <span><i class="sw sw-good"></i>Correct form</span>
+        <span><i class="sw sw-bad"></i>Common mistake</span>
+        <span><i class="sw sw-primary"></i>Main muscles</span>
+        <span><i class="sw sw-secondary"></i>Helping muscles</span>
+      </div>
+    </div>
+    <div id="spotlight" class="spotlight"></div>
   </section>
 
   <nav class="view-tabs" role="tablist">
     <button type="button" class="view-tab" role="tab" data-view="plan">Workout plan</button>
-    <button type="button" class="view-tab" role="tab" data-view="muscles">By muscle group</button>
+    <button type="button" class="view-tab" role="tab" data-view="library">Exercises by muscle</button>
   </nav>
 
   <main>
@@ -38,16 +47,36 @@
       <div id="days" class="days"></div>
     </section>
 
-    <section id="view-muscles" hidden>
-      <div id="muscle-chips" class="chips"></div>
-      <div id="exercise-groups"></div>
+    <section id="view-library" hidden>
+      <div class="library">
+        <aside class="picker-panel">
+          <h2>Tap a muscle</h2>
+          <div id="muscle-map"></div>
+          <div id="muscle-chips" class="chips"></div>
+        </aside>
+        <div class="library-main">
+          <h2 id="library-title"></h2>
+          <div id="exercise-list" class="ex-grid"></div>
+        </div>
+      </div>
     </section>
   </main>
 
-  <footer class="foot">Sets × reps are starting points. Pick a weight you can finish every set with one or two reps left in the tank.</footer>
+  <footer class="foot">Sets × reps are starting points. Pick a weight you can finish every set with one or two reps left in the tank. Tap any exercise to see its form and muscles.</footer>
+</div>
+
+<div id="modal" class="modal" hidden>
+  <div class="modal-backdrop" data-close="1"></div>
+  <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="detail-title">
+    <button type="button" class="modal-close" data-close="1" aria-label="Close">×</button>
+    <div id="modal-body"></div>
+  </div>
 </div>
 <!-- APP END -->
-<script src="data.js"></script>
-<script src="app.js"></script>
+<script src="data/exercises.js"></script>
+<script src="data/plans.js"></script>
+<script src="js/figure.js"></script>
+<script src="js/bodymap.js"></script>
+<script src="js/app.js"></script>
 </body>
 </html>
