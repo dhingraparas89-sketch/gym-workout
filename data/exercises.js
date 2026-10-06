@@ -93,7 +93,7 @@ const EXERCISES = [
     good: { cue: "Start from a full hang and pull until your chin clears the bar.", highlight: ["arm"] },
     bad: { cue: "Kicking the legs and swinging for momentum. The lats only do part of the work.", highlight: ["hip", "thigh"],
       b: { thigh: -62, shin: 10, torso: -20 } },
-    figure: { noFloor: true, armsOut: true, props: [{ line: [40, 14, 170, 14], w: 6 }], load: { type: "none" },
+    figure: { noFloor: true, armsOut: true, abd: 28, props: [{ line: [40, 14, 170, 14], w: 6, axis: "z" }], load: { type: "none" },
       a: { x: 100, y: 14, anchor: "hand", foot: 160, shin: 70, thigh: -6, torso: -4, neck: 0, ua: 4, fa: 0 },
       b: { x: 100, y: 14, anchor: "hand", foot: 160, shin: 70, thigh: -6, torso: -8, neck: 0, ua: 172, fa: -8 } }
   },
@@ -113,7 +113,7 @@ const EXERCISES = [
     good: { cue: "Sit tall with a slight lean back. Lead with the elbows and bring the bar to your upper chest.", highlight: ["arm"] },
     bad: { cue: "Leaning far back turns it into a row and takes the work off the lats.", highlight: ["spine", "hip"],
       b: { torso: -42, neck: -30 } },
-    figure: { armsOut: true, props: [...SEAT(84, 142), { rect: [96, 112, 20, 7] }], load: { type: "cable", from: [104, 0] },
+    figure: { armsOut: true, abd: 30, props: [...SEAT(84, 142), { rect: [96, 112, 20, 7] }], load: { type: "cable", from: [104, 0] },
       a: { x: 84, y: 136, anchor: "hip", shin: 0, thigh: -90, torso: -8, neck: -4, ua: 8, fa: 4 },
       b: { x: 84, y: 136, anchor: "hip", shin: 0, thigh: -90, torso: -14, neck: -6, ua: 200, fa: 18 } }
   },
@@ -136,7 +136,7 @@ const EXERCISES = [
     good: { cue: "Brace, sit down until your hips reach knee height, chest up, knees track over the toes.", highlight: ["knee", "thigh"] },
     bad: { cue: "The chest drops and the back rounds at the bottom, so the lower back takes the load.", highlight: ["spine", "back"],
       b: { torso: 66, bend: 12, neck: 90 } },
-    figure: { armsOut: true, load: { type: "barbell", at: "shoulder", offset: [-7, -1], r: 12 },
+    figure: { armsOut: true, abd: 45, load: { type: "barbell", at: "shoulder", offset: [-7, -1], r: 18 },
       a: { ...STAND, x: 94, ua: 195, fa: -12 },
       b: { ...STAND, x: 94, shin: 32, thigh: -80, torso: 40, neck: 30, ua: 235, fa: 28 } }
   },
@@ -222,7 +222,11 @@ const EXERCISES = [
       b: { ua: 50, fa: 40 } },
     figure: { view: "front", load: { type: "dumbbell" },
       a: { y: 186, ua: 170, fa: 172 },
-      b: { y: 186, ua: 95, fa: 98 } }
+      b: { y: 186, ua: 95, fa: 98 } },
+    // In 3D the arms swing out to the side ("abd") instead of using the front view.
+    figure3d: { view: undefined, abd: 0,
+      a: { ...STAND, ua: 180, fa: 176, abd: 10 }, b: { ...STAND, ua: 180, fa: 176, abd: 86 } },
+    bad3d: { b: { abd: 128, fa: 160, neck: -6 } }
   },
   {
     name: "Face pull", group: "shoulders", equipment: "Cable", sets: 3, reps: "15", rest: 60,
@@ -230,7 +234,7 @@ const EXERCISES = [
     good: { cue: "Rope at eye height. Pull it toward your face, elbows high, and pull the ends apart.", highlight: ["upperArm", "elbow"] },
     bad: { cue: "Elbows drop below the shoulders and it turns into a row.", highlight: ["upperArm", "elbow"],
       b: { ua: 205, fa: 70 } },
-    figure: { armsOut: true, props: [{ line: [184, 20, 184, 188], w: 6 }], load: { type: "cable", from: [184, 44] },
+    figure: { armsOut: true, abd: 40, props: [{ line: [184, 20, 184, 188], w: 6 }], load: { type: "cable", from: [184, 44] },
       a: { ...STAND, x: 86, torso: -6, neck: -2, ua: 82, fa: 84 },
       b: { ...STAND, x: 86, torso: -6, neck: -2, ua: 258, fa: 22 } }
   },
@@ -242,7 +246,11 @@ const EXERCISES = [
       b: { ua: 55, fa: 45 } },
     figure: { view: "front", load: { type: "dumbbell" },
       a: { y: 186, tl: 0.45, hy: 112, knees: 3, ua: 178, fa: 178 },
-      b: { y: 186, tl: 0.45, hy: 112, knees: 3, ua: 92, fa: 96 } }
+      b: { y: 186, tl: 0.45, hy: 112, knees: 3, ua: 92, fa: 96 } },
+    figure3d: { view: undefined, abdAxis: "spine",
+      a: { ...STAND, shin: 12, thigh: -40, torso: 72, neck: 60, ua: 180, fa: 176, abd: 6 },
+      b: { ...STAND, shin: 12, thigh: -40, torso: 72, neck: 60, ua: 180, fa: 176, abd: 80 } },
+    bad3d: { a: { torso: 40, neck: 30 }, b: { torso: 40, neck: 30, abd: 100, fa: 150 } }
   },
 
   // ---------- Arms ----------
@@ -291,7 +299,7 @@ const EXERCISES = [
     good: { cue: "Stay upright and lower until the elbows reach 90°.", highlight: ["elbow", "upperArm"] },
     bad: { cue: "Sinking too deep with the shoulders rolling forward. Hard on the shoulder joint.", highlight: ["shoulder"],
       b: { torso: 30, neck: 40, ua: 275, fa: 150 } },
-    figure: { noFloor: true, props: [{ line: [60, 104, 150, 104], w: 6 }, { line: [140, 104, 140, 188], w: 5 }], load: { type: "none" },
+    figure: { noFloor: true, props: [{ line: [60, 104, 150, 104], w: 6, pair: true }, { line: [140, 104, 140, 188], w: 5, pair: true }], load: { type: "none" },
       a: { x: 106, y: 104, anchor: "hand", foot: 180, shin: 80, thigh: 10, torso: 2, neck: 4, ua: 180, fa: 180 },
       b: { x: 106, y: 104, anchor: "hand", foot: 180, shin: 80, thigh: 10, torso: 10, neck: 10, ua: 245, fa: 160 } }
   },
@@ -313,7 +321,7 @@ const EXERCISES = [
     good: { cue: "Curl the pelvis up as you raise the legs. No swinging.", highlight: ["hip", "thigh"] },
     bad: { cue: "Swinging and only lifting the knees halfway, so the hip flexors do the work.", highlight: ["hip", "spine"],
       b: { thigh: -40, shin: -10, torso: 14, bend: -6 } },
-    figure: { noFloor: true, props: [{ line: [40, 14, 170, 14], w: 6 }], load: { type: "none" },
+    figure: { noFloor: true, props: [{ line: [40, 14, 170, 14], w: 6, axis: "z" }], load: { type: "none" },
       a: { x: 100, y: 14, anchor: "hand", shin: 0, thigh: 0, torso: 0, neck: 0, ua: 0, fa: 0 },
       b: { x: 100, y: 14, anchor: "hand", shin: -20, thigh: -92, torso: -8, bend: 4, neck: 0, ua: -4, fa: 0 } }
   },

@@ -101,7 +101,7 @@ function lerpPose(a, b, t) {
     if (k === "shin") { q.shin = qa.shin + wrap(qb.shin - qa.shin, -180) * t; return; }
     q[k] = qa[k] == null ? qb[k] : mix(qa[k], qb[k]);
   });
-  const base = { ...b, x: mix(a.x, b.x), y: mix(a.y, b.y), bend: mix(a.bend || 0, b.bend || 0) };
+  const base = { ...b, x: mix(a.x, b.x), y: mix(a.y, b.y), bend: mix(a.bend || 0, b.bend || 0), abd: mix(a.abd || 0, b.abd || 0) };
   return fromJoints(q, base);
 }
 

@@ -58,10 +58,24 @@ function detailNode(ex, opts = {}) {
       </div>
     </div>`;
   const slots = wrap.querySelectorAll(".fig-slot");
-  slots[0].appendChild(createFigure(ex, "good", { animate: true }));
-  slots[1].appendChild(createFigure(ex, "bad", { animate: true }));
+  // 3D character when three.js loaded; the 2D figure otherwise.
+  const v3 = window.THREE && [["good", slots[0]], ["bad", slots[1]]].map(([mode, slot]) => {
+    slot.classList.add("fig-3d");
+    const v = createViewer3D(slot, mode);
+    v.setExercise(ex);
+    return v;
+  });
+  if (v3) {
+    const key = opts.compact ? "spotlight" : "detail";
+    (viewers3d[key] || []).forEach((v) => v.dispose());
+    viewers3d[key] = v3;
+  } else {
+    slots[0].appendChild(createFigure(ex, "good", { animate: true }));
+    slots[1].appendChild(createFigure(ex, "bad", { animate: true }));
+  }
   return wrap;
 }
+const viewers3d = {};
 
 let lastFocus = null;
 function openDetail(name) {
@@ -77,6 +91,8 @@ function openDetail(name) {
 }
 function closeDetail() {
   $("#modal").hidden = true;
+  (viewers3d.detail || []).forEach((v) => v.dispose());
+  viewers3d.detail = [];
   $("#modal-body").innerHTML = "";
   document.body.classList.remove("modal-open");
   if (lastFocus) lastFocus.focus();

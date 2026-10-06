@@ -29,7 +29,7 @@ body[data-style="plate"] {
   --m-primary: #1f4fbf; --m-secondary: #f2c21b; --on-primary: #ffffff;
   --muscle: #c9c9c3; --body-base: #deded9; --body-line: #ffffff;
   --skin: #e2a87f; --skin-far: #b9805b; --skin-shade: #cf8f66; --skin-line: #3b2416; --hair: #2b1d14; --shorts: #111111;
-  --equip: #8a8a85; --plate: #2a2a2a; --plate-edge: #111111;
+  --equip: #8a8a85; --plate: #2a2a2a; --plate-edge: #111111; --pad: #1c1c1c; --floor3d: #dcdcd7;
   --fig-bg: #f1f1ee;
   --pill-bg: #111111; --pill-fg: #ffffff;
   --scrim: rgba(17, 17, 17, .6);
@@ -64,7 +64,7 @@ body[data-style="chalk"] {
   --m-primary: #f0cf6a; --m-secondary: #8fb6d9; --on-primary: #1d2826;
   --muscle: #4a5b56; --body-base: #34433f; --body-line: #24312e;
   --skin: #d9a07a; --skin-far: #a8765a; --skin-shade: #c48a65; --skin-line: #1d1410; --hair: #2b1d14; --shorts: #3f5a74;
-  --equip: #6f7f79; --plate: #3d4b47; --plate-edge: #a9b3ab;
+  --equip: #7f8f89; --plate: #2e3a37; --plate-edge: #a9b3ab; --pad: #18211f; --floor3d: #2a3734;
   --fig-bg: #1d2826;
   --pill-bg: #34433f; --pill-fg: #eeebe2;
   --scrim: rgba(10, 15, 14, .7);
@@ -97,7 +97,7 @@ body[data-style="clean"] {
   --m-primary: #e0702a; --m-secondary: #f6c59b; --on-primary: #ffffff;
   --muscle: #d9dfdd; --body-base: #e8ecea; --body-line: #ffffff;
   --skin: #e6b08b; --skin-far: #c08e6c; --skin-shade: #d79c76; --skin-line: #4a2e1e; --hair: #3a2618; --shorts: #24302d;
-  --equip: #a3aeaa; --plate: #5c6a66; --plate-edge: #24302d;
+  --equip: #9aa5a1; --plate: #3d4845; --plate-edge: #24302d; --pad: #2f3b38; --floor3d: #e3e8e6;
   --fig-bg: #f3f5f4;
   --pill-bg: #e7f0ed; --pill-fg: #0f6b5c;
   --scrim: rgba(23, 35, 32, .45);
