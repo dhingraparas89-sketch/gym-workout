@@ -10,6 +10,26 @@ const MUSCLES = {
   abs: "Abs", obliques: "Obliques", glutes: "Glutes", quads: "Quads", hamstrings: "Hamstrings", calves: "Calves"
 };
 
+// How each muscle's fibers run and what pulling along them does.
+const MUSCLE_INFO = {
+  chest: { fibers: "Fan from the upper arm bone across to the collarbone and sternum", action: "Brings the upper arm across the body" },
+  shoulders: { fibers: "Front, side and rear fibers converge halfway down the outer arm", action: "Lifts the arm forward and out to the side" },
+  "rear-delts": { fibers: "Run from the shoulder blade forward to the outer arm", action: "Pulls the arm back and out" },
+  traps: { fibers: "Upper fibers run from the neck out to the shoulder tip; middle and lower fibers run in toward the spine", action: "Shrugs and squeezes the shoulder blades together" },
+  "upper-back": { fibers: "Slant from the spine down and out to the shoulder blade", action: "Pulls the shoulder blades back" },
+  lats: { fibers: "Fan from the low back and pelvis up to the front of the upper arm", action: "Pulls the arm down and back" },
+  "lower-back": { fibers: "Run straight up beside the spine", action: "Keeps the spine straight and extends it" },
+  biceps: { fibers: "Run lengthwise down the front of the arm to the elbow tendon", action: "Bends the elbow and turns the palm up" },
+  triceps: { fibers: "Run down the back of the arm to the point of the elbow", action: "Straightens the elbow" },
+  forearms: { fibers: "Run lengthwise from the elbow to the wrist tendons", action: "Grips and stabilizes the wrist" },
+  abs: { fibers: "Run straight up from the pelvis to the ribs, split into blocks", action: "Curls the ribs toward the pelvis and braces the trunk" },
+  obliques: { fibers: "Run diagonally down and forward around the waist", action: "Twists the trunk and resists twisting" },
+  glutes: { fibers: "Slant from the pelvis down and out to the top of the thigh bone", action: "Drives the hip forward to straighten it" },
+  quads: { fibers: "All four heads converge on the kneecap", action: "Straightens the knee" },
+  hamstrings: { fibers: "Run down the back of the thigh to below the knee", action: "Bends the knee and straightens the hip" },
+  calves: { fibers: "Both heads converge on the Achilles tendon", action: "Points the foot and lifts the heel" }
+};
+
 const GROUPS = [
   { id: "chest", name: "Chest" }, { id: "back", name: "Back" }, { id: "legs", name: "Legs" },
   { id: "shoulders", name: "Shoulders" }, { id: "arms", name: "Arms" }, { id: "core", name: "Core" }
@@ -376,3 +396,39 @@ const EXERCISES = [
       b: { x: 96, y: 178, anchor: "hip", foot: 80, shin: -80, thigh: 260, torso: -90, neck: -92, ua: -70, fa: -72, t2: 0, s2: 90, f2: 0 } }
   }
 ];
+
+// The joint movement each exercise trains (exercise -> movement -> muscles -> fibers).
+const MOVEMENTS = {
+  "Barbell bench press": "Upper arms press forward from the chest while the elbows straighten",
+  "Incline dumbbell press": "Upper arms press up and in at an incline while the elbows straighten",
+  "Cable fly": "Arms sweep together in front of the chest with the elbows held still",
+  "Machine chest press": "Upper arms press forward while the elbows straighten",
+  "Push-up": "The body moves as one plank while the arms press the floor away",
+  "Deadlift": "The hips drive forward and the knees straighten to stand up with the bar",
+  "Pull-up": "The arms pull down and back, lifting the body to the bar",
+  "Barbell row": "The elbows pull back past the body while the torso stays still",
+  "Lat pulldown": "The arms pull down and back toward the ribs",
+  "Seated cable row": "The elbows pull back and the shoulder blades squeeze together",
+  "Back squat": "Hips and knees bend together, then straighten to stand",
+  "Romanian deadlift": "The hips hinge back and forward with nearly straight knees",
+  "Leg press": "Hips and knees straighten to push the platform away",
+  "Walking lunge": "The front knee and hip straighten to drive up out of a long step",
+  "Leg curl": "The knee bends against the pad",
+  "Standing calf raise": "The ankle points to lift the heels",
+  "Overhead press": "The arms press straight up overhead",
+  "Arnold press": "The arms press overhead while the palms turn forward",
+  "Dumbbell lateral raise": "The arms lift out to the sides to shoulder height",
+  "Face pull": "The arms pull back and out with the elbows high",
+  "Rear delt fly": "The arms sweep back and out while bent over",
+  "Barbell curl": "The elbows bend while the upper arms stay still",
+  "Hammer curl": "The elbows bend with a neutral grip",
+  "Triceps rope pushdown": "The elbows straighten while the upper arms stay still",
+  "Skull crusher": "The elbows straighten above the face",
+  "Dips": "The elbows straighten to press the body up between the bars",
+  "Plank": "The trunk is held straight against gravity",
+  "Hanging leg raise": "The hips and lower spine curl the legs up",
+  "Cable crunch": "The spine curls the ribs down toward the pelvis",
+  "Pallof press": "The trunk resists the cable's twist while the arms press out",
+  "Dead bug": "The trunk stays still while opposite arm and leg reach out"
+};
+EXERCISES.forEach((ex) => { ex.movement = MOVEMENTS[ex.name]; });

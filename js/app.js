@@ -28,6 +28,11 @@ function musclePills(ex, max = 3) {
 }
 
 // ---------- Detail (used in the spotlight and the pop-up window) ----------
+// Muscle -> fiber direction -> activation level, for the detail view.
+function muscleItem(m, kind, level) {
+  const info = MUSCLE_INFO[m];
+  return `<li><i class="sw sw-${kind}"></i><span>${MUSCLES[m]} <em>${level}</em>${info ? `<small>${info.fibers}</small>` : ""}</span></li>`;
+}
 function detailNode(ex, opts = {}) {
   const wrap = document.createElement("div");
   wrap.className = "detail" + (opts.compact ? " is-compact" : "");
@@ -51,9 +56,10 @@ function detailNode(ex, opts = {}) {
       <div class="muscles-panel">
         <p class="verdict">Muscles worked</p>
         ${bodyMap({ primary: ex.primary, secondary: ex.secondary })}
+        ${ex.movement ? `<p class="movement"><span>Movement</span>${ex.movement}</p>` : ""}
         <ul class="muscle-list">
-          ${ex.primary.map((m) => `<li><i class="sw sw-primary"></i>${MUSCLES[m]}</li>`).join("")}
-          ${ex.secondary.map((m) => `<li><i class="sw sw-secondary"></i>${MUSCLES[m]}</li>`).join("")}
+          ${ex.primary.map((m) => muscleItem(m, "primary", "strong")).join("")}
+          ${ex.secondary.map((m) => muscleItem(m, "secondary", "moderate")).join("")}
         </ul>
       </div>
     </div>`;
