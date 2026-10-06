@@ -71,7 +71,7 @@ const EXERCISES = [
     good: { cue: "Body in one straight line from head to heels. Lower until your chest nearly touches the floor.", highlight: ["spine", "leg"] },
     bad: { cue: "Hips sag toward the floor, which loads the lower back instead of the chest.", highlight: ["hip", "spine"],
       a: { shin: 74, thigh: 74, torso: 54 }, b: { shin: 84, thigh: 84, torso: 66 } },
-    figure: { load: { type: "none" },
+    figure: { hand: "flat", load: { type: "none" },
       a: { x: 30, y: 180, foot: 165, shin: 68, thigh: 68, torso: 68, neck: 72, ua: 180, fa: 180 },
       b: { x: 30, y: 180, foot: 165, shin: 80, thigh: 80, torso: 80, neck: 84, ua: 235, fa: 126 } }
   },
@@ -311,7 +311,7 @@ const EXERCISES = [
     good: { cue: "Elbows under shoulders, ribs down, glutes tight. One straight line.", highlight: ["spine", "leg"] },
     bad: { cue: "Hips sag and the lower back arches.", highlight: ["hip", "spine"],
       a: { shin: 84, thigh: 84, torso: 64 }, b: { shin: 85, thigh: 85, torso: 63 } },
-    figure: { load: { type: "none" },
+    figure: { hand: "flat", load: { type: "none" },
       a: { x: 36, y: 182, foot: 165, shin: 78, thigh: 78, torso: 78, neck: 82, ua: 180, fa: 90 },
       b: { x: 36, y: 182, foot: 165, shin: 79, thigh: 79, torso: 79, neck: 83, ua: 180, fa: 90 } }
   },
@@ -351,7 +351,7 @@ const EXERCISES = [
     good: { cue: "Lower back stays flat on the floor as you reach the opposite arm and leg away.", highlight: ["spine"] },
     bad: { cue: "The lower back arches off the floor as the leg goes down.", highlight: ["spine", "back"],
       b: { bend: -10, torso: -84 } },
-    figure: { load: { type: "none" },
+    figure: { hand: "flat", load: { type: "none" },
       a: { x: 96, y: 178, anchor: "hip", foot: 0, shin: -90, thigh: 180, torso: -90, neck: -92, ua: 0, fa: 0, t2: 0, s2: 90, f2: 0 },
       b: { x: 96, y: 178, anchor: "hip", foot: 80, shin: -80, thigh: 260, torso: -90, neck: -92, ua: -70, fa: -72, t2: 0, s2: 90, f2: 0 } }
   }

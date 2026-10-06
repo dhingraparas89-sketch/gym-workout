@@ -15,7 +15,10 @@ const VIEW3D = {
   shoulderHalf: 15.5,
   hipHalf: 8.5,
   yaw: 0.62,      // default camera angle around the figure (radians from a pure side view)
-  pitch: 0.12
+  pitch: 0.12,
+  skin: "#575b61",     // dark gray mannequin
+  good: "#1fe36a",     // bright highlight colors, independent of the page style
+  bad: "#ff2d2d"
 };
 
 function css(name, fallback) {
@@ -146,6 +149,49 @@ function makeBody3D(THREE, mats) {
     group.add(m); skinList.push(m); (skinMeshes[key] = skinMeshes[key] || []).push(m);
   }
   function seg(name) { const g = new THREE.Group(); parts[name] = g; return g; }
+  function addSkin(group, key, geo) {
+    if (!geo.attributes.color) geo.setAttribute("color", new THREE.Float32BufferAttribute(new Float32Array(geo.attributes.position.count * 3).fill(1), 3));
+    const m = new THREE.Mesh(geo, mats.skin);
+    m.castShadow = true; m.userData.weights = {}; m.userData.tone = 1;
+    group.add(m); skinList.push(m); (skinMeshes[key] = skinMeshes[key] || []).push(m);
+    return m;
+  }
+  // Hand: a sculpted palm with four three-jointed fingers and a two-jointed thumb.
+  // The palm faces local -x (the a side); fingers curl toward it around local z.
+  const hands = {};
+  function capsule(r, len) { const geo = new THREE.CapsuleGeometry(r, len, 4, 12); geo.translate(0, len / 2, 0); return geo; }
+  function makeHand(fa, side, a) {
+    finish(fa, "forearm", ellipsoidGeo(0, 31.2, 0, 1.45, 4.6, 3.5), [
+      [null, a * 0.7, 28.6, -side * 2.3, 1.4, 2.8, 1.7, null, 1.0],   // thumb pad
+      [null, a * 0.5, 29.4, side * 2.3, 1.2, 3.2, 1.4, null, 1.0],    // little-finger side pad
+      [null, 0, 34.6, 0, 1.6, 1.2, 3.8, null, 0.8]                     // knuckles
+    ]);
+    const fingers = [];
+    // [z offset, y of knuckle, phalanx lengths, radius]
+    [[-2.75, 35.2, [4.0, 2.5, 1.9], 0.92], [-0.9, 35.6, [4.4, 2.8, 2.0], 0.95], [0.95, 35.3, [4.1, 2.6, 1.9], 0.9], [2.7, 34.6, [3.3, 2.0, 1.7], 0.8]]
+      .forEach(([z, y, lens, r]) => {
+        let parent = new THREE.Group(); parent.position.set(0, y, side * z); fa.add(parent);
+        const joints = [];
+        lens.forEach((len, i) => {
+          const j = i === 0 ? parent : new THREE.Group();
+          if (i > 0) { j.position.y = lens[i - 1]; parent.add(j); }
+          addSkin(j, "forearm", capsule(r * (1 - i * 0.1), len));
+          joints.push(j); parent = j;
+        });
+        fingers.push(joints);
+      });
+    const thumbBase = new THREE.Group(); thumbBase.position.set(a * 0.9, 29.2, -side * 3.0); fa.add(thumbBase);
+    const t2 = new THREE.Group(); t2.position.y = 3.2; thumbBase.add(t2);
+    addSkin(thumbBase, "forearm", capsule(1.15, 3.2)); addSkin(t2, "forearm", capsule(1.0, 2.6));
+    return { fingers, thumb: [thumbBase, t2], side };
+  }
+  // grip: fingers wrapped around a bar or handle; flat: open hand pressing on the floor.
+  function setHand(h, grip) {
+    const curl = grip ? [78, 88, 48] : [6, 6, 4];
+    h.fingers.forEach((joints) => joints.forEach((j, i) => { j.rotation.set(0, 0, (curl[i] * Math.PI) / 180); }));
+    h.thumb[0].rotation.set(h.side * (grip ? 0.55 : -0.6), 0, grip ? 0.95 : 0.2);
+    h.thumb[1].rotation.set(0, 0, grip ? 0.55 : 0.1);
+  }
 
   // Segments are built pointing up their local +y; on the trunk local +x is the front.
   // Pelvis, belly and lower back (hip -> middle of the spine, 26 units before scaling).
@@ -184,29 +230,9 @@ function makeBody3D(THREE, mats) {
       [null, 2.2, 4.4, 2.2, 1.5, 5.8, 1.4, [0.35, 0, -0.25], 1.0], [null, 2.2, 4.4, -2.2, 1.5, 5.8, 1.4, [-0.35, 0, -0.25], 1.0],
       ["traps", -3, 1, 0, 3, 5, 5.6, null, 2]
     ]);
+    // Head: a plain oval, like an anatomy mannequin.
     const head = new THREE.Group(); head.position.y = 15.5; g.add(head); parts.head = head;
-    finish(head, "head", ellipsoidGeo(-0.4, 0.8, 0, 8.2, 9.6, 7.6), [
-      [null, 3.4, -3.4, 0, 5, 5.8, 6.2, null, 2.2],                    // face
-      [null, 4.4, -7, 0, 3.8, 2.8, 4.8, null, 1.6],                     // jaw
-      [null, 7.2, -8.4, 0, 1.7, 1.6, 2.3, null, 1.0],                   // chin
-      [null, 6.6, 2.7, 0, 1.6, 1.2, 5, null, 1.0],                      // brow
-      [null, 5.6, -1.4, 4.1, 2, 1.6, 2.2, null, 1.2], [null, 5.6, -1.4, -4.1, 2, 1.6, 2.2, null, 1.2], // cheekbones
-      [null, 8.4, -1.2, 0, 1.3, 2.6, 1.05, [0, 0, -0.28], 0.8],         // nose
-      [null, 8.6, -3.2, 0, 1, 0.8, 1.6, null, 0.6],                     // nose tip and nostrils
-      [null, 7.7, -5, 0, 1, 0.75, 2.4, null, 0.6],                      // lips
-      [null, -0.8, -0.4, 7.4, 1.3, 2.7, 1.1, null, 0.6], [null, -0.8, -0.4, -7.4, 1.3, 2.7, 1.1, null, 0.6] // ears
-    ]);
-    [-1, 1].forEach((s) => {
-      const eye = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 14), mats.eye);
-      eye.position.set(6.55, 1.0, s * 2.75); eye.scale.set(0.9, 0.85, 1.15); head.add(eye);
-      const iris = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), mats.dark);
-      iris.position.set(7.35, 1.0, s * 2.7); iris.scale.set(0.3, 0.5, 0.5); head.add(iris);
-    });
-    const lips = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 12), mats.lips);
-    lips.position.set(8.05, -5.05, 0); lips.scale.set(0.5, 0.35, 2.1); head.add(lips);
-    const hair = new THREE.Mesh(new THREE.SphereGeometry(1, 40, 24, 0, Math.PI * 2, 0, Math.PI * 0.5), mats.hair);
-    hair.scale.set(8.6, 10, 8.0); hair.position.set(-1.2, 1.7, 0); hair.rotation.z = 0.38; hair.castShadow = true;
-    head.add(hair);
+    finish(head, "head", ellipsoidGeo(0.4, 0.6, 0, 7.4, 9.6, 6.9), []);
   }
   // Arms and legs, one set per side (side = +1 near the camera, -1 far).
   [1, -1].forEach((side) => {
@@ -220,14 +246,10 @@ function makeBody3D(THREE, mats) {
       [null, 0, 30, 0, 3.4, 3.4, 3.4, null, 1.6]
     ]);
     const fa = seg("forearm" + s);
-    const faMesh = finish(fa, "forearm", latheGeo([[-1.5, 3.4], [3, 4.1], [8, 4], [16, 3.1], [23, 2.4], [27, 2.2]], 0.82), [
+    const faMesh = finish(fa, "forearm", latheGeo([[-1.5, 3.4], [3, 4.1], [8, 4], [16, 3.1], [23, 2.4], [27, 2.2], [29.5, 1.8], [30.5, 0.1]], 0.82), [
       ["forearms", -a * 0.8, 7, side * 1.3, 3.4, 8.4, 3.4, null, 1.4], ["forearms", a * 0.6, 8, -side * 1.2, 3.2, 8, 3.2, null, 1.4]
     ]);
-    finish(fa, "forearm", ellipsoidGeo(0, 29.6, 0, 1.6, 3.4, 3), [
-      [null, a * 0.9, 33.2, 0, 1.5, 2.4, 2.9, [0, 0, a * 0.5], 0.9],   // curled fingers
-      [null, 0, 31.6, 0, 1.9, 1.4, 3.2, null, 0.8],                     // knuckles
-      [null, a * 1.4, 28.6, side * 2.3, 1.05, 2.6, 1.05, [side * 0.4, 0, 0], 0.7] // thumb
-    ]);
+    hands[s] = makeHand(fa, side, a);
     vein(fa, "forearm", faMesh, [[3, 2.6], [8, 2.9], [13, 2.5], [18, 2.8], [23, 2.6]].map(([y, ang]) => [y, side > 0 ? ang : -ang + Math.PI * 0]), 0.3);
     const th = seg("thigh" + s);
     finish(th, "thigh", latheGeo([[-4, 8.2], [0, 8.8], [8, 8.2], [18, 7.2], [30, 5.8], [38, 4.8], [43, 4.4]], 0.94), [
@@ -252,7 +274,7 @@ function makeBody3D(THREE, mats) {
       [null, -0.9, 12.2, 0, 1.6, 2.6, 3.4, null, 1.0]                   // toes
     ]);
   });
-  return { parts, skinMeshes, skinList };
+  return { parts, skinMeshes, skinList, setHands: (grip) => Object.values(hands).forEach((h) => setHand(h, grip)) };
 }
 
 // ---------- Viewer ----------
@@ -312,8 +334,8 @@ function createViewer3D(container, mode) {
   const mats = {
     // Skin color comes from vertex colors (set in setHighlights); a fine noise bump gives it pores.
     skin: new THREE.MeshPhysicalMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.52, metalness: 0,
-      sheen: 0.35, sheenColor: new THREE.Color(0xffc9a8), sheenRoughness: 0.6, clearcoat: 0.14, clearcoatRoughness: 0.45,
-      envMapIntensity: 0.6, bumpMap: skinNoise(), bumpScale: 0.6 }),
+      sheen: 0.25, sheenColor: new THREE.Color(0xc8d0dc), sheenRoughness: 0.6, clearcoat: 0.22, clearcoatRoughness: 0.4,
+      envMapIntensity: 0.8, bumpMap: skinNoise(), bumpScale: 0.4 }),
     lips: new THREE.MeshStandardMaterial({ color: col("--skin-shade", "#c48a65").lerp(new THREE.Color(0x9a4a3c), 0.4), roughness: 0.5 }),
     eye: new THREE.MeshStandardMaterial({ color: 0xf2eee8, roughness: 0.2 }),
     shorts: new THREE.MeshStandardMaterial({ color: col("--shorts", "#222"), roughness: 0.85 }),
@@ -322,7 +344,10 @@ function createViewer3D(container, mode) {
     equip: new THREE.MeshStandardMaterial({ color: col("--equip", "#8a8a85"), roughness: 0.5, metalness: 0.5 }),
     pad: new THREE.MeshStandardMaterial({ color: col("--pad", "#2b2b2b"), roughness: 0.8 }),
     plate: new THREE.MeshStandardMaterial({ color: col("--plate", "#2a2a2a"), roughness: 0.6, metalness: 0.2 }),
-    floor: new THREE.MeshStandardMaterial({ color: col("--floor3d", "#d9dcda"), roughness: 1 })
+    floor: new THREE.MeshStandardMaterial({ color: 0xe9e9e6, roughness: 1 }),
+    frame: new THREE.MeshStandardMaterial({ color: 0x24262a, roughness: 0.35, metalness: 0.7 }),
+    rubber: new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 }),
+    upholstery: new THREE.MeshPhysicalMaterial({ color: 0x1b1b1d, roughness: 0.62, clearcoat: 0.35, clearcoatRoughness: 0.4 })
   };
 
   // Floor that fades out at the edge, so there is no hard horizon.
@@ -345,8 +370,15 @@ function createViewer3D(container, mode) {
   const equipment = new THREE.Group();
   scene.add(equipment);
 
-  const highlightColor = col(mode === "bad" ? "--bad" : "--good", mode === "bad" ? "#d9473b" : "#1e9a5f");
-  const rings = [];
+  const highlightColor = new THREE.Color(mode === "bad" ? VIEW3D.bad : VIEW3D.good);
+  const rings = [], outlines = [];
+  // A glowing shell just outside a highlighted body part.
+  const outlineMat = new THREE.ShaderMaterial({
+    uniforms: { color: { value: highlightColor }, opacity: { value: 0.55 } },
+    vertexShader: "varying float vRim; void main(){ vec3 n = normalize(normalMatrix * normal); vec4 mv = modelViewMatrix * vec4(position + normal * 0.9, 1.0); vRim = 1.0 - abs(dot(n, normalize(-mv.xyz))); gl_Position = projectionMatrix * mv; }",
+    fragmentShader: "uniform vec3 color; uniform float opacity; varying float vRim; void main(){ gl_FragColor = vec4(color, opacity * (0.35 + 0.65 * vRim)); }",
+    transparent: true, depthWrite: false, side: THREE.BackSide, blending: THREE.AdditiveBlending
+  });
   let ex = null, poseA = null, poseB = null, load = {}, glowSegs = [], glowJoints = [];
   let yaw = VIEW3D.yaw, pitch = VIEW3D.pitch, target = new THREE.Vector3(0, 90, 0), dist = 400;
   let raf = 0, disposed = false;
@@ -387,36 +419,101 @@ function createViewer3D(container, mode) {
   }
   const to3 = (p) => new THREE.Vector3(p[0] - 100, 189 - p[1], 0);
 
+  // Upholstered pad with rounded edges: length along x, thickness along y, width along z.
+  function padBox(len, thick, width) {
+    const r = Math.min(3, width / 4, len / 4), b = Math.min(1.6, thick / 3);
+    const w = width - 2 * b, l = len - 2 * b, shape = new THREE.Shape();
+    shape.moveTo(-l / 2 + r, -w / 2); shape.lineTo(l / 2 - r, -w / 2); shape.quadraticCurveTo(l / 2, -w / 2, l / 2, -w / 2 + r);
+    shape.lineTo(l / 2, w / 2 - r); shape.quadraticCurveTo(l / 2, w / 2, l / 2 - r, w / 2);
+    shape.lineTo(-l / 2 + r, w / 2); shape.quadraticCurveTo(-l / 2, w / 2, -l / 2, w / 2 - r);
+    shape.lineTo(-l / 2, -w / 2 + r); shape.quadraticCurveTo(-l / 2, -w / 2, -l / 2 + r, -w / 2);
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: Math.max(0.5, thick - 2 * b), bevelEnabled: true, bevelThickness: b, bevelSize: b, bevelSegments: 4, curveSegments: 8 });
+    geo.rotateX(Math.PI / 2); geo.center();
+    const m = new THREE.Mesh(geo, mats.upholstery);
+    m.castShadow = true; m.receiveShadow = true;
+    return m;
+  }
   function buildEquipment(fig) {
     clearEquipment();
-    (fig.props || []).forEach((pr) => {
+    const props = fig.props || [];
+    // Pads: rectangles, and thick lines that don't reach the floor (backrests, seats).
+    const isPad = (pr) => pr.rect || (pr.line && (pr.w || 0) >= 7 && Math.max(pr.line[1], pr.line[3]) < 186 && pr.axis !== "z");
+    const pads = props.filter(isPad);
+    const padTopAt = (x) => {                 // lowest pad underside above x, in 2D units
+      let best = null;
+      pads.forEach((pr) => {
+        if (pr.rect) { const [rx, ry, rw, rh] = pr.rect; if (x >= rx - 2 && x <= rx + rw + 2) best = Math.max(best ?? -1e9, ry + rh); }
+        else { const [x1, y1, x2, y2] = pr.line; const lo = Math.min(x1, x2), hi = Math.max(x1, x2);
+          if (x >= lo - 2 && x <= hi + 2) { const t = hi === lo ? 0 : (x - x1) / (x2 - x1); best = Math.max(best ?? -1e9, y1 + (y2 - y1) * t + 3.5); } }
+      });
+      return best;
+    };
+    const legs = [];
+    props.forEach((pr) => {
       if (pr.rect) {
         const [x, y, w, h] = pr.rect;
-        const box = new THREE.Mesh(new THREE.BoxGeometry(w, h, pr.depth || 30), mats.pad);
-        box.position.set(x + w / 2 - 100, 189 - (y + h / 2), 0);
-        box.castShadow = true; box.receiveShadow = true;
-        equipment.add(box);
+        const pad = padBox(w, h, w > 60 ? 28 : 26);
+        pad.position.set(x + w / 2 - 100, 189 - (y + h / 2), 0);
+        equipment.add(pad);
+        return;
       }
-      if (pr.line) {
-        const [x1, y1, x2, y2] = pr.line;
-        const p1 = to3([x1, y1]), p2 = to3([x2, y2]);
-        // Uprights that stand on the floor reach it even when the floor is lowered.
-        [p1, p2].forEach((q) => { if (q.y <= 4) q.y = Math.min(q.y, floor.position.y); });
-        const len = p1.distanceTo(p2), mid = p1.clone().add(p2).multiplyScalar(0.5);
-        if (pr.axis === "z") {
-          // A bar across the body (pull-up bar): runs left-right.
-          const bar = cyl(1.6, 110, mats.equip, "z"); bar.position.copy(mid); equipment.add(bar);
-          return;
-        }
-        const zs = pr.pair ? [-23, 23] : (len > 80 && Math.abs(x1 - x2) < 1 ? [-34] : [-13, 13]);
-        zs.forEach((z) => {
-          const c = cyl((pr.w || 6) / 2, len, mats.equip);
-          c.position.set(mid.x, mid.y, z);
-          c.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), p2.clone().sub(p1).normalize());
-          equipment.add(c);
+      if (!pr.line) return;
+      const [x1, y1, x2, y2] = pr.line;
+      const p1 = to3([x1, y1]), p2 = to3([x2, y2]);
+      if (isPad(pr)) {
+        // Backrest or seat pad laid along the line, with a steel rail behind it.
+        const len = p1.distanceTo(p2), dir = p2.clone().sub(p1).normalize();
+        const pad = padBox(len + 4, pr.w, 26);
+        pad.position.copy(p1.clone().add(p2).multiplyScalar(0.5));
+        pad.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), dir);
+        equipment.add(pad);
+        const rail = new THREE.Mesh(new THREE.BoxGeometry(len * 0.8, 3.6, 4.6), mats.frame);
+        const normal = new THREE.Vector3(-dir.y, dir.x, 0); if (normal.y > 0 || (normal.y === 0 && normal.x > 0)) normal.negate();
+        rail.position.copy(pad.position).add(normal.multiplyScalar(pr.w / 2 + 1.8));
+        rail.quaternion.copy(pad.quaternion); rail.castShadow = true;
+        equipment.add(rail);
+        return;
+      }
+      // Floor uprights under a pad become one steel leg with a wide stabilizer foot.
+      const vertical = Math.abs(x1 - x2) < 1, bottom = Math.max(y1, y2), top = Math.min(y1, y2);
+      const under = vertical && bottom >= 186 ? padTopAt(x1) : null;
+      if (under != null && Math.abs(under - top) < 7) {
+        legs.push({ x: x1 - 100, top: 189 - top });
+        const leg = new THREE.Mesh(new THREE.BoxGeometry(4.6, 189 - top - 3, 4.6), mats.frame);
+        leg.position.set(x1 - 100, 3 + (189 - top - 3) / 2, 0); leg.castShadow = true; equipment.add(leg);
+        const foot = new THREE.Mesh(new THREE.BoxGeometry(5.2, 3.6, 40), mats.frame);
+        foot.position.set(x1 - 100, 1.8 + 0.8, 0); foot.castShadow = true; foot.receiveShadow = true; equipment.add(foot);
+        [-1, 1].forEach((sz) => {
+          const cap = new THREE.Mesh(new THREE.BoxGeometry(6, 1.6, 3.4), mats.rubber);
+          cap.position.set(x1 - 100, 0.8, sz * 19); equipment.add(cap);
         });
+        return;
       }
+      const len = p1.distanceTo(p2), mid = p1.clone().add(p2).multiplyScalar(0.5);
+      // Uprights that stand on the floor reach it even when the floor is lowered.
+      [p1, p2].forEach((q) => { if (q.y <= 4) q.y = Math.min(q.y, floor.position.y); });
+      if (pr.axis === "z") {
+        // A bar across the body (pull-up bar): runs left-right.
+        const bar = cyl(1.6, 110, mats.equip, "z"); bar.position.copy(mid); equipment.add(bar);
+        return;
+      }
+      const zs = pr.pair ? [-23, 23] : (len > 80 && Math.abs(x1 - x2) < 1 ? [-34] : [-13, 13]);
+      const len2 = p1.distanceTo(p2), mid2 = p1.clone().add(p2).multiplyScalar(0.5);
+      zs.forEach((z) => {
+        const c = cyl((pr.w || 6) / 2, len2, mats.equip);
+        c.position.set(mid2.x, mid2.y, z);
+        c.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), p2.clone().sub(p1).normalize());
+        equipment.add(c);
+      });
     });
+    // A frame rail joins the legs under a long bench.
+    if (legs.length >= 2) {
+      legs.sort((p, q) => p.x - q.x);
+      const l0 = legs[0], l1 = legs[legs.length - 1];
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(l1.x - l0.x + 4.6, 4, 4.6), mats.frame);
+      rail.position.set((l0.x + l1.x) / 2, Math.min(l0.top, l1.top) - 2, 0); rail.castShadow = true;
+      equipment.add(rail);
+    }
     const L = fig.load || {};
     if (L.type === "barbell") {
       const g = new THREE.Group();
@@ -506,7 +603,8 @@ function createViewer3D(container, mode) {
     });
 
     // Equipment that moves with the body.
-    const handR = endOf(body.parts.forearmR, 30), handL = endOf(body.parts.forearmL, 30);
+    const grip = (g) => new THREE.Vector3(-2.6, 33, 0).applyQuaternion(g.quaternion).add(g.position);
+    const handR = grip(body.parts.forearmR), handL = grip(body.parts.forearmL);
     const L = ex.figure.load || {};
     if (load.bar) {
       if (L.at === "shoulder") {
@@ -542,6 +640,10 @@ function createViewer3D(container, mode) {
   }
   const uaLenOf = (p) => 30 * (p.armsOut && !p.abd ? 0.8 : 1);
 
+  function bright(c, minL) {
+    const hsl = {}; c.getHSL(hsl);
+    return new THREE.Color().setHSL(hsl.h, Math.max(hsl.s, 0.75), Math.max(hsl.l, minL));
+  }
   function setHighlights() {
     // Reset.
     body.skinList.forEach((m) => { m.material = mats.skin; });
@@ -551,22 +653,26 @@ function createViewer3D(container, mode) {
     const segMap = { spine: ["spine"], neck: ["neck"], upperArm: ["upperArm"], forearm: ["forearm"], arm: ["upperArm", "forearm"],
       thigh: ["thigh"], shin: ["shin"], foot: ["foot"], leg: ["thigh", "shin"] };
     const glowMat = mats.skin.clone();
-    glowMat.emissive = highlightColor.clone(); glowMat.emissiveIntensity = 0.28;
-    glowMat.color = new THREE.Color(1, 1, 1).lerp(highlightColor, 0.28);
+    glowMat.emissive = highlightColor.clone(); glowMat.emissiveIntensity = 0.75;
+    glowMat.color = new THREE.Color(1, 1, 1).lerp(highlightColor, 0.7);
     hl.forEach((h) => (segMap[h] || []).forEach((sname) => glowSegs.push(sname)));
-    glowSegs.forEach((sname) => (body.skinMeshes[sname] || []).forEach((m) => { m.material = glowMat; }));
+    outlines.splice(0).forEach((o) => o.parent && o.parent.remove(o));
+    glowSegs.forEach((sname) => (body.skinMeshes[sname] || []).forEach((m) => {
+      m.material = glowMat;
+      const o = new THREE.Mesh(m.geometry, outlineMat); o.renderOrder = 5; m.add(o); outlines.push(o);
+    }));
     hl.filter((h) => ["knee", "hip", "elbow", "shoulder", "ankle", "hand", "back", "head"].includes(h)).forEach((h) => {
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(9, 1.3, 12, 40),
-        new THREE.MeshBasicMaterial({ color: highlightColor, transparent: true, opacity: 0.9, depthTest: false }));
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(9, 1.9, 14, 48),
+        new THREE.MeshBasicMaterial({ color: highlightColor, transparent: true, opacity: 1, depthTest: false, toneMapped: false }));
       ring.renderOrder = 10; ring.userData.joint = h === "back" ? "spineMid" : h;
       scene.add(ring); rings.push(ring);
       const halo = new THREE.Mesh(new THREE.SphereGeometry(10, 20, 14),
-        new THREE.MeshBasicMaterial({ color: highlightColor, transparent: true, opacity: 0.22, depthWrite: false }));
+        new THREE.MeshBasicMaterial({ color: highlightColor, transparent: true, opacity: 0.3, depthWrite: false, toneMapped: false }));
       ring.add(halo);
       glowJoints.push(ring);
     });
     // Skin color per vertex, tinted where the worked muscles shape the body.
-    const skin = col("--skin", "#d9a07a"), prim = col("--m-primary", "#e0702a"), sec = col("--m-secondary", "#f6c59b");
+    const skin = new THREE.Color(VIEW3D.skin), prim = bright(col("--m-primary", "#e0702a"), 0.5), sec = bright(col("--m-secondary", "#f6c59b"), 0.58);
     const c = new THREE.Color();
     body.skinList.forEach((m) => {
       const colors = m.geometry.attributes.color, w = m.userData.weights, tone = m.userData.tone;
@@ -575,7 +681,7 @@ function createViewer3D(container, mode) {
         let p = 0, s = 0;
         pIds.forEach((id) => { p = Math.max(p, w[id][i]); });
         sIds.forEach((id) => { s = Math.max(s, w[id][i]); });
-        c.copy(skin).multiplyScalar(tone).lerp(prim, p * 0.72).lerp(sec, s * 0.6 * (1 - p));
+        c.copy(skin).multiplyScalar(tone).lerp(prim, p * 0.85).lerp(sec, s * 0.75 * (1 - p));
         colors.setXYZ(i, c.r, c.g, c.b);
       }
       colors.needsUpdate = true;
@@ -598,9 +704,17 @@ function createViewer3D(container, mode) {
     dist = size / 2 / Math.tan((camera.fov * Math.PI) / 360) * 1.25;
   }
 
+  // Rep tempo like a real lifter: pause, controlled move to b, brief hold, slower return.
+  const TEMPO = [[0.1, 0, 0], [0.42, 0, 1], [0.54, 1, 1], [1, 1, 0]]; // [end of phase, from, to]
+  const smoother = (x) => x * x * x * (x * (x * 6 - 15) + 10);
   function easeT(now) {
-    const period = 3200, raw = (now % period) / period;
-    return Math.min(1, Math.max(0, (0.5 - 0.5 * Math.cos(raw * 2 * Math.PI)) * 1.3 - 0.15));
+    const raw = (now % 4600) / 4600;
+    let start = 0;
+    for (const [end, from, to] of TEMPO) {
+      if (raw <= end) return from + (to - from) * smoother((raw - start) / (end - start));
+      start = end;
+    }
+    return 0;
   }
   const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -610,8 +724,12 @@ function createViewer3D(container, mode) {
     if (!ex || !container.isConnected) return;
     const t = reduce ? 1 : easeT(now);
     pose(lerpPose(poseA, poseB, t));
+    // Breathing: the ribcage swells a little.
+    const breath = 1 + 0.018 * Math.sin(now / 650);
+    body.parts.upperTorso.scale.x = breath; body.parts.upperTorso.scale.z = 1 + 0.009 * Math.sin(now / 650);
     const pulse = 0.4 + 0.25 * Math.sin(now / 260);
-    glowJoints.forEach((r) => { r.material.opacity = 0.6 + 0.4 * pulse; r.lookAt(camera.position); });
+    glowJoints.forEach((r) => { r.material.opacity = 0.75 + 0.25 * pulse; r.scale.setScalar(1 + 0.08 * pulse); r.lookAt(camera.position); });
+    outlineMat.uniforms.opacity.value = 0.45 + 0.3 * pulse;
     camera.position.set(target.x + Math.sin(yaw) * Math.cos(pitch) * dist, target.y + Math.sin(pitch) * dist, target.z + Math.cos(yaw) * Math.cos(pitch) * dist);
     camera.lookAt(target);
     renderer.render(scene, camera);
@@ -627,6 +745,7 @@ function createViewer3D(container, mode) {
     poseA.view = poseB.view = undefined;
     frameCamera();
     buildEquipment(fig);
+    body.setHands(fig.hand !== "flat");
     setHighlights();
     resize();
   }
