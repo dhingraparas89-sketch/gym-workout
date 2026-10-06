@@ -160,17 +160,20 @@ function makeBody3D(THREE, mats) {
   // The palm faces local -x (the a side); fingers curl toward it around local z.
   const hands = {};
   function capsule(r, len) { const geo = new THREE.CapsuleGeometry(r, len, 4, 12); geo.translate(0, len / 2, 0); return geo; }
+  // The hand hangs from a wrist pivot so it can turn (overhand, underhand, neutral) or bend flat.
+  // Hand frame: palm faces -x, fingers point +y, thumb on the +side z edge (a right hand for side +1).
   function makeHand(fa, side, a) {
-    finish(fa, "forearm", ellipsoidGeo(0, 31.2, 0, 1.45, 4.6, 3.5), [
-      [null, a * 0.7, 28.6, -side * 2.3, 1.4, 2.8, 1.7, null, 1.0],   // thumb pad
-      [null, a * 0.5, 29.4, side * 2.3, 1.2, 3.2, 1.4, null, 1.0],    // little-finger side pad
-      [null, 0, 34.6, 0, 1.6, 1.2, 3.8, null, 0.8]                     // knuckles
+    const pivot = new THREE.Group(); pivot.position.y = 27; fa.add(pivot);
+    finish(pivot, "forearm", ellipsoidGeo(0, 4.2, 0, 1.45, 4.6, 3.5), [
+      [null, a * 0.7, 1.6, side * 2.3, 1.4, 2.8, 1.7, null, 1.0],     // thumb pad
+      [null, a * 0.5, 2.4, -side * 2.3, 1.2, 3.2, 1.4, null, 1.0],    // little-finger side pad
+      [null, 0, 7.6, 0, 1.6, 1.2, 3.8, null, 0.8]                      // knuckles
     ]);
     const fingers = [];
-    // [z offset, y of knuckle, phalanx lengths, radius]
-    [[-2.75, 35.2, [4.0, 2.5, 1.9], 0.92], [-0.9, 35.6, [4.4, 2.8, 2.0], 0.95], [0.95, 35.3, [4.1, 2.6, 1.9], 0.9], [2.7, 34.6, [3.3, 2.0, 1.7], 0.8]]
+    // [z offset (index first, on the thumb side), y of knuckle, phalanx lengths, radius]
+    [[2.75, 8.2, [4.0, 2.5, 1.9], 0.92], [0.9, 8.6, [4.4, 2.8, 2.0], 0.95], [-0.95, 8.3, [4.1, 2.6, 1.9], 0.9], [-2.7, 7.6, [3.3, 2.0, 1.7], 0.8]]
       .forEach(([z, y, lens, r]) => {
-        let parent = new THREE.Group(); parent.position.set(0, y, side * z); fa.add(parent);
+        let parent = new THREE.Group(); parent.position.set(0, y, side * z); pivot.add(parent);
         const joints = [];
         lens.forEach((len, i) => {
           const j = i === 0 ? parent : new THREE.Group();
@@ -180,16 +183,16 @@ function makeBody3D(THREE, mats) {
         });
         fingers.push(joints);
       });
-    const thumbBase = new THREE.Group(); thumbBase.position.set(a * 0.9, 29.2, -side * 3.0); fa.add(thumbBase);
+    const thumbBase = new THREE.Group(); thumbBase.position.set(a * 0.9, 2.2, side * 3.0); pivot.add(thumbBase);
     const t2 = new THREE.Group(); t2.position.y = 3.2; thumbBase.add(t2);
     addSkin(thumbBase, "forearm", capsule(1.15, 3.2)); addSkin(t2, "forearm", capsule(1.0, 2.6));
-    return { fingers, thumb: [thumbBase, t2], side };
+    return { pivot, fingers, thumb: [thumbBase, t2], side };
   }
   // grip: fingers wrapped around a bar or handle; flat: open hand pressing on the floor.
   function setHand(h, grip) {
     const curl = grip ? [78, 88, 48] : [6, 6, 4];
     h.fingers.forEach((joints) => joints.forEach((j, i) => { j.rotation.set(0, 0, (curl[i] * Math.PI) / 180); }));
-    h.thumb[0].rotation.set(h.side * (grip ? 0.55 : -0.6), 0, grip ? 0.95 : 0.2);
+    h.thumb[0].rotation.set(-h.side * (grip ? 0.55 : -0.6), 0, grip ? 0.95 : 0.2);
     h.thumb[1].rotation.set(0, 0, grip ? 0.55 : 0.1);
   }
 
@@ -215,7 +218,16 @@ function makeBody3D(THREE, mats) {
   {
     const g = seg("upperTorso");
     finish(g, "spine", latheGeo([[-4, 11.8], [2, 12.2], [8, 13.4], [14, 14.6], [19, 15.4], [23, 14.6], [26, 11.4], [28.5, 6.5], [30, 0.1]], 0.64), [
-      ["chest", 7.2, 17.4, 6.2, 3.4, 5.6, 7.6, [0.25, 0, -0.15], 1.8], ["chest", 7.2, 17.4, -6.2, 3.4, 5.6, 7.6, [-0.25, 0, -0.15], 1.8],
+      ["chest", 7.2, 17.2, 7.6, 2.4, 4.6, 7.3, [-0.22, 0, 0], 2.0],       // pec: sternal head
+      ["chest", 6.4, 21.6, 8.0, 2.0, 2.8, 6.8, [0.15, 0, 0], 2.4],        // clavicular (upper) head
+      ["chest", 4.8, 19.8, 12.4, 2.3, 3.4, 3.6, [-0.4, 0, 0], 2.4],       // toward the armpit
+      ["chest", 3.6, 21.5, 14.4, 2.2, 2.8, 2.4, null, 2.4],                     // blends into the front delt
+      ["chest", 7.4, 13.6, 6.8, 2.2, 1.7, 6.6, [-0.25, 0, 0], 0.8],       // firm lower border
+      ["chest", 7.2, 17.2, -7.6, 2.4, 4.6, 7.3, [0.22, 0, 0], 2.0],       // pec: sternal head
+      ["chest", 6.4, 21.6, -8.0, 2.0, 2.8, 6.8, [-0.15, 0, 0], 2.4],        // clavicular (upper) head
+      ["chest", 4.8, 19.8, -12.4, 2.3, 3.4, 3.6, [0.4, 0, 0], 2.4],       // toward the armpit
+      ["chest", 3.6, 21.5, -14.4, 2.2, 2.8, 2.4, null, 2.4],                     // blends into the front delt
+      ["chest", 7.4, 13.6, -6.8, 2.2, 1.7, 6.6, [0.25, 0, 0], 0.8],       // firm lower border
       ["obliques", 3.8, 7, 11.6, 3.6, 5, 2.2, null, 1.0], ["obliques", 3.8, 7, -11.6, 3.6, 5, 2.2, null, 1.0],
       ["lats", -3, 11, 12.4, 5.6, 11, 3.4, [-0.25, 0, 0], 2.2], ["lats", -3, 11, -12.4, 5.6, 11, 3.4, [0.25, 0, 0], 2.2],
       ["upper-back", -6.8, 17, 5.4, 3, 7, 5.4, null, 1.4], ["upper-back", -6.8, 17, -5.4, 3, 7, 5.4, null, 1.4],
@@ -274,7 +286,7 @@ function makeBody3D(THREE, mats) {
       [null, -0.9, 12.2, 0, 1.6, 2.6, 3.4, null, 1.0]                   // toes
     ]);
   });
-  return { parts, skinMeshes, skinList, setHands: (grip) => Object.values(hands).forEach((h) => setHand(h, grip)) };
+  return { parts, skinMeshes, skinList, hands, setHands: (grip) => Object.values(hands).forEach((h) => setHand(h, grip)) };
 }
 
 // ---------- Viewer ----------
@@ -381,7 +393,7 @@ function createViewer3D(container, mode) {
   });
   let ex = null, poseA = null, poseB = null, load = {}, glowSegs = [], glowJoints = [];
   let yaw = VIEW3D.yaw, pitch = VIEW3D.pitch, target = new THREE.Vector3(0, 90, 0), dist = 400;
-  let raf = 0, disposed = false;
+  let raf = 0, disposed = false, fig3 = {};
 
   // ----- Interaction -----
   let drag = null;
@@ -560,7 +572,76 @@ function createViewer3D(container, mode) {
   }
   const endOf = (group, len) => new THREE.Vector3(0, len, 0).applyQuaternion(group.quaternion).add(group.position);
 
-  function pose(p) {
+  // Upper arm and forearm from shoulder S to hand H, elbow bending toward the pole.
+  function solveArm(ua, fa, S, H, pole, L2) {
+    const L1 = 30, toH = H.clone().sub(S);
+    const d = Math.min(Math.max(toH.length(), Math.abs(L1 - L2) + 0.5), L1 + L2 - 0.05);
+    const u = toH.normalize();
+    const w = pole.clone().sub(u.clone().multiplyScalar(pole.dot(u))).normalize();
+    const cosA = (L1 * L1 + d * d - L2 * L2) / (2 * L1 * d), sinA = Math.sqrt(Math.max(0, 1 - cosA * cosA));
+    const E = S.clone().add(u.clone().multiplyScalar(L1 * cosA)).add(w.clone().multiplyScalar(L1 * sinA));
+    const Hd = S.clone().add(u.clone().multiplyScalar(d));
+    setBone(ua, S, E.clone().sub(S).normalize(), w);
+    setBone(fa, E, Hd.sub(E).normalize(), w);
+  }
+  // Bone along y; local +x leans toward hint (the elbow side), so the biceps faces away from it.
+  function setBone(g, at, y, hint) {
+    const x = hint.clone().sub(y.clone().multiplyScalar(hint.dot(y)));
+    if (x.lengthSq() < 1e-6) x.set(1, 0, 0).sub(y.clone().multiplyScalar(y.x));
+    x.normalize();
+    const z = new THREE.Vector3().crossVectors(x, y);
+    g.position.copy(at);
+    g.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
+  }
+  // Turn the hand for the grip: overhand (thumbs in), underhand (thumbs out), neutral (palms in),
+  // or flat on the floor with the fingers pointing toward the head.
+  const handQ = { R: new THREE.Quaternion(), L: new THREE.Quaternion() };
+  const Z = new THREE.Vector3(0, 0, 1);
+  function orientHand(h, fa, side, torsoQ) {
+    const y = new THREE.Vector3(0, 1, 0).applyQuaternion(fa.quaternion);
+    const grip = fig3.grip || "over", mode = fig3.hand || "grip";
+    let x, z;
+    if (mode === "flat") {
+      const up = new THREE.Vector3(0, 1, 0).applyQuaternion(torsoQ);
+      y.set(up.x, 0, up.z); if (y.lengthSq() < 1e-4) y.set(1, 0, 0); y.normalize();
+      x = new THREE.Vector3(0, 1, 0);
+      z = new THREE.Vector3().crossVectors(x, y);
+    } else if (grip === "neutral") {
+      x = Z.clone().multiplyScalar(side);
+      x.sub(y.clone().multiplyScalar(x.dot(y)));
+      if (x.lengthSq() < 1e-4) x.set(1, 0, 0);
+      x.normalize(); z = new THREE.Vector3().crossVectors(x, y);
+    } else {
+      z = Z.clone().multiplyScalar(grip === "under" ? side : -side);
+      z.sub(y.clone().multiplyScalar(z.dot(y)));
+      if (z.lengthSq() < 1e-4) z.set(1, 0, 0);
+      z.normalize(); x = new THREE.Vector3().crossVectors(y, z);
+    }
+    const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
+    handQ[side > 0 ? "R" : "L"].copy(q);
+    h.pivot.quaternion.copy(fa.quaternion).invert().multiply(q);
+  }
+  function gripPoint(s) {
+    const fa = body.parts["forearm" + s];
+    const wrist = new THREE.Vector3(0, 27, 0).applyQuaternion(fa.quaternion).add(fa.position);
+    const off = (fig3.hand === "flat") ? new THREE.Vector3(-1.6, 4.5, 0) : new THREE.Vector3(-2.6, 6, 0);
+    return wrist.add(off.applyQuaternion(handQ[s]));
+  }
+  // For reaching moves the hand travels on an arc around the shoulder between its start and end
+  // positions, instead of following the 2D joint angles (which can swing the arm the long way round).
+  let reachEnds = null;
+  function reachTarget(pz, side) {
+    const ends = reachEnds.map(({ j, gz }) => ({
+      S: to3(j.shoulder).add(new THREE.Vector3(0, 0, side * VIEW3D.shoulderHalf)),
+      H: to3(j.hand).setZ(side * (gz ?? fig3.ik.grip ?? 22))
+    }));
+    const ra = ends[0].H.clone().sub(ends[0].S), rb = ends[1].H.clone().sub(ends[1].S);
+    const len = ra.length() + (rb.length() - ra.length()) * pz;
+    const q = new THREE.Quaternion().setFromUnitVectors(ra.clone().normalize(), rb.clone().normalize());
+    const dir = ra.clone().normalize().applyQuaternion(new THREE.Quaternion().slerp(q, pz));
+    return dir.multiplyScalar(len);
+  }
+  function pose(p, t) {
     const j = solveSide(p);
     const hip = to3(j.hip), shoulderC = to3(j.shoulder), mid = to3(j.spineMid);
     const lowerA = Math.atan2(mid.x - hip.x, mid.y - hip.y) * 180 / Math.PI;
@@ -574,6 +655,7 @@ function createViewer3D(container, mode) {
     placeAngle(body.parts.neck, neckBase, p.neck ?? p.torso);
 
     const torsoQ = body.parts.upperTorso.quaternion;
+    const ik = fig3.ik, handMode = fig3.hand || "grip";
     const lateral = new THREE.Vector3(0, 0, 1);
     const abd = ((p.abd || 0) * Math.PI) / 180;
     [1, -1].forEach((side) => {
@@ -585,26 +667,37 @@ function createViewer3D(container, mode) {
         const axis = p.abdAxis === "spine" ? new THREE.Vector3(0, 1, 0).applyQuaternion(torsoQ) : new THREE.Vector3(1, 0, 0).applyQuaternion(torsoQ);
         extra = new THREE.Quaternion().setFromAxisAngle(axis.normalize(), side * (p.abdAxis === "spine" ? -abd : abd));
       }
-      const uaLen = 30 * (p.armsOut && !abd ? 0.8 : 1);
-      placeAngle(body.parts["upperArm" + s], sh, p.ua, extra);
+      const uaLen = ik ? 30 : 30 * (p.armsOut && !abd ? 0.8 : 1);
       body.parts["upperArm" + s].scale.set(1, uaLen / 30, 1);
-      const elbow = endOf(body.parts["upperArm" + s], uaLen);
-      placeAngle(body.parts["forearm" + s], elbow, p.fa, extra);
+      if (ik) {
+        // Two-bone reach: the hand goes where the 2D pose puts it, at the grip width,
+        // and the elbow bends toward the pole (out to the side, like a real press).
+        const H = t == null ? to3(j.hand).setZ(side * (p.gz ?? ik.grip ?? 22))
+          : to3(j.shoulder).add(new THREE.Vector3(0, 0, side * VIEW3D.shoulderHalf)).add(reachTarget(t, side));
+        if (handMode === "flat") H.y = Math.max(H.y, 2.6);
+        const pole = new THREE.Vector3(...(ik.pole || [-0.5, -0.6, 1])); pole.z *= side; pole.applyQuaternion(torsoQ);
+        solveArm(body.parts["upperArm" + s], body.parts["forearm" + s], sh, H, pole, handMode === "flat" ? 27 : 33);
+      } else {
+        placeAngle(body.parts["upperArm" + s], sh, p.ua, extra);
+        const elbow = endOf(body.parts["upperArm" + s], uaLen);
+        placeAngle(body.parts["forearm" + s], elbow, p.fa, extra);
+      }
+      orientHand(body.hands[s], body.parts["forearm" + s], side, torsoQ);
       const hip3 = hip.clone().add(lateral.clone().multiplyScalar(side * VIEW3D.hipHalf));
       const far = side < 0 && p.t2 != null;
       const thighDir = far ? p.t2 : p.thigh + 180;
       const shinDir = far ? p.s2 : p.shin + 180;
       const footDir = far ? (p.f2 ?? 90) : (p.foot ?? 90);
-      placeAngle(body.parts["thigh" + s], hip3, thighDir);
+      const legOut = fig3.legAbd ? new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0).applyQuaternion(body.parts.lowerTorso.quaternion), (-side * fig3.legAbd * Math.PI) / 180) : null;
+      placeAngle(body.parts["thigh" + s], hip3, thighDir, legOut);
       const knee = endOf(body.parts["thigh" + s], 42);
-      placeAngle(body.parts["shin" + s], knee, shinDir);
+      placeAngle(body.parts["shin" + s], knee, shinDir, legOut);
       const ankle = endOf(body.parts["shin" + s], 42);
-      placeAngle(body.parts["foot" + s], ankle, footDir);
+      placeAngle(body.parts["foot" + s], ankle, footDir, legOut);
     });
 
     // Equipment that moves with the body.
-    const grip = (g) => new THREE.Vector3(-2.6, 33, 0).applyQuaternion(g.quaternion).add(g.position);
-    const handR = grip(body.parts.forearmR), handL = grip(body.parts.forearmL);
+    const handR = gripPoint("R"), handL = gripPoint("L");
     const L = ex.figure.load || {};
     if (load.bar) {
       if (L.at === "shoulder") {
@@ -615,7 +708,7 @@ function createViewer3D(container, mode) {
     if (load.dbs) {
       [handR, handL].forEach((h, i) => {
         load.dbs[i].position.copy(h);
-        load.dbs[i].quaternion.copy(body.parts[i ? "forearmL" : "forearmR"].quaternion);
+        load.dbs[i].quaternion.copy(handQ[i ? "L" : "R"]);
       });
     }
     if (load.cable) {
@@ -681,7 +774,7 @@ function createViewer3D(container, mode) {
         let p = 0, s = 0;
         pIds.forEach((id) => { p = Math.max(p, w[id][i]); });
         sIds.forEach((id) => { s = Math.max(s, w[id][i]); });
-        c.copy(skin).multiplyScalar(tone).lerp(prim, p * 0.85).lerp(sec, s * 0.75 * (1 - p));
+        c.copy(skin).multiplyScalar(tone).lerp(prim, p * 0.72).lerp(sec, s * 0.65 * (1 - p));
         colors.setXYZ(i, c.r, c.g, c.b);
       }
       colors.needsUpdate = true;
@@ -723,7 +816,7 @@ function createViewer3D(container, mode) {
     raf = requestAnimationFrame(tick);
     if (!ex || !container.isConnected) return;
     const t = reduce ? 1 : easeT(now);
-    pose(lerpPose(poseA, poseB, t));
+    pose(lerpPose(poseA, poseB, t), fig3.ik ? t : null);
     // Breathing: the ribcage swells a little.
     const breath = 1 + 0.018 * Math.sin(now / 650);
     body.parts.upperTorso.scale.x = breath; body.parts.upperTorso.scale.z = 1 + 0.009 * Math.sin(now / 650);
@@ -738,14 +831,16 @@ function createViewer3D(container, mode) {
   function setExercise(next) {
     ex = next;
     const fig = { ...ex.figure, ...(ex.figure3d || {}) };
+    fig3 = fig;
     const fault = mode === "bad" ? { ...ex.bad, ...(ex.bad3d || {}) } : null;
     const extra = { armsOut: fig.armsOut, abd: fig.abd, abdAxis: fig.abdAxis };
     poseA = { ...extra, ...fig.a, ...(fault && fault.a) };
     poseB = { ...extra, ...fig.b, ...(fault && fault.b) };
     poseA.view = poseB.view = undefined;
+    reachEnds = [poseA, poseB].map((q) => ({ j: solveSide(q), gz: q.gz }));
     frameCamera();
     buildEquipment(fig);
-    body.setHands(fig.hand !== "flat");
+    body.setHands(!fig.hand || fig.hand === "grip");
     setHighlights();
     resize();
   }
