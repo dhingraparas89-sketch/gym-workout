@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rep Sheet</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@400;600;700&family=Big+Shoulders+Display:wght@700;900&family=Barlow:wght@400;500;600&family=Familjen+Grotesk:wght@500;700&family=Manrope:wght@400;500;700&family=IBM+Plex+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="styles/base.css">
+<link rel="stylesheet" href="styles/themes.css">
+</head>
+<body data-style="plate">
+<!-- APP START -->
+<div class="page">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">Rep Sheet</span>
+    </div>
+    <div class="style-wrap">
+      <span class="style-label">Style</span>
+      <div id="style-switch" class="segmented" role="group" aria-label="Visual style"></div>
+    </div>
+  </header>
+
+  <section class="intro">
+    <h1>What to lift today</h1>
+    <p>Pick a weekly plan and follow the day you're on, or browse exercises by muscle group. Tick off each exercise as you finish it.</p>
+  </section>
+
+  <nav class="view-tabs" role="tablist">
+    <button type="button" class="view-tab" role="tab" data-view="plan">Workout plan</button>
+    <button type="button" class="view-tab" role="tab" data-view="muscles">By muscle group</button>
+  </nav>
+
+  <main>
+    <section id="view-plan">
+      <div id="plan-picker" class="plan-picker"></div>
+      <div id="days" class="days"></div>
+    </section>
+
+    <section id="view-muscles" hidden>
+      <div id="muscle-chips" class="chips"></div>
+      <div id="exercise-groups"></div>
+    </section>
+  </main>
+
+  <footer class="foot">Sets × reps are starting points. Pick a weight you can finish every set with one or two reps left in the tank.</footer>
+</div>
+<!-- APP END -->
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

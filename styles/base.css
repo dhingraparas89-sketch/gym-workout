@@ -1,0 +1,137 @@
+/* Layout and components. All colors and fonts come from variables
+   set per style in themes.css, so this file is shared by every style. */
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.page {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 20px 20px 48px;
+  display: grid;
+  gap: 28px;
+}
+
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Top bar */
+.topbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand-mark {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--accent);
+  box-shadow: inset 0 0 0 7px var(--accent), inset 0 0 0 10px var(--bg);
+}
+.brand-name { font-family: var(--font-display); font-size: 22px; letter-spacing: var(--display-spacing); text-transform: var(--display-case); }
+.style-wrap { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.style-label { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+
+.segmented { display: flex; flex-wrap: wrap; border: var(--line); border-radius: var(--radius); overflow: hidden; }
+.segmented button { background: var(--surface); border: 0; padding: 6px 12px; font-size: 13px; }
+.segmented button + button { border-left: var(--line); }
+.segmented button[aria-pressed="true"] { background: var(--fg); color: var(--bg); }
+
+/* Intro */
+.intro { display: grid; gap: 8px; }
+.intro h1 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: clamp(36px, 7vw, 68px);
+  line-height: 1;
+  letter-spacing: var(--display-spacing);
+  text-transform: var(--display-case);
+  text-wrap: balance;
+}
+.intro p { margin: 0; max-width: 60ch; color: var(--muted); }
+
+/* View tabs */
+.view-tabs { display: flex; gap: 4px; border-bottom: var(--line); }
+.view-tab {
+  background: none; border: 0; padding: 10px 14px; margin-bottom: -1px;
+  font-weight: 600; color: var(--muted);
+  border-bottom: 3px solid transparent;
+}
+.view-tab[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
+
+main > section:not([hidden]) { display: grid; gap: 20px; }
+
+/* Plan picker */
+.plan-picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.plan-option {
+  text-align: left; display: grid; gap: 2px;
+  background: var(--surface); border: var(--line); border-radius: var(--radius);
+  padding: 14px 16px; box-shadow: var(--shadow);
+}
+.plan-option[aria-pressed="true"] { background: var(--selected-bg); color: var(--selected-fg); border-color: var(--selected-bg); }
+.plan-name { font-family: var(--font-display); font-size: 20px; letter-spacing: var(--display-spacing); text-transform: var(--display-case); }
+.plan-meta { font-family: var(--font-mono); font-size: 12px; opacity: .8; }
+.plan-who { font-size: 13px; opacity: .85; }
+
+/* Day cards */
+.days { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; align-items: start; }
+.day { background: var(--surface); border: var(--line); border-radius: var(--radius); box-shadow: var(--shadow); min-width: 0; }
+.day-head { display: grid; gap: 2px; padding: 14px 16px; border-bottom: var(--line); }
+.day-head h3 { margin: 0; font-family: var(--font-display); font-size: 26px; letter-spacing: var(--display-spacing); text-transform: var(--display-case); }
+.day-meta { font-family: var(--font-mono); font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.ex-list { list-style: none; margin: 0; padding: 0; }
+.ex-row {
+  display: grid; grid-template-columns: auto 1fr auto; column-gap: 12px; row-gap: 2px;
+  align-items: center; padding: 10px 16px;
+}
+.ex-row + .ex-row { border-top: var(--line-soft); }
+.ex-row input { grid-row: span 2; width: 18px; height: 18px; accent-color: var(--accent); margin: 0; }
+.ex-row label { display: grid; gap: 2px; cursor: pointer; min-width: 0; }
+.ex-row .prescription { text-align: right; }
+.ex-row .rest { grid-column: 3; text-align: right; }
+.ex-row input:checked + label .ex-name { text-decoration: line-through; color: var(--muted); }
+.ex-name { font-weight: 600; }
+
+.prescription { font-family: var(--font-mono); font-size: 14px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rest { font-size: 12px; color: var(--muted); white-space: nowrap; }
+
+.tag { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--dot); box-shadow: var(--dot-ring); flex: none; }
+
+/* Muscle group view */
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--surface); border: var(--line); border-radius: var(--chip-radius);
+  padding: 6px 14px; font-size: 14px;
+}
+.chip[aria-pressed="true"] { background: var(--fg); color: var(--bg); border-color: var(--fg); }
+
+#exercise-groups { display: grid; gap: 28px; }
+.group { display: grid; gap: 12px; }
+.group-title {
+  margin: 0; display: flex; align-items: center; gap: 10px;
+  font-family: var(--font-display); font-size: 28px; letter-spacing: var(--display-spacing); text-transform: var(--display-case);
+}
+.group-title .dot { width: 16px; height: 16px; }
+.ex-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+.ex-card {
+  background: var(--surface); border: var(--line); border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 14px 16px; display: grid; gap: 6px; align-content: start; min-width: 0;
+}
+.ex-card h4 { margin: 0; font-size: 16px; }
+.ex-card p { margin: 0; }
+.ex-equip { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.ex-dose { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.ex-tip { font-size: 14px; color: var(--muted); }
+
+.foot { font-size: 13px; color: var(--muted); max-width: 70ch; }
+
+@media (max-width: 480px) {
+  .page { padding: 16px 16px 40px; }
+  .ex-row { padding: 10px 12px; }
+}
