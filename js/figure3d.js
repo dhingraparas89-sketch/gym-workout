@@ -588,6 +588,7 @@ function makeBody3D(THREE, mats) {
   // The fingers show once the skin they belong to is ready.
   skinList.forEach((m) => { m.visible = false; });
   const body = { parts, skin: null, skinMeshes, skinList, hands, handQ: { R: new THREE.Quaternion(), L: new THREE.Quaternion() },
+    boneNames: [...SKIN_DEFS.map((d) => d.name), "twistR1", "twistR2", "twistL1", "twistL2"],
     setHands: (grip) => Object.values(hands).forEach((h) => setHand(h, grip)),
     // cb(skin) runs once the skin mesh exists (later in the same frame at the soonest).
     onSkin(cb) { if (body.skin) Promise.resolve().then(() => cb(body.skin)); else skinWaiting.push(cb); } };
@@ -622,7 +623,7 @@ function createViewer3D(container, mode) {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
   if ("outputColorSpace" in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.05;
@@ -631,34 +632,10 @@ function createViewer3D(container, mode) {
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(28, 1, 1, 2000);
-  // Soft studio reflections: a gradient dome baked into an environment map.
-  {
-    const envScene = new THREE.Scene();
-    const dome = new THREE.Mesh(new THREE.SphereGeometry(10, 32, 16), new THREE.MeshBasicMaterial({ side: THREE.BackSide, vertexColors: true }));
-    const pos = dome.geometry.attributes.position, colors = [];
-    for (let i = 0; i < pos.count; i++) {
-      const t = (pos.getY(i) / 10 + 1) / 2;
-      const c = new THREE.Color(0x3a332e).lerp(new THREE.Color(0xfff4e8), Math.pow(t, 1.6));
-      colors.push(c.r, c.g, c.b);
-    }
-    dome.geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
-    envScene.add(dome);
-    const pmrem = new THREE.PMREMGenerator(renderer);
-    scene.environment = pmrem.fromScene(envScene, 0.04).texture;
-    pmrem.dispose();
-  }
-  scene.add(new THREE.HemisphereLight(0xfff6ee, 0x5a4a40, 0.55));
-  const key = new THREE.DirectionalLight(0xfff1e2, 2.4);
-  key.position.set(120, 260, 200);
-  key.castShadow = true;
-  key.shadow.mapSize.set(2048, 2048);
-  key.shadow.bias = -0.0004;
-  key.shadow.normalBias = 0.6;
-  Object.assign(key.shadow.camera, { left: -160, right: 160, top: 160, bottom: -160, near: 10, far: 800 });
-  scene.add(key);
-  const rim = new THREE.DirectionalLight(0xbfd4ff, 1.3);
-  rim.position.set(-200, 120, -160);
-  scene.add(rim);
+  // A commercial gym: reflections of overhead light panels on the metal, a soft key light from
+  // above that casts the shadows, a cool fill, a rim light from behind.
+  scene.environment = GYM3D.environment(renderer);
+  const { key, rim } = GYM3D.lights(scene);
 
   const col = (name, fb) => new THREE.Color(css(name, fb));
   // Skin shader: fine fiber striations along each muscle's fiber direction, darker grooves where
@@ -735,39 +712,16 @@ function createViewer3D(container, mode) {
     skin: patchSkin(new THREE.MeshPhysicalMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.74, metalness: 0,
       sheen: 0.06, sheenColor: new THREE.Color(0xb8c2d0), sheenRoughness: 0.85, clearcoat: 0,
       envMapIntensity: 0.75, bumpMap: skinNoise(), bumpScale: 0.25 })),
-    lips: new THREE.MeshStandardMaterial({ color: col("--skin-shade", "#c48a65").lerp(new THREE.Color(0x9a4a3c), 0.4), roughness: 0.5 }),
-    eye: new THREE.MeshStandardMaterial({ color: 0xf2eee8, roughness: 0.2 }),
-    shorts: new THREE.MeshStandardMaterial({ color: col("--shorts", "#222"), roughness: 0.85 }),
-    hair: new THREE.MeshStandardMaterial({ color: col("--hair", "#2b1d14"), roughness: 0.9 }),
-    dark: new THREE.MeshStandardMaterial({ color: 0x1a1210, roughness: 0.4 }),
-    equip: new THREE.MeshStandardMaterial({ color: col("--equip", "#8a8a85"), roughness: 0.5, metalness: 0.5 }),
-    pad: new THREE.MeshStandardMaterial({ color: col("--pad", "#2b2b2b"), roughness: 0.8 }),
-    plate: new THREE.MeshStandardMaterial({ color: col("--plate", "#2a2a2a"), roughness: 0.6, metalness: 0.2 }),
-    floor: new THREE.MeshStandardMaterial({ color: 0xe9e9e6, roughness: 1 }),
-    frame: new THREE.MeshStandardMaterial({ color: 0x24262a, roughness: 0.35, metalness: 0.7 }),
-    rubber: new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 }),
-    upholstery: new THREE.MeshPhysicalMaterial({ color: 0x1b1b1d, roughness: 0.62, clearcoat: 0.35, clearcoatRoughness: 0.4 })
   };
 
-  // Floor that fades out at the edge, so there is no hard horizon.
-  {
-    const c = document.createElement("canvas"); c.width = c.height = 128;
-    const g = c.getContext("2d"), grad = g.createRadialGradient(64, 64, 10, 64, 64, 64);
-    grad.addColorStop(0, "#fff"); grad.addColorStop(0.55, "#bbb"); grad.addColorStop(1, "#000");
-    g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
-    mats.floor.alphaMap = new THREE.CanvasTexture(c);
-    mats.floor.transparent = true;
-    mats.floor.depthWrite = false;
-  }
-  const floor = new THREE.Mesh(new THREE.CircleGeometry(260, 64), mats.floor);
-  floor.rotation.x = -Math.PI / 2;
-  floor.receiveShadow = true;
+  // Rubber gym floor, fitted to the feet of each exercise.
+  const floor = GYM3D.floor();
   scene.add(floor);
 
   const body = makeBody3D(THREE, mats);
   Object.values(body.parts).forEach((g) => { if (g !== body.parts.head) scene.add(g); });
   // The skin may arrive a moment later (it is built in the background): show it with the scan-in.
-  body.onSkin((skin) => { scene.add(skin); if (ex) setActivation(); shownAt = 0; });
+  body.onSkin((skin) => { scene.add(skin); if (ex) { setActivation(); fitScene(); } shownAt = 0; });
   const equipment = new THREE.Group();
   scene.add(equipment);
 
@@ -789,7 +743,7 @@ function createViewer3D(container, mode) {
   });
   el.addEventListener("pointerup", () => { drag = null; });
   el.addEventListener("pointercancel", () => { drag = null; });
-  el.addEventListener("dblclick", () => { yaw = VIEW3D.yaw; pitch = VIEW3D.pitch; });
+  el.addEventListener("dblclick", () => { [yaw, pitch] = fig3.view || [VIEW3D.yaw, VIEW3D.pitch]; });
 
   function resize() {
     const w = container.clientWidth || 300, h = container.clientHeight || w;
@@ -801,334 +755,193 @@ function createViewer3D(container, mode) {
   if (ro) ro.observe(container);
 
   // ----- Equipment -----
+  // Each exercise names its kit (the real machine, bench, bar or dumbbells it uses; see
+  // GYM3D.kits). The kit is fitted to where the body's skin really is over the whole rep,
+  // so pads touch the back and seat, feet stand on the floor and bars sit in the hands, and
+  // every frame it moves with the body: hand -> handle -> cable -> pulleys -> weight stack.
+  let rig = null, floorY = 0, holdAt = null, fitted = false;
   function clearEquipment() {
     while (equipment.children.length) equipment.remove(equipment.children[0]);
-    load = {};
-  }
-  function cyl(r, len, mat, axis) {
-    const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 28), mat);
-    if (axis === "z") m.rotation.x = Math.PI / 2;
-    if (axis === "x") m.rotation.z = Math.PI / 2;
-    m.castShadow = true; m.receiveShadow = true;
-    return m;
+    rig = null; paths = [];
   }
   const to3 = (p) => new THREE.Vector3(p[0] - 100, 189 - p[1], 0);
 
-  // Upholstered pad with rounded edges: length along x, thickness along y, width along z.
-  function padBox(len, thick, width) {
-    const r = Math.min(3, width / 4, len / 4), b = Math.min(1.6, thick / 3);
-    const w = width - 2 * b, l = len - 2 * b, shape = new THREE.Shape();
-    shape.moveTo(-l / 2 + r, -w / 2); shape.lineTo(l / 2 - r, -w / 2); shape.quadraticCurveTo(l / 2, -w / 2, l / 2, -w / 2 + r);
-    shape.lineTo(l / 2, w / 2 - r); shape.quadraticCurveTo(l / 2, w / 2, l / 2 - r, w / 2);
-    shape.lineTo(-l / 2 + r, w / 2); shape.quadraticCurveTo(-l / 2, w / 2, -l / 2, w / 2 - r);
-    shape.lineTo(-l / 2, -w / 2 + r); shape.quadraticCurveTo(-l / 2, -w / 2, -l / 2 + r, -w / 2);
-    const geo = new THREE.ExtrudeGeometry(shape, { depth: Math.max(0.5, thick - 2 * b), bevelEnabled: true, bevelThickness: b, bevelSize: b, bevelSegments: 4, curveSegments: 8 });
-    geo.rotateX(Math.PI / 2); geo.center();
-    const m = new THREE.Mesh(geo, mats.upholstery);
-    m.castShadow = true; m.receiveShadow = true;
-    return m;
-  }
-  // ----- Cable stations -----
-  // Built like real gym machines: steel frame, a selectorized weight stack on guide rods,
-  // pulleys, and a steel cable for each handle. The top plates rise as the cable is pulled.
-  const cableMat = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.4, metalness: 0.6 });
-  const ropeMat = new THREE.MeshStandardMaterial({ color: 0x2c2c2c, roughness: 0.9 });
-  const chrome = new THREE.MeshStandardMaterial({ color: 0xd8dadc, roughness: 0.18, metalness: 1 });
-  const unitCyl = new THREE.CylinderGeometry(1, 1, 1, 10);
-  function segment(mat, r) { const m = new THREE.Mesh(unitCyl, mat); m.userData.r = r; m.castShadow = true; equipment.add(m); return m; }
-  function setSeg(m, a, b) {
-    const d = b.clone().sub(a), len = d.length();
-    m.position.copy(a).add(b).multiplyScalar(0.5);
-    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), len > 1e-6 ? d.divideScalar(len) : new THREE.Vector3(0, 1, 0));
-    m.scale.set(m.userData.r, Math.max(len, 0.01), m.userData.r);
-  }
-  function box(w, h, d, mat, x, y, z, parent) {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
-    m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true;
-    (parent || equipment).add(m); return m;
-  }
-  function wheel(r, parent, x, y, z, axis) {
-    const g = new THREE.Group(); g.position.set(x, y, z);
-    const w = new THREE.Mesh(new THREE.CylinderGeometry(r, r, 1.4, 24), mats.plate); w.rotation.x = Math.PI / 2; g.add(w);
-    const hub = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.35, r * 0.35, 1.8, 12), chrome); hub.rotation.x = Math.PI / 2; g.add(hub);
-    if (axis) g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), axis);
-    parent.add(g); return g;
-  }
-  // A single tower. It is built in its own frame (+x faces the lifter) and placed at (x, z).
-  // Returns the world points the cable runs through and the moving part of the stack.
-  function tower(x, z, faceTo, pulleyY, opts = {}) {
-    const H = opts.height || Math.max(200, pulleyY + 26);
-    const g = new THREE.Group(); g.position.set(x, floor.position.y, z);
-    const dir = faceTo.clone().sub(new THREE.Vector3(x, 0, z)).setY(0).normalize();
-    g.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), dir);
-    equipment.add(g);
-    const py = pulleyY - floor.position.y;
-    box(40, 2.6, 34, mats.frame, -6, 1.3, 0, g);                                 // base plate
-    [-1, 1].forEach((s) => {
-      box(4.4, H, 4.4, mats.frame, -22, H / 2, s * 13, g);                       // rear uprights
-      box(4.4, H, 4.4, mats.frame, 6, H / 2, s * 13, g);                          // front uprights
-      box(30, 3.6, 3.6, mats.frame, -8, H - 1.8, s * 13, g);                      // top rails
-      const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, H - 16, 10), chrome);
-      rod.position.set(-8, 4 + (H - 16) / 2, s * 5.2); g.add(rod);               // guide rods
-    });
-    box(30, 3.6, 30, mats.frame, -8, H - 1.8, 0, g);                              // top plate
-    // Weight stack: 16 plates, the top six ride up when pulled.
-    const plateMat = new THREE.MeshStandardMaterial({ color: 0x151515, roughness: 0.55, metalness: 0.3 });
-    for (let i = 0; i < 10; i++) box(17, 2.5, 15, plateMat, -8, 5 + i * 2.65, 0, g);
-    const moving = new THREE.Group(); g.add(moving);
-    for (let i = 10; i < 16; i++) box(17, 2.5, 15, plateMat, -8, 5 + i * 2.65, 0, moving);
-    const head = 5 + 16 * 2.65;
-    box(18, 3.4, 16, chrome, -8, head + 0.6, 0, moving);                          // head plate
-    const pin = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 18, 8), chrome); pin.rotation.x = Math.PI / 2;
-    pin.position.set(-8, 5 + 10 * 2.65, 0); moving.add(pin);                      // selector pin
-    // Pulley column at the front with an adjustable carriage.
-    if (!opts.noCarriage) {
-      box(5, H - 6, 5, chrome, 12, (H - 6) / 2 + 3, 0, g);
-      box(8, 11, 8, mats.frame, 12, py, 0, g);                                    // carriage
-      wheel(3.6, g, 16.5, py, 0);
-      wheel(3.2, g, 12, H - 6, 0);
-    }
-    wheel(3.2, g, -8, H - 6, 0);
-    const W = (v) => g.localToWorld(v.clone());
-    g.updateMatrixWorld(true);
-    const route = [
-      () => W(new THREE.Vector3(-8, head + 2.4 + moving.position.y, 0)),
-      () => W(new THREE.Vector3(-8, H - 3, 0)), () => W(new THREE.Vector3(12, H - 3, 0)),
-      () => W(new THREE.Vector3(14, py + 3, 0)), () => W(new THREE.Vector3(18.5, py, 0))
-    ];
-    return { g, moving, route, H, W };
-  }
-  function handleFor(kind) {
-    const g = new THREE.Group();
-    if (kind === "D") {
-      const ring = new THREE.Mesh(new THREE.TorusGeometry(3.2, 0.55, 8, 24, Math.PI * 1.25), mats.frame);
-      ring.rotation.z = -Math.PI * 0.125 + Math.PI / 2; g.add(ring);
-      const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 0.9, 8, 12), mats.rubber); grip.rotation.x = Math.PI / 2; g.add(grip);
-    }
-    equipment.add(g); return g;
-  }
-  function buildStation(fig) {
-    const st = fig.station, cables = [];
-    const hip = to3(solveSide(poseA).hip), person = new THREE.Vector3(hip.x, 0, 0);
-    const L = fig.load || {}, from = L.from ? to3(L.from) : new THREE.Vector3(0, 150, 0);
-    const pulleyY = st.pulleyY ?? from.y;
-    if (st.kind === "crossover") {
-      // Two towers, one each side, a cable to each hand.
-      const tx = hip.x + (st.back ?? -14);
-      [1, -1].forEach((side) => {
-        const t = tower(tx, side * 78, new THREE.Vector3(tx, 0, 0), pulleyY);
-        cables.push({ t, attach: side > 0 ? "R" : "L", handle: handleFor("D") });
-      });
-      // Overhead bar joining the towers.
-      const bar = segment(mats.frame, 2.2); setSeg(bar, new THREE.Vector3(tx - 8, cables[0].t.H + floor.position.y, 70), new THREE.Vector3(tx - 8, cables[0].t.H + floor.position.y, -70));
-      const pull = segment(chrome, 1.4); setSeg(pull, new THREE.Vector3(tx + 10, cables[0].t.H - 6, 60), new THREE.Vector3(tx + 10, cables[0].t.H - 6, -60));
-    } else if (st.kind === "pulldown") {
-      // Column behind the seat with an arm reaching over the head to the top pulley.
-      const cx = hip.x - 36, t = tower(cx, 0, person.clone().setX(hip.x + 50), 40, { height: 214 });
-      const top = new THREE.Vector3(from.x, 214 + floor.position.y - 10, 0);
-      box(top.x - cx + 6, 5, 6, mats.frame, (cx + top.x) / 2, top.y + 4, 0);
-      wheel(3.4, equipment, top.x, top.y, 0);
-      t.route.splice(3, 2, () => new THREE.Vector3(top.x - 3, top.y + 3, 0), () => new THREE.Vector3(top.x, top.y - 3, 0));
-      const bar = new THREE.Group(); equipment.add(bar);
-      const rod = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 96, 14), chrome); rod.rotation.x = Math.PI / 2; bar.add(rod);
-      [-1, 1].forEach((s) => { const end = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 14, 12), chrome); end.position.set(0, -3.5, s * 50); end.rotation.x = s * 0.5 + Math.PI / 2; bar.add(end); });
-      cables.push({ t, attach: "mid", bar });
-    } else if (st.kind === "press") {
-      // Selectorized chest press: weight stack behind the seat, two lever arms swinging
-      // from pivots above the shoulders down to upright handles.
-      const sh = to3(solveSide(poseA).shoulder);
-      const t = tower(hip.x - 40, 0, person.clone().setX(hip.x + 60), 60, { noCarriage: true, height: 190 });
-      const pivotX = hip.x - 14, pivotY = sh.y + 36;
-      box(6, 6, 78, mats.frame, pivotX, pivotY, 0);                                 // pivot shaft
-      box(t.g.position.x - pivotX + 18, 5, 6, mats.frame, (t.g.position.x + pivotX) / 2 - 4, pivotY, 0);
-      const levers = [1, -1].map((side) => {
-        const P = new THREE.Vector3(pivotX, pivotY, side * 37);
-        const arm = segment(mats.frame, 2.2), drop = segment(mats.frame, 1.8);
-        const grip = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.3, 11, 14), mats.rubber); grip.castShadow = true; equipment.add(grip);
-        return { side, P, arm, drop, grip };
-      });
-      // A cable from the stack runs up to the pivot so the plates rise as the arms move.
-      cables.push({ t, attach: "mid", levers, press: true });
-    } else {
-      // A single tower facing the lifter (front, or to the side for the Pallof press).
-      const at = st.at ? new THREE.Vector3(st.at[0] - 100, 0, st.at[1]) : new THREE.Vector3(from.x + (from.x > hip.x ? 22 : -22), 0, 0);
-      const t = tower(at.x, at.z, person, pulleyY);
-      cables.push({ t, attach: "mid", rope: st.handle === "rope", vbar: st.handle === "V", handle: st.handle === "D" ? handleFor("D") : null });
-    }
-    cables.forEach((c) => {
-      c.segs = c.t.route.slice(0, c.press ? 2 : undefined).map(() => segment(cableMat, 0.6));
-      if (c.rope) c.ropeSegs = [segment(ropeMat, 0.95), segment(ropeMat, 0.95)];
-      if (c.vbar) c.ropeSegs = [segment(mats.frame, 1.1), segment(mats.frame, 1.1)];
-    });
-    load.cables = cables;
-    // Rest length of each cable: the shortest it gets during the rep.
-    const samples = [0, 0.25, 0.5, 0.75, 1];
-    cables.forEach((c) => { c.rest = Infinity; });
-    samples.forEach((t) => {
-      pose(lerpPose(poseA, poseB, t), fig.ik ? t : null);
-      cables.forEach((c) => { c.rest = Math.min(c.rest, c.press ? cableEnd(c).x : cableEnd(c).distanceTo(c.t.route[c.t.route.length - 1]())); });
-    });
-  }
-  function cableEnd(c) {
-    const R = gripPoint("R"), Lh = gripPoint("L");
-    if (c.attach === "R") return R;
-    if (c.attach === "L") return Lh;
-    return R.add(Lh).multiplyScalar(0.5);
-  }
-  function updateCables() {
-    (load.cables || []).forEach((c) => {
-      const end = cableEnd(c), route = c.t.route;
-      if (c.press) {
-        c.levers.forEach((l) => {
-          const s = l.side > 0 ? "R" : "L", hp = gripPoint(s);
-          const up = new THREE.Vector3(0, 0, 1).applyQuaternion(body.handQ[s]);   // the grip runs along the hand's z
-          if (up.y < 0) up.negate();
-          l.grip.position.copy(hp); l.grip.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), up);
-          const top = hp.clone().add(up.clone().multiplyScalar(5.5));
-          const elbow = top.clone().add(new THREE.Vector3(0, 6, 0)).setZ(top.z + l.side * 4);
-          setSeg(l.drop, top, elbow); setSeg(l.arm, elbow, l.P);
-        });
-        c.t.moving.position.y = Math.max(0, Math.min(40, (end.x - c.rest) * 0.8));
-        const pts = route.slice(0, 3).map((f) => f());
-        c.segs.forEach((m, i) => setSeg(m, pts[i], pts[i + 1]));
-        return;
+  // CPU skinning: world positions of skin vertices (all of them, or the listed ones).
+  const boneM = [];
+  function skinWorld(idx, out) {
+    const skin = body.skin, geo = skin.geometry, pos = geo.attributes.position.array;
+    const si = geo.attributes.skinIndex.array, sw = geo.attributes.skinWeight.array;
+    Object.values(body.parts).forEach((p) => { if (p.parent === scene) p.updateMatrixWorld(true); });
+    skin.skeleton.bones.forEach((b, i) => { boneM[i] = (boneM[i] || new THREE.Matrix4()).multiplyMatrices(b.matrixWorld, skin.skeleton.boneInverses[i]); });
+    const n = idx ? idx.length : pos.length / 3;
+    if (!out || out.length < n * 3) out = new Float32Array(n * 3);
+    for (let k = 0; k < n; k++) {
+      const i = idx ? idx[k] : k, x = pos[3 * i], y = pos[3 * i + 1], z = pos[3 * i + 2];
+      let ox = 0, oy = 0, oz = 0;
+      for (let j = 0; j < 4; j++) {
+        const w = sw[4 * i + j]; if (!w) continue;
+        const e = boneM[si[4 * i + j]].elements;
+        ox += w * (e[0] * x + e[4] * y + e[8] * z + e[12]);
+        oy += w * (e[1] * x + e[5] * y + e[9] * z + e[13]);
+        oz += w * (e[2] * x + e[6] * y + e[10] * z + e[14]);
       }
-      const pulley = route[route.length - 1]();
-      const pullDir = pulley.clone().sub(end).normalize();
-      let knot = end;
-      if (c.rope || c.vbar) {
-        knot = end.clone().add(pullDir.clone().multiplyScalar(c.rope ? 9 : 6));
-        setSeg(c.ropeSegs[0], knot, gripPoint("R")); setSeg(c.ropeSegs[1], knot, gripPoint("L"));
-      }
-      if (c.bar) { c.bar.position.copy(end); }
-      if (c.handle) {
-        c.handle.position.copy(end);
-        if (c.attach !== "mid") c.handle.quaternion.copy(body.handQ[c.attach]);
-        knot = end.clone().add(pullDir.clone().multiplyScalar(4));
-      }
-      const lift = Math.max(0, Math.min(40, (knot.distanceTo(pulley) - c.rest) * 0.5));
-      c.t.moving.position.y = lift;
-      const pts = route.map((f) => f()).concat([knot]);
-      c.segs.forEach((m, i) => setSeg(m, pts[i], pts[i + 1]));
-    });
+      out[3 * k] = ox; out[3 * k + 1] = oy; out[3 * k + 2] = oz;
+    }
+    return out;
   }
-  function buildEquipment(fig) {
-    clearEquipment();
-    const props = fig.props || [];
-    // Pads: rectangles, and thick lines that don't reach the floor (backrests, seats).
-    const isPad = (pr) => pr.rect || (pr.line && (pr.w || 0) >= 7 && Math.max(pr.line[1], pr.line[3]) < 186 && pr.axis !== "z");
-    const pads = props.filter(isPad);
-    const padTopAt = (x) => {                 // lowest pad underside above x, in 2D units
-      let best = null;
-      pads.forEach((pr) => {
-        if (pr.rect) { const [rx, ry, rw, rh] = pr.rect; if (x >= rx - 2 && x <= rx + rw + 2) best = Math.max(best ?? -1e9, ry + rh); }
-        else { const [x1, y1, x2, y2] = pr.line; const lo = Math.min(x1, x2), hi = Math.max(x1, x2);
-          if (x >= lo - 2 && x <= hi + 2) { const t = hi === lo ? 0 : (x - x1) / (x2 - x1); best = Math.max(best ?? -1e9, y1 + (y2 - y1) * t + 3.5); } }
-      });
-      return best;
+  // The bone that moves each vertex the most (its body part).
+  let domBone = null;
+  function dominantBones() {
+    if (domBone) return domBone;
+    const geo = body.skin.geometry, si = geo.attributes.skinIndex.array, sw = geo.attributes.skinWeight.array, n = si.length / 4;
+    domBone = new Uint8Array(n);
+    for (let i = 0; i < n; i++) { let b = 0; for (let j = 1; j < 4; j++) if (sw[4 * i + j] > sw[4 * i + b]) b = j; domBone[i] = si[4 * i + b]; }
+    return domBone;
+  }
+
+  // The rep, sampled: skin points, grips and joints at evenly spaced moments.
+  function sampleRep(n) {
+    const S = [];
+    for (let i = 0; i <= n; i++) {
+      const t = i / n;
+      pose(lerpPose(poseA, poseB, t), fig3.ik ? t : null);
+      S.push({ t, pts: skinWorld(null, null), grip: { R: gripPoint("R"), L: gripPoint("L") }, axis: { R: gripAxis("R"), L: gripAxis("L") },
+        handQ: { R: body.handQ.R.clone(), L: body.handQ.L.clone() }, J: jointsOf(body) });
+    }
+    return S;
+  }
+  // What a kit can ask about the body while it fits itself.
+  function makeCtx(S) {
+    const names = body.boneNames, dom = dominantBones();
+    const each = (fn, only) => S.forEach((s) => { const p = s.pts; for (let i = 0, v = 0; i < p.length; i += 3, v++) if (!only || only(names[dom[v]])) fn(p[i], p[i + 1], p[i + 2], s, v); });
+    const inBox = (b, x, y, z) => x >= (b.x0 ?? -1e9) && x <= (b.x1 ?? 1e9) && z >= (b.z0 ?? -1e9) && z <= (b.z1 ?? 1e9) && y >= (b.y0 ?? -1e9) && y <= (b.y1 ?? 1e9);
+    return {
+      THREE, S, fig: fig3, mode, names, floorY,
+      // Lowest / highest skin point over the whole rep inside a box (optionally only some body parts).
+      lowest(b, only) { let m = Infinity; each((x, y, z) => { if (y < m && inBox(b, x, y, z)) m = y; }, only); return m; },
+      highest(b, only) { let m = -Infinity; each((x, y, z) => { if (y > m && inBox(b, x, y, z)) m = y; }, only); return m; },
+      // Closest the skin comes to a pad's face: the pad's centre o, outward normal n, length
+      // along `along`, width across z. Only skin over the pad (and not far behind it) counts.
+      gap(o, n, along, len, width, only) {
+        const lat = new THREE.Vector3().crossVectors(along, n).normalize();
+        let m = Infinity;
+        each((x, y, z) => {
+          const dx = x - o.x, dy = y - o.y, dz = z - o.z;
+          const a = dx * along.x + dy * along.y + dz * along.z, l = dx * lat.x + dy * lat.y + dz * lat.z, h = dx * n.x + dy * n.y + dz * n.z;
+          if (Math.abs(a) <= len / 2 && Math.abs(l) <= width / 2 && h > -12 && h < m) m = h;
+        }, only);
+        return m;
+      },
+      bounds(only) { const b = new THREE.Box3(); each((x, y, z) => b.expandByPoint(new THREE.Vector3(x, y, z)), only); return b; },
+      // Vertices picked on the first sample, tracked live every frame.
+      track(pred) {
+        const idx = []; const p = S[0].pts;
+        for (let v = 0; v < p.length / 3; v++) if (pred(p[3 * v], p[3 * v + 1], p[3 * v + 2], names[dom[v]])) idx.push(v);
+        const list = Int32Array.from(idx); let out = null;
+        return { count: list.length, now: () => (out = skinWorld(list, out)), at: (i) => S[i].pts && list };
+      },
+      to3
     };
-    const legs = [];
-    props.forEach((pr) => {
-      if (pr.rect) {
-        const [x, y, w, h] = pr.rect;
-        const pad = padBox(w, h, w > 60 ? 28 : 26);
-        pad.position.set(x + w / 2 - 100, 189 - (y + h / 2), 0);
-        equipment.add(pad);
-        return;
-      }
-      if (!pr.line) return;
-      const [x1, y1, x2, y2] = pr.line;
-      const p1 = to3([x1, y1]), p2 = to3([x2, y2]);
-      if (isPad(pr)) {
-        // Backrest or seat pad laid along the line, with a steel rail behind it.
-        const len = p1.distanceTo(p2), dir = p2.clone().sub(p1).normalize();
-        const pad = padBox(len + 4, pr.w, 26);
-        pad.position.copy(p1.clone().add(p2).multiplyScalar(0.5));
-        pad.quaternion.setFromUnitVectors(new THREE.Vector3(1, 0, 0), dir);
-        equipment.add(pad);
-        const rail = new THREE.Mesh(new THREE.BoxGeometry(len * 0.8, 3.6, 4.6), mats.frame);
-        const normal = new THREE.Vector3(-dir.y, dir.x, 0); if (normal.y > 0 || (normal.y === 0 && normal.x > 0)) normal.negate();
-        rail.position.copy(pad.position).add(normal.multiplyScalar(pr.w / 2 + 1.8));
-        rail.quaternion.copy(pad.quaternion); rail.castShadow = true;
-        equipment.add(rail);
-        return;
-      }
-      // A cable station replaces the plain tower post.
-      if (fig.station && Math.abs(x1 - x2) < 1 && Math.abs(y1 - y2) > 80) return;
-      // Floor uprights under a pad become one steel leg with a wide stabilizer foot.
-      const vertical = Math.abs(x1 - x2) < 1, bottom = Math.max(y1, y2), top = Math.min(y1, y2);
-      const under = vertical && bottom >= 186 ? padTopAt(x1) : null;
-      if (under != null && Math.abs(under - top) < 7) {
-        legs.push({ x: x1 - 100, top: 189 - top });
-        const leg = new THREE.Mesh(new THREE.BoxGeometry(4.6, 189 - top - 3, 4.6), mats.frame);
-        leg.position.set(x1 - 100, 3 + (189 - top - 3) / 2, 0); leg.castShadow = true; equipment.add(leg);
-        const foot = new THREE.Mesh(new THREE.BoxGeometry(5.2, 3.6, 40), mats.frame);
-        foot.position.set(x1 - 100, 1.8 + 0.8, 0); foot.castShadow = true; foot.receiveShadow = true; equipment.add(foot);
-        [-1, 1].forEach((sz) => {
-          const cap = new THREE.Mesh(new THREE.BoxGeometry(6, 1.6, 3.4), mats.rubber);
-          cap.position.set(x1 - 100, 0.8, sz * 19); equipment.add(cap);
-        });
-        return;
-      }
-      const len = p1.distanceTo(p2), mid = p1.clone().add(p2).multiplyScalar(0.5);
-      // Uprights that stand on the floor reach it even when the floor is lowered.
-      [p1, p2].forEach((q) => { if (q.y <= 4) q.y = Math.min(q.y, floor.position.y); });
-      if (pr.axis === "z") {
-        // A bar across the body (pull-up bar): runs left-right.
-        const bar = cyl(1.6, 110, mats.equip, "z"); bar.position.copy(mid); equipment.add(bar);
-        return;
-      }
-      const zs = pr.pair ? [-23, 23] : (len > 80 && Math.abs(x1 - x2) < 1 ? [-34] : [-13, 13]);
-      const len2 = p1.distanceTo(p2), mid2 = p1.clone().add(p2).multiplyScalar(0.5);
-      zs.forEach((z) => {
-        const c = cyl((pr.w || 6) / 2, len2, mats.equip);
-        c.position.set(mid2.x, mid2.y, z);
-        c.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), p2.clone().sub(p1).normalize());
-        equipment.add(c);
-      });
+  }
+
+  // Soft contact shadows (ambient occlusion) where things meet the floor: equipment feet are
+  // fixed; the body's feet (and flat hands) are followed every frame, darker the closer they are.
+  const shadowGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+  const liveShadows = [];
+  function shadowBlob(x, z, w, d, o) {
+    const mat = GYM3D.materials().shadow.clone(); mat.opacity = o;
+    const m = new THREE.Mesh(shadowGeo, mat);
+    m.position.set(x, floorY + 0.08, z); m.scale.set(w, 1, d); m.renderOrder = 1;
+    equipment.add(m); return m;
+  }
+  function contactShadows(list) {
+    list.forEach((c) => shadowBlob(c.x, c.z, c.w, c.d, c.o));
+    liveShadows.length = 0;
+    ["R", "L"].forEach((s) => {
+      const ft = body.parts["foot" + s];
+      liveShadows.push({ m: shadowBlob(0, 0, 32, 15, 0), at: () => endOf(ft, 7), dir: () => endOf(ft, 12).sub(ft.position), base: 0.7, r: 3.5, len: 32, wid: 15 });
+      if (fig3.hand === "flat") liveShadows.push({ m: shadowBlob(0, 0, 18, 14, 0), at: () => gripPoint(s), base: 0.55, r: 1.5, len: 18, wid: 14 });
     });
-    // A frame rail joins the legs under a long bench.
-    if (legs.length >= 2) {
-      legs.sort((p, q) => p.x - q.x);
-      const l0 = legs[0], l1 = legs[legs.length - 1];
-      const rail = new THREE.Mesh(new THREE.BoxGeometry(l1.x - l0.x + 4.6, 4, 4.6), mats.frame);
-      rail.position.set((l0.x + l1.x) / 2, Math.min(l0.top, l1.top) - 2, 0); rail.castShadow = true;
-      equipment.add(rail);
+    liveShadows.forEach((l) => { l.m.visible = l.at().y - floorY < 30; });
+  }
+  function updateShadows() {
+    liveShadows.forEach((l) => {
+      if (!l.m.visible) return;
+      const p = l.at(), h = Math.max(0, p.y - floorY - l.r), grow = 1 + h / 25;
+      l.m.position.set(p.x, floorY + 0.08, p.z);
+      if (l.dir) { const d = l.dir(); l.m.rotation.y = -Math.atan2(d.z, d.x); }
+      l.m.scale.set(l.len * grow, 1, l.wid * grow);
+      l.m.material.opacity = l.base * Math.exp(-h / 7);
+    });
+  }
+
+  // Movement paths (optimal form only): a faint line along the path the working end travels over
+  // a rep (both hands, else the feet, else the head and chest for hanging and supported moves),
+  // with a bead riding it in time with the body.
+  let paths = [];
+  const PATH_SRC = {
+    handR: () => gripPoint("R"), handL: () => gripPoint("L"),
+    ankleR: () => endOf(body.parts.shinR, 42), ankleL: () => endOf(body.parts.shinL, 42),
+    neck: () => body.parts.neck.position.clone()
+  };
+  function buildPaths() {
+    paths = [];
+    if (mode !== "good" || fig3.path === false) return;
+    const tr = {}; Object.keys(PATH_SRC).forEach((k) => { tr[k] = []; });
+    for (let i = 0; i <= 32; i++) {
+      const t = i / 32;
+      pose(lerpPose(poseA, poseB, t), fig3.ik ? t : null);
+      Object.keys(PATH_SRC).forEach((k) => tr[k].push(PATH_SRC[k]()));
     }
-    const L = fig.load || {};
-    if (L.type === "barbell") {
-      const g = new THREE.Group();
-      const r = L.r || 13;
-      g.add(cyl(1.3, 150, mats.equip, "z"));
-      [-1, 1].forEach((s) => {
-        const p = cyl(r, 5, mats.plate, "z"); p.position.z = s * 52; g.add(p);
-        const p2 = cyl(r * 0.8, 4, mats.plate, "z"); p2.position.z = s * 57; g.add(p2);
-        const c = cyl(2.6, 3, mats.equip, "z"); c.position.z = s * 47; g.add(c);
-      });
-      equipment.add(g); load.bar = g;
+    const travel = (k) => tr[k].reduce((a, p, i) => a + (i ? p.distanceTo(tr[k][i - 1]) : 0), 0);
+    let keys = fig3.path ? [].concat(fig3.path) : null;
+    if (!keys) {
+      const by = (ks) => ks.filter((k) => travel(k) > 9);
+      keys = by(["handR", "handL"]);
+      if (!keys.length) keys = by(["ankleR", "ankleL"]);
+      if (!keys.length) keys = by(["neck"]);
     }
-    if (L.type === "dumbbell") {
-      load.dbs = [1, -1].map(() => {
-        const g = new THREE.Group();
-        g.add(cyl(1.1, 14, mats.equip, "z"));
-        [-1, 1].forEach((s) => { const p = cyl(5, 3.4, mats.plate, "z"); p.position.z = s * 5.6; g.add(p); });
-        equipment.add(g); return g;
-      });
-    }
-    if (fig.station) buildStation(fig);
-    else if (L.type === "cable") {
-      const geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
-      load.cable = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: css("--equip", "#888") }));
-      load.from = to3(L.from); load.from.z = (fig.props || []).some((p) => p.line && Math.abs(p.line[0] - p.line[2]) < 1 && Math.abs(p.line[1] - p.line[3]) > 80) ? -34 : 0;
-      equipment.add(load.cable);
-      load.handle = cyl(1.2, 16, mats.equip, "z"); equipment.add(load.handle);
-      const pulley = cyl(3.2, 2.4, mats.plate, "z"); pulley.position.copy(load.from); equipment.add(pulley);
-    }
-    if (L.type === "roller") { load.roller = cyl(4.5, 26, mats.pad, "z"); equipment.add(load.roller); }
-    if (L.type === "footplate") {
-      load.plate = new THREE.Mesh(new THREE.BoxGeometry(3, 30, 46), mats.equip);
-      load.plate.castShadow = true; equipment.add(load.plate);
-    }
+    const mat = new THREE.MeshBasicMaterial({ color: 0xbff7ea, transparent: true, opacity: 0.22, depthWrite: false });
+    const beadMat = new THREE.MeshBasicMaterial({ color: 0xd8fff5, transparent: true, opacity: 0.85, depthWrite: false });
+    keys.forEach((k) => {
+      const curve = new THREE.CatmullRomCurve3(tr[k]);
+      const line = new THREE.Mesh(new THREE.TubeGeometry(curve, 64, 0.32, 6, false), mat); line.renderOrder = 2;
+      const bead = new THREE.Mesh(new THREE.SphereGeometry(1.3, 14, 10), beadMat); bead.renderOrder = 3;
+      // End ticks so the start and finish of the range read clearly.
+      [0, 32].forEach((i) => { const d = new THREE.Mesh(new THREE.SphereGeometry(0.7, 10, 8), mat); d.position.copy(tr[k][i]); equipment.add(d); });
+      equipment.add(line, bead);
+      paths.push({ bead, at: PATH_SRC[k] });
+    });
+  }
+
+  // Fit the floor, then build the exercise's kit around the body.
+  function fitScene() {
+    clearEquipment();
+    fitted = false;
+    if (!body.skin || !ex) return;
+    const kitName = fig3.kit || "none";
+    const S = sampleRep(8);
+    const ctx = makeCtx(S);
+    const feet = (n) => n.startsWith("foot") || n.startsWith("shin");
+    // The floor goes where the body stands: under the soles, under the whole body for floor
+    // exercises, or below the hanging feet.
+    const ground = GYM3D.kits.groundOf(kitName, fig3);
+    if (typeof ground === "function") floorY = ground(ctx);
+    else if (ground === "feet") floorY = ctx.lowest({}, feet);
+    else if (ground === "body") floorY = ctx.lowest({}) - (fig3.mat ? 1.5 : 0);
+    else if (ground === "hang") floorY = Math.min(ctx.lowest({}) - 18, (holdAt ? holdAt.y : 200) - GYM3D.kits.hangOf(kitName));
+    else floorY = 0;
+    ctx.floorY = floorY;
+    floor.position.y = floorY;
+    const P = GYM3D.Parts(equipment, floorY);
+    ctx.P = P;
+    rig = GYM3D.kits.build(kitName, ctx) || null;
+    // Soft contact shadows under every foot of the equipment.
+    contactShadows(P.shadows);
+    buildPaths();
+    fitted = true;
+    pose(lerpPose(poseA, poseB, 0), fig3.ik ? 0 : null);
+    frameScene(ctx);
   }
 
   // ----- Posing -----
@@ -1184,7 +997,9 @@ function createViewer3D(container, mode) {
       if (x.lengthSq() < 1e-4) x.set(1, 0, 0);
       x.normalize(); z = new THREE.Vector3().crossVectors(x, y);
     } else {
-      z = Z.clone().multiplyScalar(grip === "under" ? side : -side);
+      // Overhand: thumbs point in toward each other; underhand: out. The left hand's thumb is on
+      // its -z side, so the same z gives a mirror-image grip on both hands.
+      z = Z.clone().multiplyScalar(grip === "under" ? 1 : -1);
       z.sub(y.clone().multiplyScalar(z.dot(y)));
       if (z.lengthSq() < 1e-4) z.set(1, 0, 0);
       z.normalize(); x = new THREE.Vector3().crossVectors(y, z);
@@ -1199,12 +1014,16 @@ function createViewer3D(container, mode) {
       h.twist[0].quaternion.identity().slerp(tw, 1 / 3); h.twist[1].quaternion.identity().slerp(tw, 2 / 3);
     }
   }
+  // Centre of the closed fist (where a bar or handle runs through the hand), or the middle of
+  // the palm for a flat hand.
   function gripPoint(s) {
     const fa = cur.parts["forearm" + s];
     const wrist = new THREE.Vector3(0, 27, 0).applyQuaternion(fa.quaternion).add(fa.position);
-    const off = (fig3.hand === "flat") ? new THREE.Vector3(-1.6, 4.5, 0) : new THREE.Vector3(-2.6, 6, 0);
+    const off = (fig3.hand === "flat") ? new THREE.Vector3(-1.6, 4.5, 0) : new THREE.Vector3(-2.8, 6.7, 0);
     return wrist.add(off.applyQuaternion(handQOf()[s]));
   }
+  // The line a bar takes through the fist: across the palm, from the little finger to the index finger.
+  function gripAxis(s) { return new THREE.Vector3(0, 0, s === "R" ? 1 : -1).applyQuaternion(handQOf()[s]); }
   // For reaching moves the hand travels on an arc around the shoulder between its start and end
   // positions, instead of following the 2D joint angles (which can swing the arm the long way round).
   let reachEnds = null;
@@ -1218,6 +1037,19 @@ function createViewer3D(container, mode) {
     const q = new THREE.Quaternion().setFromUnitVectors(ra.clone().normalize(), rb.clone().normalize());
     const dir = ra.clone().normalize().applyQuaternion(new THREE.Quaternion().slerp(q, pz));
     return dir.multiplyScalar(len);
+  }
+  // Lever machines: the hands travel on a circle of radius ik.arc through the start and end hand
+  // positions, centred above and behind them (where the lever's pivot is).
+  function arcTarget(pz, side) {
+    const [A, B] = curEnds.map(({ j, gz }) => to3(j.hand).setZ(side * (gz ?? fig3.ik.grip ?? 22)));
+    const chord = B.clone().sub(A), h = chord.length() / 2, R = Math.max(fig3.ik.arc, h + 1);
+    const perp = new THREE.Vector3(-chord.y, chord.x, 0).normalize();
+    if (perp.y < 0) perp.negate();
+    const C = A.clone().add(B).multiplyScalar(0.5).addScaledVector(perp, Math.sqrt(R * R - h * h));
+    const a0 = Math.atan2(A.y - C.y, A.x - C.x); let a1 = Math.atan2(B.y - C.y, B.x - C.x);
+    if (a1 - a0 > Math.PI) a1 -= 2 * Math.PI; else if (a0 - a1 > Math.PI) a1 += 2 * Math.PI;
+    const a = a0 + (a1 - a0) * pz;
+    return new THREE.Vector3(C.x + Math.cos(a) * R, C.y + Math.sin(a) * R, A.z + (B.z - A.z) * pz);
   }
   function pose(p, t, target = body, ends = reachEnds) {
     cur = target; curEnds = ends;
@@ -1251,8 +1083,14 @@ function createViewer3D(container, mode) {
       if (ik) {
         // Two-bone reach: the hand goes where the 2D pose puts it, at the grip width,
         // and the elbow bends toward the pole (out to the side, like a real press).
-        const H = t == null ? to3(j.hand).setZ(side * (p.gz ?? ik.grip ?? 22))
+        // Hanging and supported moves keep a fixed grip on the bar (the 2D hand, at the grip
+        // width); lever machines move the hand on the lever's circle; others reach on an arc
+        // around the shoulder.
+        const H = t == null || fig3.hold === "hands" ? to3(j.hand).setZ(side * (p.gz ?? ik.grip ?? 22))
+          : ik.arc ? arcTarget(t, side)
           : to3(j.shoulder).add(new THREE.Vector3(0, 0, side * VIEW3D.shoulderHalf)).add(reachTarget(t, side));
+        // Both hands on one handle (Pallof press): one fist above the other at the midline.
+        if (ik.stack) { H.z = side * 0.6; H.y += side * ik.stack; }
         if (handMode === "flat") H.y = Math.max(H.y, 2.6);
         const pole = new THREE.Vector3(...(ik.pole || [-0.5, -0.6, 1])); pole.z *= side; pole.applyQuaternion(torsoQ);
         solveArm(cur.parts["upperArm" + s], cur.parts["forearm" + s], sh, H, pole, handMode === "flat" ? 27 : 33);
@@ -1275,35 +1113,17 @@ function createViewer3D(container, mode) {
       placeAngle(cur.parts["foot" + s], ankle, footDir, legOut);
     });
 
-    if (target !== body) return;
+    // Hanging and supported moves (pull-up, dips): the hands stay locked on the bar and the
+    // body moves around them, like a real closed chain.
+    if (fig3.hold === "hands" && holdAt) {
+      const d = holdAt.clone().sub(gripPoint("R").add(gripPoint("L")).multiplyScalar(0.5));
+      Object.values(cur.parts).forEach((g) => { if (g.parent === scene || !g.parent) g.position.add(d); });
+    }
+    if (target !== body || !rig || !fitted) return;
     // Equipment that moves with the body.
-    const handR = gripPoint("R"), handL = gripPoint("L");
-    const L = ex.figure.load || {};
-    if (load.bar) {
-      if (L.at === "shoulder") {
-        const at = to3(j.shoulder); const off = L.offset || [0, 0];
-        load.bar.position.set(at.x + off[0], at.y - off[1], 0);
-      } else load.bar.position.set((handR.x + handL.x) / 2, (handR.y + handL.y) / 2, 0);
-    }
-    if (load.dbs) {
-      [handR, handL].forEach((h, i) => {
-        load.dbs[i].position.copy(h);
-        load.dbs[i].quaternion.copy(body.handQ[i ? "L" : "R"]);
-      });
-    }
-    if (load.cables) updateCables();
-    if (load.cable) {
-      const pos = load.cable.geometry.attributes.position;
-      pos.setXYZ(0, load.from.x, load.from.y, load.from.z); pos.setXYZ(1, handR.x, handR.y, (handR.z + handL.z) / 2); pos.needsUpdate = true;
-      load.handle.position.set(handR.x, handR.y, (handR.z + handL.z) / 2);
-    }
-    if (load.roller) { const a = endOf(cur.parts.shinR, 42); load.roller.position.set(a.x, a.y + 5, 0); }
-    if (load.plate) {
-      const ft = cur.parts.footR, toe = endOf(ft, 9);
-      load.plate.position.copy(toe).add(new THREE.Vector3(-3, 0, 0).applyQuaternion(ft.quaternion)).setZ(0);
-      load.plate.quaternion.copy(ft.quaternion);
-    }
-
+    rig.update({ t, grip: { R: gripPoint("R"), L: gripPoint("L") }, axis: { R: gripAxis("R"), L: gripAxis("L") }, handQ: body.handQ, J: jointsOf(body) });
+    paths.forEach((p) => p.bead.position.copy(p.at()));
+    updateShadows();
   }
 
   // ----- Form feedback -----
@@ -1635,20 +1455,43 @@ function createViewer3D(container, mode) {
     container.dispatchEvent(new CustomEvent("muscle-pick", { bubbles: true, detail: { id: pinned } }));
   });
 
+  // First framing, from the joints alone (before the skin and equipment exist).
   function frameCamera() {
-    // Fit the whole rep: sample the motion and take its bounds.
     const pts = [];
     [0, 0.5, 1].forEach((t) => {
       const j = solveSide(lerpPose(poseA, poseB, t));
       Object.values(j).forEach((v) => { if (Array.isArray(v)) pts.push(v); });
     });
     const xs = pts.map((p) => p[0] - 100), ys = pts.map((p) => 189 - p[1]);
-    const minX = Math.min(...xs) - 20, maxX = Math.max(...xs) + 20, minY = Math.max(0, Math.min(...ys) - 12), maxY = Math.max(...ys) + 16;
-    // Hanging exercises: drop the floor well below the feet.
-    floor.position.y = ex.figure.noFloor ? Math.min(0, Math.min(...ys) - 40) : 0;
+    const minX = Math.min(...xs) - 20, maxX = Math.max(...xs) + 20, minY = Math.min(...ys) - 12, maxY = Math.max(...ys) + 16;
     target.set((minX + maxX) / 2, (minY + maxY) / 2, 0);
     const size = Math.max(maxX - minX, maxY - minY, 120);
     dist = size / 2 / Math.tan((camera.fov * Math.PI) / 360) * 1.12;
+  }
+  // Frame body, equipment and the whole movement for the exercise's camera angle: project the
+  // scene's bounds onto the view and back the camera off until everything fits, with a margin.
+  function frameScene(ctx) {
+    const box = ctx.bounds();
+    const eq = new THREE.Box3().setFromObject(equipment);
+    if (!eq.isEmpty()) {
+      // Take in the equipment, but not so much that the body gets small (tall towers are cropped).
+      const near = box.clone().expandByVector(new THREE.Vector3(60, 45, 75));
+      box.union(eq.intersect(near));
+    }
+    box.min.y = Math.max(box.min.y, floorY - 4);
+    const c = box.getCenter(new THREE.Vector3());
+    const f = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)); // toward the camera
+    const right = new THREE.Vector3(0, 1, 0).cross(f).normalize(), up = new THREE.Vector3().crossVectors(f, right);
+    const tv = Math.tan((camera.fov * Math.PI) / 360), th = tv * Math.max(0.5, camera.aspect || 1);
+    let need = 0;
+    for (let i = 0; i < 8; i++) {
+      const q = new THREE.Vector3(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z).sub(c);
+      const z = q.dot(f);
+      need = Math.max(need, z + Math.abs(q.dot(right)) / th, z + Math.abs(q.dot(up)) / tv);
+    }
+    target.copy(c);
+    dist = Math.max(need * 1.06, 150);
+    bodyTop = ctx.bounds().max.y;
   }
 
   // Rep tempo like a real lifter: pause, controlled move to b, brief hold, slower return.
@@ -1671,7 +1514,7 @@ function createViewer3D(container, mode) {
     const dark = getComputedStyle(container).getPropertyValue("--stage").trim() === "dark";
     if (dark === stageDark) return;
     stageDark = dark;
-    mats.floor.color.set(dark ? 0x23272d : 0xe9e9e6);
+    floor.material.color.setScalar(dark ? 1.3 : 1.9);
     rim.intensity = dark ? 2.2 : 1.3;
     renderer.toneMappingExposure = dark ? 1.15 : 1.05;
   }
@@ -1684,9 +1527,9 @@ function createViewer3D(container, mode) {
     if (now - stageAt > 400) { stageAt = now; readStage(); }
     if (!shownAt) shownAt = now;
     const k = reduce ? 5000 : now - shownAt; // time since this exercise appeared
-    const t = reduce ? 1 : easeT(now, period);
+    const t = heldAt ?? (reduce ? 1 : easeT(now, period));
     if (ghost) {
-      const gt = reduce ? 1 : easeT(now);
+      const gt = heldAt ?? (reduce ? 1 : easeT(now));
       pose(lerpPose(ghostA, ghostB, gt), fig3.ik ? gt : null, ghost, ghostEnds);
       ghost.mat.uniforms.opacity.value = (ghostOn ? 0.42 : 0) * smooth((k - 450) / 650);
     }
@@ -1705,9 +1548,15 @@ function createViewer3D(container, mode) {
     // Breathing: the ribcage swells a little.
     const breath = 1 + 0.018 * Math.sin(now / 650);
     body.parts.upperTorso.scale.x = breath; body.parts.upperTorso.scale.z = 1 + 0.009 * Math.sin(now / 650);
+    // The camera glides to each new framing instead of jumping (and follows a drag at once).
     const aim = closeUp ? closeUp.at : target, d = closeUp ? dist / closeUp.zoom : dist;
-    camera.position.set(aim.x + Math.sin(yaw) * Math.cos(pitch) * d, aim.y + Math.sin(pitch) * d, aim.z + Math.cos(yaw) * Math.cos(pitch) * d);
-    camera.lookAt(aim);
+    const dt = Math.min(0.1, Math.max(0, (now - (cam.at || now)) / 1000)); cam.at = now;
+    const kk = cam.snap || reduce ? 1 : 1 - Math.exp(-dt / 0.38);
+    cam.snap = false;
+    cam.aim.lerp(aim, kk); cam.d += (d - cam.d) * kk;
+    if (drag) { cam.yaw = yaw; cam.pitch = pitch; } else { cam.yaw += (yaw - cam.yaw) * kk; cam.pitch += (pitch - cam.pitch) * kk; }
+    camera.position.set(cam.aim.x + Math.sin(cam.yaw) * Math.cos(cam.pitch) * cam.d, cam.aim.y + Math.sin(cam.pitch) * cam.d, cam.aim.z + Math.cos(cam.yaw) * Math.cos(cam.pitch) * cam.d);
+    camera.lookAt(cam.aim);
     camera.updateMatrixWorld();
     updateFeedback(now, k);
     if (hoverAt && frame % 3 === 0) {
@@ -1719,54 +1568,73 @@ function createViewer3D(container, mode) {
     renderer.render(scene, camera);
   }
 
-  let bodyTop = 180, closeUp = null;
+  let bodyTop = 180, closeUp = null, heldAt = null;
+  const cam = { aim: new THREE.Vector3(0, 90, 0), d: 400, yaw: VIEW3D.yaw, pitch: VIEW3D.pitch, at: 0, snap: true };
   function setExercise(next) {
     ex = next;
     form = (typeof FORM !== "undefined" ? FORM : {})[ex.name] || null;
     const fig = { ...ex.figure, ...(ex.figure3d || {}) };
     fig3 = fig;
+    clearEquipment();
     const fault = mode === "bad" ? { ...ex.bad, ...(ex.bad3d || {}) } : null;
     const extra = { armsOut: fig.armsOut, abd: fig.abd, abdAxis: fig.abdAxis };
-    poseA = { ...extra, ...fig.a, ...(fault && fault.a) };
-    poseB = { ...extra, ...fig.b, ...(fault && fault.b) };
-    ghostA = { ...extra, ...fig.a }; ghostB = { ...extra, ...fig.b };
+    // fig.mix: 3D-only joint angles applied to both ends of the rep (e.g. hands on a machine's handles).
+    poseA = { ...extra, ...fig.a, ...fig.mix, ...(fault && fault.a) };
+    poseB = { ...extra, ...fig.b, ...fig.mix, ...(fault && fault.b) };
+    ghostA = { ...extra, ...fig.a, ...fig.mix }; ghostB = { ...extra, ...fig.b, ...fig.mix };
     poseA.view = poseB.view = ghostA.view = ghostB.view = undefined;
     reachEnds = [poseA, poseB].map((q) => ({ j: solveSide(q), gz: q.gz }));
     ghostEnds = [ghostA, ghostB].map((q) => ({ j: solveSide(q), gz: q.gz }));
     const err = form && form.error;
     period = mode === "bad" && err && err.type === "tempo" ? (err.tempo === "slow" ? 8000 : 2300) : 4600;
-    frameCamera();
-    buildEquipment(fig);
-    if (fig.station) {
-      // Widen the view to take in the machine.
-      const b = new THREE.Box3().setFromObject(equipment), c = b.getCenter(new THREE.Vector3()), sz = b.getSize(new THREE.Vector3());
-      const span = Math.max(sz.x * 0.85 + sz.z * 0.55, sz.y) + 20;
-      target.set((target.x + c.x) / 2, Math.max(target.y, sz.y / 2 + floor.position.y), 0);
-      dist = Math.max(dist, span / 2 / Math.tan((camera.fov * Math.PI) / 360) * 1.1);
-    }
-    bodyTop = target.y + dist * Math.tan((camera.fov * Math.PI) / 360);
     body.setHands(!fig.hand || fig.hand === "grip");
     if (ghost) ghost.setHands(!fig.hand || fig.hand === "grip");
+    // A hanging or supported body holds the bar where its hands are at the start of the rep.
+    holdAt = null;
+    if (fig.hold === "hands") {
+      pose(lerpPose(ghostA, ghostB, 0), fig.ik ? 0 : null);
+      holdAt = gripPoint("R").add(gripPoint("L")).multiplyScalar(0.5);
+    }
+    resize();
+    // Each exercise has its best camera angle; the camera glides there.
+    [yaw, pitch] = fig.view || [VIEW3D.yaw, VIEW3D.pitch];
+    frameCamera();
     viewer.analysis = null;
     pinned = null; tip.hidden = true; focusId = null;
     setFeedback();
     setActivation();
+    fitScene();
     shownAt = 0;
-    resize();
   }
 
   raf = requestAnimationFrame(tick);
   const viewer = {
     setExercise,
     analysis: null, // after setExercise on a mistake: { label, your, optimal } for the biggest difference
-    resetView() { yaw = VIEW3D.yaw; pitch = VIEW3D.pitch; },
+    resetView() { [yaw, pitch] = (fig3 && fig3.view) || [VIEW3D.yaw, VIEW3D.pitch]; },
     // Turn the camera to a given angle (radians around the body, and up/down).
     // zoom > 1 moves in on a point atY above the framed center (for close-ups of the body).
     setView(y, p, zoom, atY) { yaw = y; if (p != null) pitch = p; closeUp = zoom > 1 ? { zoom, at: new THREE.Vector3(target.x, target.y + (atY || 0), target.z) } : null; },
     // Show one muscle on its own (null for all the exercise's muscles).
     focusMuscle(id) { focusId = id || null; if (ex) setActivation(); },
+    // Hold the rep still at a moment t (0 = start, 1 = end of the movement); null plays it.
+    holdAt(t) { heldAt = t == null ? null : Math.min(1, Math.max(0, t)); },
     // Show or hide the optimal-form ghost over a mistake.
     setGhost(on) { ghostOn = !!on; },
+    // Contact report (for automated checks): how the body meets the floor and the equipment.
+    inspect() {
+      if (!body.skin || !ex) return null;
+      const S = sampleRep(8), ctx = makeCtx(S), r = (v) => Math.round(v * 10) / 10, v3 = (v) => [r(v.x), r(v.y), r(v.z)];
+      const feet = (n) => n.startsWith("foot");
+      const out = {
+        floorY: r(floorY), bodyMin: r(ctx.lowest({})), feetMin: S.map((s) => r(Math.min(...[...Array(s.pts.length / 3).keys()].filter((v) => feet(ctx.names[dominantBones()[v]])).map((v) => s.pts[3 * v + 1])))),
+        grips: S.map((s) => [v3(s.grip.R), v3(s.grip.L)]), joints: S.map((s) => Object.fromEntries(Object.entries(s.J).map(([k, v]) => [k, v3(v)]))),
+        bounds: (() => { const b = ctx.bounds(); return [v3(b.min), v3(b.max)]; })(),
+        report: rig && rig.report ? rig.report(ctx) : null
+      };
+      pose(lerpPose(poseA, poseB, 0), fig3.ik ? 0 : null);
+      return out;
+    },
     dispose() {
       disposed = true; cancelAnimationFrame(raf); if (ro) ro.disconnect();
       renderer.dispose(); if (renderer.forceContextLoss) renderer.forceContextLoss();
