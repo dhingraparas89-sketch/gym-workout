@@ -122,7 +122,7 @@ const EXERCISES = [
     good: { cue: "Start from a full hang and pull until your chin clears the bar.", highlight: ["arm"] },
     bad: { cue: "Kicking the legs and swinging for momentum. The lats only do part of the work.", highlight: ["hip", "thigh"],
       b: { thigh: -62, shin: 10, torso: -20 } },
-    figure3d: { kit: "pullupBar", hold: "hands", ik: { grip: 46, pole: [0.2, -0.6, 1] } },
+    figure3d: { kit: "pullupBar", hold: "hands", path: "neck", ik: { grip: 46, pole: [0.2, -0.6, 1] } },
     figure: { noFloor: true, armsOut: true, abd: 28, props: [{ line: [40, 14, 170, 14], w: 6, axis: "z" }], load: { type: "none" },
       a: { x: 100, y: 14, anchor: "hand", foot: 160, shin: 70, thigh: -6, torso: -4, neck: 0, ua: 4, fa: 0 },
       b: { x: 100, y: 14, anchor: "hand", foot: 160, shin: 70, thigh: -6, torso: -8, neck: 0, ua: 172, fa: -8 } }
@@ -346,7 +346,7 @@ const EXERCISES = [
     good: { cue: "Stay upright and lower until the elbows reach 90°.", highlight: ["elbow", "upperArm"] },
     bad: { cue: "Sinking too deep with the shoulders rolling forward. Hard on the shoulder joint.", highlight: ["shoulder"],
       b: { torso: 30, neck: 40, ua: 275, fa: 150 } },
-    figure3d: { kit: "dipStation", hold: "hands", ik: { grip: 27, pole: [-1, 0, 0.35] }, grip: "neutral" },
+    figure3d: { kit: "dipStation", hold: "hands", path: "neck", ik: { grip: 27, pole: [-1, 0, 0.35] }, grip: "neutral" },
     figure: { noFloor: true, props: [{ line: [60, 104, 150, 104], w: 6, pair: true }, { line: [140, 104, 140, 188], w: 5, pair: true }], load: { type: "none" },
       a: { x: 106, y: 104, anchor: "hand", foot: 180, shin: 80, thigh: 10, torso: 2, neck: 4, ua: 180, fa: 180 },
       b: { x: 106, y: 104, anchor: "hand", foot: 180, shin: 80, thigh: 10, torso: 10, neck: 10, ua: 245, fa: 160 } }

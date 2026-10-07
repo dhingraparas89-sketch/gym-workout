@@ -1113,7 +1113,7 @@ GYM3D.kits = (() => {
     return { update };
   } };
 
-  // Lat pulldown: seat, thigh rollers locking the legs, a tower behind with a boom over the
+  // Lat pulldown: seat, thigh rollers locking the legs, a tower in front with a boom over the
   // lifter, and the lat bar on the cable.
   K.pulldown = { build(ctx) {
     const THREE = T(), P = ctx.P, M = P.M, fy = P.floorY, S = ctx.S, J = S[0].J, hip = J.pelvis, knee = J.knee;
@@ -1130,9 +1130,12 @@ GYM3D.kits = (() => {
     P.beam(V(rx + 2, fy + 9, 0), V(rx + 2, ry - 3, 0), 4.5, 4.5, V(0, 0, 1), { caps: false });
     P.box(5, 5, 5, M.graphite, V(rx + 2, ry - 3, 0));
     let top = -Infinity, bx = 0; S.forEach((s) => { const m = mid(s.grip.R, s.grip.L); if (m.y > top) { top = m.y; bx = m.x; } });
-    const at = V(hip.x - 44, 0, 0), H = Math.max(212, top - fy + 48);
-    const t = cableTower(ctx, { at, face: V(1, 0, 0), height: H, boom: bx - at.x, ratio: 0.5 });
-    P.beam(V(at.x + 2, fy + 5.25, 0), V(rx + 8, fy + 5.25, 0), 7.5, 7.5, V(0, 1, 0));
+    // The lifter faces the machine: the tower stands just past the feet, its boom reaching back
+    // over the bar.
+    const at = V(Math.max(J.toe.x, knee.x) + 16, 0, 0), H = Math.max(212, top - fy + 48);
+    const t = cableTower(ctx, { at, face: V(-1, 0, 0), height: H, boom: at.x - bx, ratio: 0.5 });
+    P.beam(V(hip.x - 16, fy + 5.25, 0), V(at.x - 4, fy + 5.25, 0), 7.5, 7.5, V(0, 1, 0));
+    P.stabilizer(V(hip.x - 10, fy, 0), V(0, 0, 1), 52);
     P.foot(rx + 5, 0, 8, 10);
     P.beam(V(hip.x + 2, fy + 9, 0), V(hip.x + 2, seatTop - 9, 0), 7.5, 6, V(0, 0, 1), { caps: false });
     P.box(sx1 - sx0 - 6, 3, 8, M.steel, V((sx0 + sx1) / 2, seatTop - 10.5, 0));

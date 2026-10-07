@@ -161,6 +161,7 @@ function detailNode(ex, opts = {}) {
       <section class="stage stage-good">
         <header class="stage-top">
           <span class="stage-name">Optimal form <small>Reference movement</small></span>
+          <button type="button" class="ghost-toggle fiber-toggle" aria-pressed="false" title="Show the fiber direction of the working muscles">Fiber detail</button>
         </header>
         <div class="fig-slot">
           <div class="stage-badge is-good"><b>${ICON.check}Form optimal</b><span>Great movement pattern</span></div>
@@ -218,6 +219,8 @@ function detailNode(ex, opts = {}) {
     wrap.addEventListener("click", (e) => {
       const b = e.target.closest("[data-focus]");
       if (b) focus(b.getAttribute("aria-pressed") === "true" ? null : b.dataset.focus);
+      const fb = e.target.closest(".fiber-toggle");
+      if (fb) { const on = fb.getAttribute("aria-pressed") !== "true"; fb.setAttribute("aria-pressed", String(on)); v3.forEach((v) => v.setFibers(on)); return; }
       const g = e.target.closest(".ghost-toggle");
       if (g) { const on = g.getAttribute("aria-pressed") !== "true"; g.setAttribute("aria-pressed", String(on)); v3[1].setGhost(on); }
     });
