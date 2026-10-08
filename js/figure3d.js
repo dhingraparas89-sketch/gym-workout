@@ -1876,7 +1876,7 @@ function createViewer3D(container, mode, opts = {}) {
       const J = jointsOf(body), r = (v) => Math.round(v);
       const at = (k, a, b, c) => (measured.moves[k] ? r(angle3(J[a], J[b], J[c])) : null);
       const up = J.spine.clone().sub(J.pelvis), hi = J.neck.clone().sub(J.spine), dev = 180 - angle3(J.pelvis, J.spine, J.neck);
-      const spine = dev < 20 ? "Neutral" : up.x * hi.y - up.y * hi.x < 0 ? "Flexed" : "Extended";
+      const spine = dev < 20 ? "Neutral" : up.x * hi.y - up.y * hi.x > 0 ? "Flexed" : "Extended";
       return { knee: at("knee", "hip", "knee", "ankle"), hip: at("hip", "neck", "pelvis", "knee"), elbow: at("elbow", "shoulder", "elbow", "hand"),
         shoulder: at("shoulder", "pelvis", "shoulder", "elbow"), spine, range: measured.range, stability: measured.stability };
     },

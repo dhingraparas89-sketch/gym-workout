@@ -1,394 +1,357 @@
-// Page logic: plan view, muscle library, and the exercise detail window.
+// Page shell: hash router, top navigation, and the pages (dashboard, library, exercise detail,
+// muscles, my exercises, plans). Every 3D viewer is created by the page that shows it and
+// disposed when the route changes.
 
-const $ = (sel) => document.querySelector(sel);
+const state = { plan: "ppl", style: "lab" };
 
-const BY_NAME = {};
-EXERCISES.forEach((ex) => { BY_NAME[ex.name] = ex; });
-const GROUP_NAME = Object.fromEntries(GROUPS.map((g) => [g.id, g.name]));
+// ---------- Viewer lifecycle ----------
+const MAX_VIEWERS = 3;
+const live = { viewers: [], cleanups: [] };
+function makeViewer(container, mode, opts) {
+  if (!window.THREE || typeof createViewer3D !== "function") return null;
+  while (live.viewers.length >= MAX_VIEWERS) { const old = live.viewers.shift(); try { old.dispose(); } catch (e) {} }
+  let v = null;
+  try { v = createViewer3D(container, mode, opts || {}); } catch (e) { console.error(e); v = null; }
+  if (v) live.viewers.push(v);
+  return v;
+}
+function teardown() {
+  live.cleanups.splice(0).forEach((fn) => { try { fn(); } catch (e) {} });
+  live.viewers.splice(0).forEach((v) => { try { v.dispose(); } catch (e) {} });
+}
+const ctx = {
+  makeViewer,
+  onCleanup: (fn) => live.cleanups.push(fn),
+  // Update the address without re-rendering the page (filters, selections).
+  setHash(h) { try { history.replaceState(null, "", h); } catch (e) { location.hash = h; } highlightNav(); }
+};
 
-const state = { view: "plan", plan: "ppl", muscle: "chest", style: "lab" };
+// ---------- Router ----------
+function parseHash() {
+  const raw = (location.hash || "#/").replace(/^#\/?/, "");
+  const [path, query] = raw.split("?");
+  const parts = path.split("/").filter(Boolean).map(decodeURIComponent);
+  return { page: parts[0] || "", params: parts.slice(1), query: new URLSearchParams(query || "") };
+}
+const PAGES = {
+  "": renderDashboard, library: renderLibrary, exercise: renderExercise, muscles: (r) => renderMuscles(r.params, ctx),
+  my: renderMy, plans: renderPlans
+};
+const NAV_OF = { "": "", library: "library", exercise: "library", muscles: "muscles", my: "my", plans: "plans" };
+function highlightNav() {
+  const { page } = parseHash();
+  $$(".nav a").forEach((a) => a.setAttribute("aria-current", a.dataset.nav === NAV_OF[page] ? "page" : "false"));
+}
+let lastPage = null;
+function route() {
+  teardown();
+  const r = parseHash();
+  const render = PAGES[r.page] || renderDashboard;
+  const app = $("#app");
+  app.innerHTML = "";
+  document.title = "Rep Sheet";
+  let node;
+  try { node = render(r); } catch (e) { console.error(e); node = notFound(); }
+  app.appendChild(node);
+  app.dataset.page = r.page || "home";
+  highlightNav();
+  closeMenu();
+  const key = r.page + "/" + r.params.join("/");
+  if (key !== lastPage) window.scrollTo(0, 0);
+  lastPage = key;
+}
+function notFound() {
+  const d = document.createElement("div");
+  d.className = "empty";
+  d.innerHTML = `<h2>Not found</h2><p>That page doesn't exist.</p><a class="btn" href="#/library">Browse exercises</a>`;
+  return d;
+}
+const mk = (cls, html, tag) => { const d = document.createElement(tag || "div"); if (cls) d.className = cls; if (html != null) d.innerHTML = html; return d; };
 
-function remember(key, value) { try { localStorage.setItem("repsheet." + key, value); } catch (e) {} }
-function recall(key) { try { return localStorage.getItem("repsheet." + key); } catch (e) { return null; } }
+// ---------- Dashboard ----------
+const POPULAR = ["Back squat", "Barbell bench press", "Deadlift", "Pull-up", "Romanian deadlift", "Overhead press", "Lat pulldown", "Dumbbell lateral raise"];
+const CAT_ICON = {
+  chest: "M4 8c3-2 5-2 8 0 3-2 5-2 8 0v5c-2 3-5 3-8 1-3 2-6 2-8-1z",
+  back: "M12 3v18M7 6l5 3 5-3M6 11l6 4 6-4M8 17l4 2 4-2",
+  shoulders: "M4 14a8 6 0 0 1 16 0M8 10a4 4 0 0 1 8 0M12 4v3",
+  arms: "M6 18c0-6 3-9 7-10 2-.5 4 1 4 3s-2 3-4 3M6 18h8",
+  legs: "M9 3v8l-2 10M15 3v8l2 10M9 11h6",
+  glutes: "M4 9c0 6 3 10 8 10s8-4 8-10M12 9v10M4 9h16",
+  core: "M8 4h8v16H8zM8 9h8M8 14h8M12 4v16"
+};
+function renderDashboard() {
+  const page = mk("dash");
+  const popular = POPULAR.map((n) => BY_NAME[n]).filter(Boolean);
+  const total = ALL_EXERCISES().length;
+  page.innerHTML = `
+    <section class="hero">
+      <div class="hero-text">
+        <p class="eyebrow">Biomechanics lab</p>
+        <h1>Train smarter.<br>Move better.</h1>
+        <p class="lede">${total} exercises analyzed on a 3D anatomical model: optimal form, the exact correction for the most common mistake, and every muscle at work along its fibers.</p>
+        <div class="hero-cta">
+          <a class="btn" href="#/library">Browse exercises ${ICON.arrow}</a>
+          <a class="btn btn-ghost" href="#/muscles">Muscle explorer</a>
+        </div>
+        <dl class="hero-stats">
+          <div><dt>Exercises</dt><dd>${total}</dd></div>
+          <div><dt>Muscles mapped</dt><dd>${Object.keys(MUSCLES).length}</dd></div>
+          <div><dt>Form checks</dt><dd>${ALL_EXERCISES().reduce((t, e) => t + (e.formChecks || []).length, 0)}</dd></div>
+        </dl>
+      </div>
+      <div class="hero-visual">
+        <div class="fig-slot hero-3d"></div>
+        <div class="hero-tag"><span class="dot"></span><b>Romanian deadlift</b><span>Optimal form · live</span></div>
+        <a class="hero-open" href="#/exercise/romanian-deadlift">Analyze ${ICON.arrow}</a>
+      </div>
+    </section>
 
-function formatRest(sec) {
-  if (sec < 60) return sec + " s";
-  const m = Math.floor(sec / 60), s = sec % 60;
-  return s ? m + ":" + String(s).padStart(2, "0") + " min" : m + " min";
+    <section class="block">
+      <header class="block-head"><h2>Quick start</h2><a href="#/library" class="more">All exercises ${ICON.arrow}</a></header>
+      <div class="cat-tiles">${CATEGORIES.map((c) => {
+        const n = ALL_EXERCISES().filter((e) => catsOf(e).includes(c.id)).length;
+        return `<a class="cat-tile" href="#/library?cat=${c.id}"><span class="cat-ico">${svgIcon(CAT_ICON[c.id] || CAT_ICON.core)}</span><b>${c.name}</b><span>${n} exercises</span>${ICON.arrow}</a>`;
+      }).join("")}</div>
+    </section>
+
+    <section class="block">
+      <header class="block-head"><h2>Popular exercises</h2><a href="#/library" class="more">See all ${ICON.arrow}</a></header>
+      <div class="popular"></div>
+    </section>
+
+    <section class="block">
+      <header class="block-head"><h2>Muscle map</h2><a href="#/muscles" class="more">Open 3D explorer ${ICON.arrow}</a></header>
+      <div class="dash-map">
+        <div class="map-figure panel"></div>
+        <div class="map-info panel"></div>
+      </div>
+    </section>
+
+    <section class="block cta-block">
+      <div class="cta">
+        <div>
+          <p class="eyebrow">Form analysis</p>
+          <h2>See your mistake next to the optimal rep.</h2>
+          <p class="lede">Side-by-side 3D comparison, a form score, the measured joint difference and the one correction that fixes it.</p>
+        </div>
+        <a class="btn" href="#/exercise/barbell-bench-press">Analyze an exercise ${ICON.arrow}</a>
+      </div>
+    </section>`;
+  page.querySelector(".popular").appendChild(cardGrid(popular));
+  mountMuscleMap(page.querySelector(".dash-map"), { region: "chest", muscle: "chest", compact: true });
+  const squat = BY_NAME["Romanian deadlift"] || BY_NAME["Back squat"];
+  const slot = page.querySelector(".hero-3d");
+  if (squat && window.THREE) {
+    slot.classList.add("fig-3d");
+    const v = makeViewer(slot, "good", { athlete: Store.athlete() || squat.athlete });
+    if (v) v.setExercise(squat);
+  } else if (squat) slot.appendChild(figureNode(squat, "good", { animate: true }));
+  return page;
 }
 
-// Rough session length: ~40 s per working set plus the rest after it, plus a 10 min warm-up.
+// ---------- Library ----------
+function renderLibrary(r) {
+  const q = r.query;
+  const f = { cat: CAT_NAME[q.get("cat")] ? q.get("cat") : "", eq: EQUIP_NAME[q.get("eq")] ? q.get("eq") : "", lvl: DIFF_NAME[q.get("lvl")] ? q.get("lvl") : "", q: q.get("q") || "" };
+  const page = mk("library");
+  const seg = (key, items, label) => `<div class="filter" role="group" aria-label="${label}"><span class="filter-label">${label}</span><div class="pills">
+      <button type="button" class="pill-btn" data-k="${key}" data-v="" aria-pressed="${!f[key]}">All</button>
+      ${items.map((i) => `<button type="button" class="pill-btn" data-k="${key}" data-v="${i.id}" aria-pressed="${f[key] === i.id}">${i.name}</button>`).join("")}</div></div>`;
+  page.innerHTML = `
+    <header class="page-head">
+      <p class="eyebrow">Library</p>
+      <h1>Exercises</h1>
+      <p class="lede">Every exercise with its muscles, setup and 3D form analysis.</p>
+    </header>
+    <div class="lib-tools">
+      <label class="search">${ICON.search}<input type="search" placeholder="Search exercises..." value="${esc(f.q)}" aria-label="Search exercises" autocomplete="off"><button type="button" class="search-clear" aria-label="Clear search" ${f.q ? "" : "hidden"}>${ICON.close}</button></label>
+      <div class="cat-tabs" role="tablist" aria-label="Category">
+        <button type="button" class="cat-tab" data-k="cat" data-v="" aria-pressed="${!f.cat}">All exercises</button>
+        ${CATEGORIES.map((c) => `<button type="button" class="cat-tab" data-k="cat" data-v="${c.id}" aria-pressed="${f.cat === c.id}">${c.name}</button>`).join("")}
+      </div>
+      <div class="filters">${seg("eq", EQUIPMENT_TYPES, "Equipment")}${seg("lvl", DIFFICULTIES, "Difficulty")}</div>
+    </div>
+    <div class="lib-status"><p class="count"></p><button type="button" class="reset" hidden>Reset filters</button></div>
+    <div class="lib-results"></div>`;
+  const results = page.querySelector(".lib-results"), count = page.querySelector(".count"), reset = page.querySelector(".reset");
+  const sync = () => {
+    const p = new URLSearchParams();
+    ["cat", "eq", "lvl", "q"].forEach((k) => { if (f[k]) p.set(k, f[k]); });
+    const s = p.toString();
+    ctx.setHash("#/library" + (s ? "?" + s : ""));
+  };
+  const draw = () => {
+    const list = ALL_EXERCISES().filter((ex) => matches(ex, f));
+    count.innerHTML = `<b>${list.length}</b> ${list.length === 1 ? "exercise" : "exercises"}${f.cat ? ` in ${CAT_NAME[f.cat]}` : ""}`;
+    reset.hidden = !(f.cat || f.eq || f.lvl || f.q);
+    results.innerHTML = "";
+    results.appendChild(cardGrid(list, `<span class="empty-ico">${ICON.search}</span><h3>No exercises match</h3><p>Try another muscle, category or equipment, or reset the filters.</p><button type="button" class="btn btn-ghost reset-2">Reset filters</button>`));
+  };
+  page.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-k]");
+    if (b) {
+      f[b.dataset.k] = b.dataset.v;
+      page.querySelectorAll(`[data-k="${b.dataset.k}"]`).forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.v === f[b.dataset.k])));
+      sync(); draw(); return;
+    }
+    if (e.target.closest(".reset, .reset-2")) {
+      f.cat = f.eq = f.lvl = f.q = "";
+      page.querySelector(".search input").value = "";
+      page.querySelector(".search-clear").hidden = true;
+      page.querySelectorAll("[data-k]").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.v === "")));
+      sync(); draw(); return;
+    }
+    if (e.target.closest(".search-clear")) {
+      const inp = page.querySelector(".search input");
+      inp.value = ""; f.q = ""; e.target.closest(".search-clear").hidden = true; inp.focus(); sync(); draw();
+    }
+  });
+  let t = 0;
+  page.querySelector(".search input").addEventListener("input", (e) => {
+    f.q = e.target.value.trim();
+    page.querySelector(".search-clear").hidden = !e.target.value;
+    clearTimeout(t);
+    t = setTimeout(() => { sync(); draw(); }, 120);
+  });
+  draw();
+  requestAnimationFrame(() => {
+    const on = page.querySelector('.cat-tab[aria-pressed="true"]'), bar = page.querySelector(".cat-tabs");
+    if (!on || !bar) return;
+    const a = on.getBoundingClientRect(), b = bar.getBoundingClientRect();
+    if (a.right > b.right) bar.scrollLeft += a.left - b.left - 16;
+  });
+  return page;
+}
+
+// ---------- Exercise detail ----------
+function renderExercise(r) {
+  const ex = BY_SLUG[r.params[0]] || BY_NAME[r.params[0]];
+  if (!ex) return notFound();
+  Store.pushRecent(ex.name);
+  document.title = ex.name + " · Rep Sheet";
+  return renderDetail(ex, ctx);
+}
+
+// ---------- My exercises ----------
+function renderMy() {
+  const page = mk("my");
+  const favs = Store.favorites().map((n) => BY_NAME[n]), recent = Store.recent().map((n) => BY_NAME[n]);
+  page.innerHTML = `
+    <header class="page-head">
+      <p class="eyebrow">Personal</p>
+      <h1>My exercises</h1>
+      <p class="lede">Saved exercises and the ones you opened recently, kept on this device.</p>
+    </header>
+    <section class="block">
+      <header class="block-head"><h2>${ICON.heart}Saved <span class="n">${favs.length}</span></h2></header>
+      <div class="saved"></div>
+    </section>
+    <section class="block">
+      <header class="block-head"><h2>${ICON.clock}Recent exercises <span class="n">${recent.length}</span></h2>${recent.length ? `<button type="button" class="more clear-recent">Clear</button>` : ""}</header>
+      <div class="recent"></div>
+    </section>`;
+  page.querySelector(".saved").appendChild(cardGrid(favs, `<span class="empty-ico">${ICON.heart}</span><h3>No saved exercises yet</h3><p>Tap the heart on any exercise to keep it here.</p><a class="btn btn-ghost" href="#/library">Browse exercises</a>`));
+  page.querySelector(".recent").appendChild(cardGrid(recent, `<span class="empty-ico">${ICON.clock}</span><h3>Nothing opened yet</h3><p>The last 8 exercises you open show up here.</p>`));
+  page.addEventListener("click", (e) => { if (e.target.closest(".clear-recent")) { Store.set("recent", []); route(); } });
+  return page;
+}
+
+// ---------- Plans ----------
 function estimateMinutes(list) {
   const sec = list.reduce((t, ex) => t + ex.sets * (40 + ex.rest), 0);
   return Math.round(sec / 60 / 5) * 5 + 10;
 }
-
-function musclePills(ex, max = 3) {
-  return ex.primary.slice(0, max).map((m) => `<span class="pill">${MUSCLES[m]}</span>`).join("");
-}
-
-// ---------- Detail (used in the spotlight and the pop-up window) ----------
-// Line icons, drawn on a 24-unit grid with a 1.7 stroke.
-const svgIcon = (d) => `<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="${d}"/></svg>`;
-const ICON = {
-  check: svgIcon("M5 12.5l4.2 4.2L19 7"),
-  warn: svgIcon("M12 4l9 16H3zM12 10v4.5M12 17.2v.3"),
-  motion: svgIcon("M4 17c3-9 7-12 16-12M16 3l4 2-2 4"),
-  posture: svgIcon("M12 3v18M8 7c2 1.5 6 1.5 8 0M8 12h8M8 17c2-1.5 6-1.5 8 0"),
-  alignment: svgIcon("M6 4l6 8-6 8M18 4v16"),
-  range: svgIcon("M4 19a8 8 0 0 1 16 0M12 19l5-6"),
-  tempo: svgIcon("M12 21a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM12 13l4-3M10 2h4"),
-  activation: svgIcon("M4 12h3l2-5 3 10 2-5h6"),
-  ghost: svgIcon("M6 20V10a6 6 0 0 1 12 0v10l-3-2-3 2-3-2zM10 10v.5M14 10v.5")
-};
-const ERROR_TYPES = {
-  posture: "Posture", alignment: "Joint alignment", range: "Range of motion", tempo: "Tempo", activation: "Muscle activation"
-};
-const SCORE_PARTS = [["posture", "Posture"], ["alignment", "Alignment"], ["range", "Range of motion"], ["tempo", "Tempo"], ["stability", "Stability"], ["activation", "Muscle activation"]];
-
-// Small stable variation per exercise, so optimal scores look measured rather than fixed.
-function jitter(name, salt, span) {
-  let h = 0;
-  for (const ch of name + salt) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return h % span;
-}
-function scoreOf(scores) {
-  const vals = SCORE_PARTS.map(([k]) => scores[k]);
-  return Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
-}
-function optimalScores(ex) {
-  return Object.fromEntries(SCORE_PARTS.map(([k]) => [k, 94 + jitter(ex.name, k, 6)]));
-}
-
-function scoreCard(ex, f) {
-  const yours = f.scores, best = optimalScores(ex), total = scoreOf(yours), bestTotal = scoreOf(best);
-  const C = 2 * Math.PI * 52;
-  return `
-    <article class="card score-card">
-      <p class="card-label">Form score</p>
-      <div class="score-main">
-        <svg class="score-ring" viewBox="0 0 120 120" aria-hidden="true">
-          <circle class="ring-track" cx="60" cy="60" r="52"/>
-          <circle class="ring-best" cx="60" cy="60" r="52" stroke-dasharray="${C}" style="--to:${C * (1 - bestTotal / 100)}"/>
-          <circle class="ring-value" cx="60" cy="60" r="52" stroke-dasharray="${C}" style="--to:${C * (1 - total / 100)}" stroke-dashoffset="${C}"/>
-        </svg>
-        <div class="score-num"><b data-count="${total}">0</b><span>/ 100</span></div>
-        <p class="score-note">Your form<br><span>Optimal ${bestTotal}</span></p>
-      </div>
-      <ul class="score-parts">
-        ${SCORE_PARTS.map(([k, label], i) => `
-          <li class="${k === f.error.type ? "is-weak" : ""}" style="--i:${i}">
-            <span>${label}</span><b>${yours[k]}</b>
-            <i class="bar"><i class="bar-best" style="--w:${best[k]}%"></i><i class="bar-fill" style="--w:${yours[k]}%"></i></i>
-          </li>`).join("")}
-      </ul>
-    </article>`;
-}
-
-function fixCard(f) {
-  const e = f.error;
-  return `
-    <article class="card fix-card">
-      <p class="card-label is-bad">${ICON.warn}Form correction</p>
-      <p class="fix-type">${ICON[e.type] || ""}${ERROR_TYPES[e.type] || "Form"}</p>
-      <h3>${e.title}</h3>
-      <p class="fix-detail">${e.detail}</p>
-      <div class="fix-cue"><span>Recommended</span>${e.fix}</div>
-      <div class="fix-metric" hidden>
-        <div><span>Your form</span><b class="m-your"></b></div>
-        <div><span>Optimal</span><b class="m-best"></b></div>
-        <p class="m-label"></p>
-      </div>
-    </article>`;
-}
-
-function muscleCard(ex, f) {
-  const comp = (f && f.error.compensate) || [];
-  const row = (m, role, pct, cls) => {
-    const info = MUSCLE_INFO[m];
-    return `<li><button type="button" class="m-row ${cls}" data-focus="${m}" aria-pressed="false">
-      <span class="m-name">${MUSCLES[m]}<em>${role}</em></span>
-      <span class="m-pct">${pct}%</span>
-      <i class="bar"><i class="bar-fill" style="--w:${pct}%"></i></i>
-      ${info ? `<small>${info.fibers}</small>` : ""}
-    </button></li>`;
-  };
-  const strong = (m) => 88 + jitter(ex.name, m, 9), soft = (m) => 42 + jitter(ex.name, m, 14);
-  return `
-    <article class="card muscle-card">
-      <p class="card-label">Muscle activation</p>
-      <div class="muscle-top">
-        ${bodyMap({ primary: ex.primary, secondary: ex.secondary })}
-        ${ex.movement ? `<p class="movement"><span>${ICON.motion}Movement</span>${ex.movement}</p>` : ""}
-      </div>
-      <ul class="m-rows">
-        ${ex.primary.map((m) => row(m, "Main · strong", strong(m), "is-main")).join("")}
-        ${ex.secondary.filter((m) => !comp.includes(m)).map((m) => row(m, "Helper · moderate", soft(m), "is-help")).join("")}
-        ${comp.filter((m) => !ex.primary.includes(m)).map((m) => row(m, "Takes over in the mistake", 55 + jitter(ex.name, m, 25), "is-comp")).join("")}
-      </ul>
-      <p class="card-hint">Tap a muscle here or on the body to see it on its own.</p>
-    </article>`;
-}
-
-// Count numbers up and grow bars once the panel is on screen.
-function animateIn(wrap) {
-  requestAnimationFrame(() => requestAnimationFrame(() => {
-    wrap.classList.add("is-in");
-    wrap.querySelectorAll("[data-count]").forEach((n) => {
-      const to = +n.dataset.count, start = performance.now(), dur = 1100;
-      const step = (now) => {
-        const k = Math.min(1, (now - start) / dur), e = 1 - Math.pow(1 - k, 3);
-        n.textContent = Math.round(to * e);
-        if (k < 1 && n.isConnected) requestAnimationFrame(step);
-      };
-      requestAnimationFrame(step);
-    });
-  }));
-}
-
-function detailNode(ex, opts = {}) {
-  const f = FORM[ex.name];
-  const wrap = document.createElement("div");
-  wrap.className = "detail" + (opts.compact ? " is-compact" : "");
-  const avg = Math.round(ex.primary.reduce((t, m) => t + 88 + jitter(ex.name, m, 9), 0) / ex.primary.length);
-  wrap.innerHTML = `
-    <header class="detail-head">
-      <p class="eyebrow">${GROUP_NAME[ex.group]} · ${ex.equipment}</p>
-      <h2 id="${opts.compact ? "" : "detail-title"}">${ex.name}</h2>
-      <p class="dose"><span class="prescription">${ex.sets} × ${ex.reps}</span><span class="rest">rest ${formatRest(ex.rest)}</span></p>
+function renderPlans() {
+  const page = mk("plans");
+  page.innerHTML = `
+    <header class="page-head">
+      <p class="eyebrow">Programs</p>
+      <h1>Workout plans</h1>
+      <p class="lede">Sets × reps are starting points. Pick a weight you can finish every set with one or two reps left in the tank.</p>
     </header>
-    <div class="compare">
-      <section class="stage stage-good">
-        <header class="stage-top">
-          <span class="stage-name">Optimal form <small>Reference movement</small></span>
-          <button type="button" class="ghost-toggle fiber-toggle" aria-pressed="false" title="Show the fiber direction of the working muscles">Fiber detail</button>
+    <div class="plan-picker"></div>
+    <div class="days"></div>`;
+  const draw = () => {
+    page.querySelector(".plan-picker").innerHTML = PLANS.map((p) => `
+      <button type="button" class="plan-option" data-plan="${p.id}" aria-pressed="${p.id === state.plan}">
+        <span class="plan-name">${p.name}</span>
+        <span class="plan-meta">${p.perWeek} days / week</span>
+        <span class="plan-who">${p.who}</span>
+      </button>`).join("");
+    const plan = PLANS.find((p) => p.id === state.plan) || PLANS[0];
+    const days = page.querySelector(".days");
+    days.innerHTML = "";
+    plan.days.forEach((day) => {
+      const list = day.exercises.map((n) => BY_NAME[n]).filter(Boolean);
+      const totalSets = list.reduce((t, ex) => t + ex.sets, 0);
+      const primary = [...new Set(list.flatMap((ex) => ex.primary))];
+      const secondary = [...new Set(list.flatMap((ex) => ex.secondary))].filter((m) => !primary.includes(m));
+      const card = mk("day", `
+        <header class="day-head">
+          <div><h3>${day.name}</h3><span class="day-meta">${list.length} exercises · ${totalSets} sets · ~${estimateMinutes(list)} min</span></div>
+          <div class="day-map">${bodyMap({ primary, secondary })}</div>
         </header>
-        <div class="fig-slot">
-          <div class="stage-badge is-good"><b>${ICON.check}Form optimal</b><span>Great movement pattern</span></div>
-        </div>
-        <footer class="stage-foot">
-          <ul class="checks">${(f ? f.checks : []).map((c, i) => `<li style="--i:${i}">${ICON.check}${c}</li>`).join("")}</ul>
-          <div class="act-meter"><span>Target muscle activation</span><b>${avg}%</b><i class="bar"><i class="bar-fill" style="--w:${avg}%"></i></i></div>
-          <p class="cue">${ex.good.cue}</p>
-        </footer>
-      </section>
-      <section class="stage stage-bad">
-        <header class="stage-top">
-          <span class="stage-name">Your form <small>Example: the common mistake</small></span>
-        </header>
-        <div class="fig-slot">
-          <div class="stage-badge is-bad"><b>${ICON.warn}Form correction</b><span>${f ? f.error.title : ex.bad.cue}</span></div>
-        </div>
-        <footer class="stage-foot">
-          <div class="guide-legend">
-            <span><i class="ln ln-bad"></i>Your form</span><span><i class="ln ln-good"></i>Optimal</span>
-            <button type="button" class="ghost-toggle" aria-pressed="true">${ICON.ghost}Optimal overlay</button>
-          </div>
-          <p class="cue"><b>Fix:</b> ${f ? f.error.fix : ex.bad.cue}</p>
-        </footer>
-      </section>
-    </div>
-    ${f && !opts.compact ? `<div class="insights">${scoreCard(ex, f)}${fixCard(f)}${muscleCard(ex, f)}</div>` : ""}`;
-
-  const slots = wrap.querySelectorAll(".fig-slot");
-  // 3D character when three.js loaded; the 2D figure otherwise.
-  const v3 = window.THREE && [["good", slots[0]], ["bad", slots[1]]].map(([mode, slot]) => {
-    slot.classList.add("fig-3d");
-    const v = createViewer3D(slot, mode);
-    v.setExercise(ex);
-    return v;
-  });
-  if (v3) {
-    const key = opts.compact ? "spotlight" : "detail";
-    (viewers3d[key] || []).forEach((v) => v.dispose());
-    viewers3d[key] = v3;
-    // Biggest measured difference, e.g. "Elbow angle: 118° vs 76°".
-    const a = v3[1].analysis, metric = wrap.querySelector(".fix-metric");
-    if (a && metric) {
-      metric.hidden = false;
-      metric.querySelector(".m-your").textContent = a.your;
-      metric.querySelector(".m-best").textContent = a.optimal;
-      metric.querySelector(".m-label").textContent = a.label;
-    }
-    // Picking a muscle (on either body or in the list) shows it on its own in both views.
-    const focus = (id) => {
-      v3.forEach((v) => v.focusMuscle(id));
-      wrap.querySelectorAll("[data-focus]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.focus === id)));
-    };
-    wrap.addEventListener("muscle-pick", (e) => focus(e.detail.id));
-    wrap.addEventListener("click", (e) => {
-      const b = e.target.closest("[data-focus]");
-      if (b) focus(b.getAttribute("aria-pressed") === "true" ? null : b.dataset.focus);
-      const fb = e.target.closest(".fiber-toggle");
-      if (fb) { const on = fb.getAttribute("aria-pressed") !== "true"; fb.setAttribute("aria-pressed", String(on)); v3.forEach((v) => v.setFibers(on)); return; }
-      const g = e.target.closest(".ghost-toggle");
-      if (g) { const on = g.getAttribute("aria-pressed") !== "true"; g.setAttribute("aria-pressed", String(on)); v3[1].setGhost(on); }
+        <ol class="ex-list"></ol>`, "article");
+      const ol = card.querySelector(".ex-list");
+      list.forEach((ex, i) => {
+        const li = mk("ex-row", `
+          <input type="checkbox" aria-label="Done: ${esc(ex.name)}">
+          <a class="ex-open" href="#/exercise/${ex.slug}">
+            <span class="thumb"></span>
+            <span class="ex-text"><span class="ex-name">${esc(ex.name)}</span>
+              <span class="pills">${ex.primary.slice(0, 2).map((m) => `<span class="pill">${esc(muscleName(m))}</span>`).join("")}</span></span>
+            <span class="ex-dose"><span class="prescription">${ex.sets} × ${esc(ex.reps)}</span><span class="rest">rest ${formatRest(ex.rest)}</span></span>
+          </a>`, "li");
+        li.querySelector(".thumb").appendChild(figureNode(ex, "good"));
+        ol.appendChild(li);
+      });
+      days.appendChild(card);
     });
-  } else {
-    slots[0].appendChild(createFigure(ex, "good", { animate: true }));
-    slots[1].appendChild(createFigure(ex, "bad", { animate: true }));
-    wrap.querySelectorAll(".ghost-toggle").forEach((b) => b.remove());
-  }
-  animateIn(wrap);
-  return wrap;
-}
-const viewers3d = {};
-
-let lastFocus = null;
-function openDetail(name) {
-  const ex = BY_NAME[name];
-  if (!ex) return;
-  lastFocus = document.activeElement;
-  const body = $("#modal-body");
-  body.innerHTML = "";
-  body.appendChild(detailNode(ex));
-  $("#modal").hidden = false;
-  document.body.classList.add("modal-open");
-  $(".modal-close").focus();
-}
-function closeDetail() {
-  $("#modal").hidden = true;
-  (viewers3d.detail || []).forEach((v) => v.dispose());
-  viewers3d.detail = [];
-  $("#modal-body").innerHTML = "";
-  document.body.classList.remove("modal-open");
-  if (lastFocus) lastFocus.focus();
-}
-
-// ---------- Plan view ----------
-function renderPlanPicker() {
-  $("#plan-picker").innerHTML = PLANS.map((p) => `
-    <button type="button" class="plan-option" data-plan="${p.id}" aria-pressed="${p.id === state.plan}">
-      <span class="plan-name">${p.name}</span>
-      <span class="plan-meta">${p.perWeek} days / week</span>
-      <span class="plan-who">${p.who}</span>
-    </button>`).join("");
-}
-
-function renderDays() {
-  const plan = PLANS.find((p) => p.id === state.plan);
-  const days = $("#days");
-  days.innerHTML = "";
-  plan.days.forEach((day, d) => {
-    const list = day.exercises.map((n) => BY_NAME[n]).filter(Boolean);
-    const totalSets = list.reduce((t, ex) => t + ex.sets, 0);
-    const primary = [...new Set(list.flatMap((ex) => ex.primary))];
-    const secondary = [...new Set(list.flatMap((ex) => ex.secondary))].filter((m) => !primary.includes(m));
-    const card = document.createElement("article");
-    card.className = "day";
-    card.innerHTML = `
-      <header class="day-head">
-        <div>
-          <h3>${day.name}</h3>
-          <span class="day-meta">${list.length} exercises · ${totalSets} sets · ~${estimateMinutes(list)} min</span>
-        </div>
-        <div class="day-map">${bodyMap({ primary, secondary })}</div>
-      </header>
-      <ol class="ex-list"></ol>`;
-    const ol = card.querySelector(".ex-list");
-    list.forEach((ex, i) => {
-      const id = `ex-${plan.id}-${d}-${i}`;
-      const li = document.createElement("li");
-      li.className = "ex-row";
-      li.innerHTML = `
-        <input type="checkbox" id="${id}" aria-label="Done: ${ex.name}">
-        <button type="button" class="ex-open" data-open="${ex.name}">
-          <span class="thumb"></span>
-          <span class="ex-text">
-            <span class="ex-name">${ex.name}</span>
-            <span class="pills">${musclePills(ex, 2)}</span>
-          </span>
-          <span class="ex-dose">
-            <span class="prescription">${ex.sets} × ${ex.reps}</span>
-            <span class="rest">rest ${formatRest(ex.rest)}</span>
-          </span>
-        </button>`;
-      li.querySelector(".thumb").appendChild(createFigure(ex, "good"));
-      ol.appendChild(li);
-    });
-    days.appendChild(card);
+  };
+  page.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-plan]");
+    if (b) { state.plan = b.dataset.plan; Store.setRaw("plan", state.plan); draw(); }
   });
+  draw();
+  return page;
 }
 
-// ---------- Library view ----------
-function renderLibrary() {
-  $("#muscle-map").innerHTML = bodyMap({ interactive: true, selected: state.muscle, primary: [state.muscle] });
-  $("#muscle-chips").innerHTML = Object.entries(MUSCLES).map(([id, name]) =>
-    `<button type="button" class="chip" data-muscle="${id}" aria-pressed="${id === state.muscle}">${name}</button>`).join("");
-
-  const main = EXERCISES.filter((ex) => ex.primary.includes(state.muscle));
-  const helps = EXERCISES.filter((ex) => ex.secondary.includes(state.muscle));
-  $("#library-title").textContent = `${MUSCLES[state.muscle]}: ${main.length} main exercise${main.length === 1 ? "" : "s"}`;
-  const list = $("#exercise-list");
-  list.innerHTML = "";
-  [...main.map((ex) => [ex, true]), ...helps.map((ex) => [ex, false])].forEach(([ex, isMain]) => {
-    const card = document.createElement("button");
-    card.type = "button";
-    card.className = "ex-card";
-    card.dataset.open = ex.name;
-    card.innerHTML = `
-      <span class="card-fig"></span>
-      <span class="card-body">
-        <span class="card-tag ${isMain ? "is-main" : ""}">${isMain ? "Main target" : "Also works it"}</span>
-        <span class="card-name">${ex.name}</span>
-        <span class="card-dose"><span class="prescription">${ex.sets} × ${ex.reps}</span> · ${ex.equipment}</span>
-        <span class="card-cue">${ex.good.cue}</span>
-      </span>`;
-    card.querySelector(".card-fig").appendChild(createFigure(ex, "good", { animate: true }));
-    list.appendChild(card);
-  });
-}
-
-// ---------- Shared ----------
+// ---------- Shell ----------
 function renderStyleSwitch() {
-  $("#style-switch").innerHTML = STYLES.map((s) =>
-    `<button type="button" data-style="${s.id}" aria-pressed="${s.id === state.style}">${s.name}</button>`).join("");
+  const sw = $("#style-switch");
+  if (!sw) return;
+  sw.innerHTML = STYLES.map((s) => `<option value="${s.id}"${s.id === state.style ? " selected" : ""}>${s.name}</option>`).join("");
 }
-
-function renderSpotlight() {
-  const spot = $("#spotlight");
-  spot.innerHTML = "";
-  const node = detailNode(BY_NAME["Back squat"], { compact: true });
-  const open = document.createElement("button");
-  open.type = "button";
-  open.className = "spot-open";
-  open.dataset.open = "Back squat";
-  open.textContent = "Open the back squat";
-  node.querySelector(".detail-head").appendChild(open);
-  spot.appendChild(node);
-}
-
-function render() {
-  document.body.dataset.style = state.style;
-  $("#view-plan").hidden = state.view !== "plan";
-  $("#view-library").hidden = state.view !== "library";
-  document.querySelectorAll(".view-tab").forEach((b) => b.setAttribute("aria-selected", b.dataset.view === state.view));
-  renderStyleSwitch();
-  if (state.view === "plan") { renderPlanPicker(); renderDays(); } else { renderLibrary(); }
-}
+function closeMenu() { document.body.classList.remove("menu-open"); const m = $(".menu-btn"); if (m) m.setAttribute("aria-expanded", "false"); }
 
 document.addEventListener("click", (e) => {
-  if (e.target.closest("[data-close]")) { closeDetail(); return; }
-  const muscle = e.target.closest("[data-muscle]");
-  if (muscle) { state.muscle = muscle.dataset.muscle; renderLibrary(); return; }
-  const opener = e.target.closest("[data-open]");
-  if (opener) { openDetail(opener.dataset.open); return; }
-  const btn = e.target.closest("button");
-  if (!btn) return;
-  if (btn.dataset.style) { state.style = btn.dataset.style; remember("theme", state.style); document.body.dataset.style = state.style; renderStyleSwitch(); return; }
-  if (btn.dataset.view) { state.view = btn.dataset.view; }
-  else if (btn.dataset.plan) { state.plan = btn.dataset.plan; remember("plan", state.plan); }
-  else return;
-  render();
+  const fav = e.target.closest("[data-fav]");
+  if (fav) {
+    e.preventDefault(); e.stopPropagation();
+    const on = Store.toggleFav(fav.dataset.fav);
+    $$(`[data-fav="${CSS.escape(fav.dataset.fav)}"]`).forEach((b) => {
+      b.setAttribute("aria-pressed", String(on));
+      b.setAttribute("aria-label", (on ? "Remove from" : "Save to") + " favorites");
+      b.title = on ? "Saved" : "Save";
+      b.classList.remove("pop"); void b.offsetWidth; b.classList.add("pop");
+    });
+    return;
+  }
+  if (e.target.closest(".menu-btn")) {
+    const open = !document.body.classList.contains("menu-open");
+    document.body.classList.toggle("menu-open", open);
+    e.target.closest(".menu-btn").setAttribute("aria-expanded", String(open));
+  }
 });
-
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && !$("#modal").hidden) closeDetail();
-  const muscle = e.target.closest && e.target.closest("[data-muscle]");
-  if (muscle && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); state.muscle = muscle.dataset.muscle; renderLibrary(); }
+document.addEventListener("change", (e) => {
+  if (e.target.id === "style-switch") {
+    state.style = e.target.value; Store.setRaw("theme", state.style); document.body.dataset.style = state.style;
+  }
 });
+window.addEventListener("hashchange", route);
 
-state.style = STYLES.some((s) => s.id === recall("theme")) ? recall("theme") : state.style;
-state.plan = PLANS.some((p) => p.id === recall("plan")) ? recall("plan") : state.plan;
-renderSpotlight();
-render();
+state.style = STYLES.some((s) => s.id === Store.raw("theme")) ? Store.raw("theme") : state.style;
+state.plan = PLANS.some((p) => p.id === Store.raw("plan")) ? Store.raw("plan") : state.plan;
+document.body.dataset.style = state.style;
+renderStyleSwitch();
+route();

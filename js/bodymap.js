@@ -41,14 +41,19 @@ const BODY_BACK = [
 
 function bodyView(label, shapes, opts) {
   const primary = opts.primary || [], secondary = opts.secondary || [];
+  const regionOf = (id) => (typeof REGION_OF !== "undefined" && REGION_OF[id]) || id;
   const muscles = shapes.map(([id, shape]) => {
+    const region = regionOf(id);
     const cls = ["m"];
     if (primary.includes(id)) cls.push("is-primary");
     else if (secondary.includes(id)) cls.push("is-secondary");
-    if (opts.selected === id) cls.push("is-selected");
+    if (opts.selected === id || (opts.region && opts.region === region)) cls.push("is-selected");
+    const rname = (typeof MUSCLE_REGIONS !== "undefined" && (MUSCLE_REGIONS.find((r) => r.id === region) || {}).name) || MUSCLES[id] || id;
     const name = MUSCLES[id] || id;
-    const attrs = opts.interactive ? ` data-muscle="${id}" tabindex="0" role="button" aria-label="${name}"` : "";
-    return `<g class="${cls.join(" ")}"${attrs}><title>${name}</title>${shape}<g transform="translate(120 0) scale(-1 1)">${shape}</g></g>`;
+    const attrs = opts.interactive
+      ? ` data-region="${region}" data-mid="${id}" tabindex="0" role="button" aria-label="${rname}: ${name}"`
+      : "";
+    return `<g class="${cls.join(" ")}"${attrs}><title>${rname === name ? name : rname + " · " + name}</title>${shape}<g transform="translate(120 0) scale(-1 1)">${shape}</g></g>`;
   }).join("");
   return `<figure class="body-view">
     <svg viewBox="0 0 120 244" class="body-svg" aria-label="${label} view">
@@ -61,7 +66,7 @@ function bodyView(label, shapes, opts) {
   </figure>`;
 }
 
-// opts: { primary: [], secondary: [], selected: id, interactive: bool }
+// opts: { primary: [], secondary: [], selected: muscle id, region: region id, interactive: bool }
 function bodyMap(opts = {}) {
   return `<div class="body-map${opts.interactive ? " is-interactive" : ""}">${bodyView("Front", BODY_FRONT, opts)}${bodyView("Back", BODY_BACK, opts)}</div>`;
 }

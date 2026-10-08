@@ -4,74 +4,36 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rep Sheet</title>
+<meta name="theme-color" content="#0b0d10">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@400;600;700&family=Big+Shoulders+Display:wght@700;900&family=Barlow:wght@400;500;600&family=Familjen+Grotesk:wght@500;700&family=Manrope:wght@400;500;700&family=IBM+Plex+Mono:wght@500&family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@500;600;700&family=JetBrains+Mono:wght@500&display=swap">
 <link rel="stylesheet" href="styles/base.css">
 <link rel="stylesheet" href="styles/themes.css">
 </head>
 <body data-style="lab">
 <!-- APP START -->
-<div class="page">
-  <header class="topbar">
-    <div class="brand">
+<a class="skip" href="#app">Skip to content</a>
+<header class="topbar">
+  <div class="topbar-in">
+    <a class="brand" href="#/" aria-label="Rep Sheet home">
       <span class="brand-mark" aria-hidden="true"></span>
       <span class="brand-name">Rep Sheet</span>
-    </div>
-    <div class="style-wrap">
-      <span class="style-label">Style</span>
-      <div id="style-switch" class="segmented" role="group" aria-label="Visual style"></div>
-    </div>
-  </header>
-
-  <section class="hero">
-    <div class="hero-text">
-      <h1>Lift it right</h1>
-      <p>Every exercise analyzed on a 3D anatomical model: optimal form, the exact correction for the common mistake, and the muscles at work along their fibers.</p>
-      <div class="legend">
-        <span><i class="sw sw-good"></i>Optimal form</span>
-        <span><i class="sw sw-bad"></i>Correction</span>
-        <span><i class="sw sw-primary"></i>Main muscles</span>
-        <span><i class="sw sw-secondary"></i>Helping muscles</span>
-      </div>
-    </div>
-    <div id="spotlight" class="spotlight"></div>
-  </section>
-
-  <nav class="view-tabs" role="tablist">
-    <button type="button" class="view-tab" role="tab" data-view="plan">Workout plan</button>
-    <button type="button" class="view-tab" role="tab" data-view="library">Exercises by muscle</button>
-  </nav>
-
-  <main>
-    <section id="view-plan">
-      <div id="plan-picker" class="plan-picker"></div>
-      <div id="days" class="days"></div>
-    </section>
-
-    <section id="view-library" hidden>
-      <div class="library">
-        <aside class="picker-panel">
-          <h2>Tap a muscle</h2>
-          <div id="muscle-map"></div>
-          <div id="muscle-chips" class="chips"></div>
-        </aside>
-        <div class="library-main">
-          <h2 id="library-title"></h2>
-          <div id="exercise-list" class="ex-grid"></div>
-        </div>
-      </div>
-    </section>
-  </main>
-
-  <footer class="foot">Sets × reps are starting points. Pick a weight you can finish every set with one or two reps left in the tank. Tap any exercise to see its form and muscles.</footer>
-</div>
-
-<div id="modal" class="modal" hidden>
-  <div class="modal-backdrop" data-close="1"></div>
-  <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="detail-title">
-    <button type="button" class="modal-close" data-close="1" aria-label="Close">×</button>
-    <div id="modal-body"></div>
+      <span class="brand-sub">Biomechanics</span>
+    </a>
+    <nav class="nav" aria-label="Main">
+      <a href="#/" data-nav="">Dashboard</a>
+      <a href="#/library" data-nav="library">Exercises</a>
+      <a href="#/muscles" data-nav="muscles">Muscles</a>
+      <a href="#/my" data-nav="my">My exercises</a>
+      <a href="#/plans" data-nav="plans">Plans</a>
+    </nav>
+    <label class="style-wrap" title="Visual style"><span class="sr">Visual style</span>
+      <select id="style-switch" aria-label="Visual style"></select>
+    </label>
+    <button type="button" class="menu-btn" aria-label="Menu" aria-expanded="false"><span></span><span></span></button>
   </div>
-</div>
+</header>
+<main id="app" class="page" tabindex="-1"></main>
+<footer class="foot"><div class="foot-in"><span class="brand-mini"><span class="brand-mark" aria-hidden="true"></span>Rep Sheet</span><span>Form guidance is educational. Start light, own the movement, then load it.</span></div></footer>
 <!-- APP END -->
 <script src="data/exercises.js"></script>
 <script src="data/form.js"></script>
@@ -88,6 +50,9 @@
 <script src="js/kits/lower.js"></script>
 <script src="js/figure3d.js"></script>
 <script src="js/bodymap.js"></script>
+<script src="js/ui/core.js"></script>
+<script src="js/ui/detail.js"></script>
+<script src="js/ui/muscles.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
