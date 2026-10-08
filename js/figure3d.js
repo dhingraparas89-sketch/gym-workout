@@ -1314,9 +1314,12 @@ function createViewer3D(container, mode, opts = {}) {
         const pole = new THREE.Vector3(...(ik.pole || [-0.5, -0.6, 1])); pole.z *= side; pole.applyQuaternion(torsoQ);
         solveArm(cur.parts["upperArm" + s], cur.parts["forearm" + s], sh, H, pole, handMode === "flat" ? 27 : 33);
       } else {
-        placeAngle(cur.parts["upperArm" + s], sh, p.ua, extra);
+        // A far (left) arm with its own angles (p.arm2: { ua, fa, abd? }), e.g. a hand braced on a bench.
+        const a2 = side < 0 && p.arm2;
+        const ex2 = !a2 ? extra : a2.abd ? new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0).applyQuaternion(torsoQ).normalize(), (side * a2.abd * Math.PI) / 180) : null;
+        placeAngle(cur.parts["upperArm" + s], sh, a2 ? a2.ua : p.ua, ex2);
         const elbow = endOf(cur.parts["upperArm" + s], uaLen);
-        placeAngle(cur.parts["forearm" + s], elbow, p.fa, extra);
+        placeAngle(cur.parts["forearm" + s], elbow, a2 ? a2.fa : p.fa, ex2);
       }
       orientHand(cur.hands[s], cur.parts["forearm" + s], side, torsoQ);
       const hip3 = hip.clone().add(lateral.clone().multiplyScalar(side * VIEW3D.hipHalf));

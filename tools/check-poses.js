@@ -1,11 +1,12 @@
-// Checks every pose in data/exercises.js against natural joint ranges.
+// Checks every pose in data/exercises.js and data/library/*.js against natural joint ranges.
 // Run: node tools/check-poses.js
 const fs = require("fs");
 const vm = require("vm");
 const path = require("path");
 const ctx = { console, performance: { now: () => 0 } };
 vm.createContext(ctx);
-for (const f of ["data/exercises.js", "js/figure.js"]) {
+const lib = fs.readdirSync(path.join(__dirname, "..", "data", "library")).filter((f) => f.endsWith(".js") && f !== "meta.js").map((f) => "data/library/" + f);
+for (const f of ["data/exercises.js", "data/form.js", ...lib, "js/figure.js"]) {
   vm.runInContext(fs.readFileSync(path.join(__dirname, "..", f), "utf8") + "\nthis.EXERCISES = typeof EXERCISES !== 'undefined' ? EXERCISES : this.EXERCISES; this.checkPose = typeof checkPose !== 'undefined' ? checkPose : this.checkPose;", ctx);
 }
 let problems = 0;
