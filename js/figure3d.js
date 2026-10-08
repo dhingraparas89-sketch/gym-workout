@@ -102,7 +102,29 @@ function buildSkinData(segs) {
     const e = g.inv;
     out[0] = e[0] * x + e[4] * y + e[8] * z + e[12]; out[1] = e[1] * x + e[5] * y + e[9] * z + e[13]; out[2] = e[2] * x + e[6] * y + e[10] * z + e[14];
   };
-  const P = [0, 0, 0];
+  const P = [0, 0, 0], Q = [0, 0, 0];
+  // Shorts: matte training shorts from just below the navel to mid-thigh. Returns how much a
+  // rest-pose point is covered (0..1) and in out[1] how much extra fabric stands off the skin
+  // there (the waistband and hems are a little thicker).
+  const segIx = (n) => segs.findIndex((g) => g.name === n);
+  const TORSO = segIx("lowerTorso"), THIGHS = [segIx("thighR"), segIx("thighL")];
+  const clothOut = [0, 0];
+  function cloth(x, y, z, out) {
+    out[0] = 0; out[1] = 0;
+    if (TORSO < 0) return 0;
+    local(segs[TORSO], x, y, z, Q);
+    let r = Math.hypot(Q[0], Q[2]), m = (1 - skinSmooth(7.0, 7.6, Q[1])) * skinSmooth(-16, -14, Q[1]) * (1 - skinSmooth(17, 19, r)), lip = m * Math.exp(-(((Q[1] - 6.6) / 0.7) ** 2));
+    for (let i = 0; i < 2; i++) {
+      const g = segs[THIGHS[i]];
+      if (!g) continue;
+      local(g, x, y, z, Q);
+      r = Math.hypot(Q[0], Q[2]);
+      const mt = (1 - skinSmooth(20.3, 21.3, Q[1])) * skinSmooth(-14, -12, Q[1]) * (1 - skinSmooth(11, 13, r));
+      if (mt > m) { m = mt; lip = mt * Math.exp(-(((Q[1] - 20.2) / 0.8) ** 2)); }
+    }
+    out[0] = m; out[1] = m * 0.55 + lip * 0.2;
+    return m;
+  }
   function field(x, y, z) {
     let F = BIG;
     for (let s = 0; s < S; s++) {
@@ -112,15 +134,18 @@ function buildSkinData(segs) {
       const d = skinSegDist(g, P[0], P[1], P[2]);
       F = F === BIG ? d : skinSmin(F, d, g.k || 3);
     }
-    // Creases (gluteal fold, the cleft between the glutes) are carved after every segment has
-    // been joined, so a neighbouring segment's blend can't fill them back in.
+    // Creases (gluteal fold, the cleft between the glutes, the lines across the abdomen) are
+    // carved after every segment has been joined, so a neighbouring segment's blend can't fill
+    // them back in. Fabric bridges the creases it covers and stands a little off the skin.
+    const cm = cloth(x, y, z, clothOut), off = clothOut[1];
+    const F0 = F;
     for (let s = 0; s < S; s++) {
       const g = segs[s];
       if (!g.cuts.length) continue;
       local(g, x, y, z, P);
       for (let i = 0; i < g.cuts.length; i++) { const c = g.cuts[i]; F = -skinSmin(-F, skinEllDist(c, P[0], P[1], P[2]), c.k); }
     }
-    return F;
+    return F + (F0 - F) * cm - off;
   }
 
   // Sample the field on a grid: a coarse pass first, then fine samples only near the surface.
@@ -235,7 +260,7 @@ function buildSkinData(segs) {
 
   // Per vertex: which muscles shape it (for activation), its fiber coordinates, and how much
   // each segment moves it (skin weights: one segment away from the joints, a blend near them).
-  const weights = {}, fib = new Float32Array(nv * 4), bw = new Float32Array(nv * S);
+  const weights = {}, fib = new Float32Array(nv * 4), bw = new Float32Array(nv * S), clothV = new Float32Array(nv);
   segs.forEach((g) => g.feats.forEach((f) => { if (f.id && !weights[f.id]) weights[f.id] = new Float32Array(nv); }));
   const fds = segs.map((g) => new Float32Array(g.feats.length)), ds = new Float32Array(S), L = [0, 0, 0];
   for (let v = 0; v < nv; v++) {
@@ -259,14 +284,15 @@ function buildSkinData(segs) {
     for (let s = 0; s < S; s++) { const w = ds[s] >= BIG ? 0 : 1 - skinSmooth(0, segs[s].tau, ds[s] - dmin); bw[v * S + s] = w; sum += w; }
     for (let s = 0; s < S; s++) bw[v * S + s] /= sum || 1;
     // Two different muscles meeting near the surface: a faint groove between them.
-    const sep = t2 < BIG ? (1 - skinSmooth(0, 1.4, t2 - t1)) * (1 - skinSmooth(0.8, 2.6, t2)) : 0;
+    clothV[v] = cloth(x, y, z, clothOut);
+    const sep = (t2 < BIG ? (1 - skinSmooth(0, 1.4, t2 - t1)) * (1 - skinSmooth(0.8, 2.6, t2)) : 0) * (1 - clothV[v]);
     fib[v * 4 + 3] = sep;
     if (top && top.spec) {
       local(segs[topSeg], x, y, z, L);
       const [u, w] = skinFiberUV(top.spec, L[0], L[1], L[2]);
       fib[v * 4] = u; fib[v * 4 + 1] = w; fib[v * 4 + 2] = 1 - skinSmooth(0.3, 2.8, t1);
     }
-    pos[v * 3] -= nor[v * 3] * 0.2 * sep; pos[v * 3 + 1] -= nor[v * 3 + 1] * 0.2 * sep; pos[v * 3 + 2] -= nor[v * 3 + 2] * 0.2 * sep;
+    pos[v * 3] -= nor[v * 3] * 0.3 * sep; pos[v * 3 + 1] -= nor[v * 3 + 1] * 0.3 * sep; pos[v * 3 + 2] -= nor[v * 3 + 2] * 0.3 * sep;
   }
   // Smooth the skin weights over the surface so joints bend in a soft band, then keep the top four.
   const bw2 = new Float32Array(bw.length);
@@ -304,7 +330,7 @@ function buildSkinData(segs) {
     const tot = order.reduce((t, s) => t + wb[v * B + s], 0) || 1;
     order.forEach((s, i) => { skinIndex[v * 4 + i] = s; skinWeight[v * 4 + i] = wb[v * B + s] / tot; });
   }
-  return { pos, nor, index: new Uint32Array(index), fib, weights, skinIndex, skinWeight };
+  return { pos, nor, index: new Uint32Array(index), fib, cloth: clothV, weights, skinIndex, skinWeight };
 }
 
 // Built once per page and shared by every viewer: in a background worker when the browser allows
@@ -320,7 +346,7 @@ function requestSkin(segs, done) {
   const here = () => setTimeout(() => finish(buildSkinData(segs)), 0);
   let worker = null;
   try {
-    const src = SKIN_HELPERS.map(String).join("\n") + "\nonmessage = (e) => { const d = buildSkinData(e.data); postMessage(d, [d.pos.buffer, d.nor.buffer, d.index.buffer, d.fib.buffer, d.skinIndex.buffer, d.skinWeight.buffer, ...Object.values(d.weights).map((w) => w.buffer)]); };";
+    const src = SKIN_HELPERS.map(String).join("\n") + "\nonmessage = (e) => { const d = buildSkinData(e.data); postMessage(d, [d.pos.buffer, d.nor.buffer, d.index.buffer, d.fib.buffer, d.cloth.buffer, d.skinIndex.buffer, d.skinWeight.buffer, ...Object.values(d.weights).map((w) => w.buffer)]); };";
     worker = new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
   } catch (err) { worker = null; }
   if (!worker) { here(); return; }
@@ -363,6 +389,7 @@ function makeBody3D(THREE, mats) {
     const n = geo.attributes.position.count;
     if (!geo.attributes.color) geo.setAttribute("color", new THREE.Float32BufferAttribute(new Float32Array(n * 3).fill(1), 3));
     if (!geo.attributes.fib) geo.setAttribute("fib", new THREE.Float32BufferAttribute(new Float32Array(n * 4), 4));
+    if (!geo.attributes.cloth) geo.setAttribute("cloth", new THREE.Float32BufferAttribute(new Float32Array(n), 1));
     if (!geo.attributes.act) geo.setAttribute("act", new THREE.Float32BufferAttribute(new Float32Array(n), 1));
   }
   function seg(name) { const g = new THREE.Group(); parts[name] = g; return g; }
@@ -391,7 +418,7 @@ function makeBody3D(THREE, mats) {
         lens.forEach((len, i) => {
           const j = i === 0 ? parent : new THREE.Group();
           if (i > 0) { j.position.y = lens[i - 1]; parent.add(j); }
-          addSkin(j, "forearm", capsule(r * (1 - i * 0.1), len));
+          addSkin(j, "forearm", capsule(r * 1.06 * (1 - i * 0.1), len));
           joints.push(j); parent = j;
         });
         fingers.push(joints);
@@ -401,12 +428,16 @@ function makeBody3D(THREE, mats) {
     addSkin(thumbBase, "forearm", capsule(1.15, 3.2)); addSkin(t2, "forearm", capsule(1.0, 2.6));
     return { pivot, fingers, thumb: [thumbBase, t2], side };
   }
-  // grip: fingers wrapped around a bar or handle; flat: open hand pressing on the floor.
+  // grip (true): fingers wrapped around a bar or handle; false: open hand pressing on the floor;
+  // "relaxed": the loose natural curl of a hand hanging at rest, each finger a little more than the last.
   function setHand(h, grip) {
-    const curl = grip ? [78, 88, 48] : [6, 6, 4];
-    h.fingers.forEach((joints) => joints.forEach((j, i) => { j.rotation.set(0, 0, (curl[i] * Math.PI) / 180); }));
-    h.thumb[0].rotation.set(-h.side * (grip ? 0.55 : -0.6), 0, grip ? 0.95 : 0.2);
-    h.thumb[1].rotation.set(0, 0, grip ? 0.55 : 0.1);
+    const relaxed = grip === "relaxed";
+    h.fingers.forEach((joints, f) => {
+      const curl = relaxed ? [16 + f * 5, 26 + f * 5, 14 + f * 3] : grip ? [78, 88, 48] : [6, 6, 4];
+      joints.forEach((j, i) => { j.rotation.set(0, 0, (curl[i] * Math.PI) / 180); });
+    });
+    h.thumb[0].rotation.set(-h.side * (relaxed ? 0.1 : grip ? 0.55 : -0.6), 0, relaxed ? 0.45 : grip ? 0.95 : 0.2);
+    h.thumb[1].rotation.set(0, 0, relaxed ? 0.25 : grip ? 0.55 : 0.1);
   }
 
   // ----- One continuous skin -----
@@ -448,6 +479,10 @@ function makeBody3D(THREE, mats) {
       // its lower edge forming the gluteal fold; glute med fills the side above it.
       ...[1, -1].map((s) => ["glutes", -2.5, s * 150, 1.6, [3.6, 8.6, 7.2], s * 0.35, 4.2, { t: "fan", o: [-1, -3, s * 12], n: [-1, 0, s * 0.5], g: s }]),
       ...[1, -1].map((s) => ["glutes", 6, s * 112, 0.5, [2.0, 5, 5.5], 0, 3.8, { t: "fan", o: [-1, -3, s * 12], n: [-1, 0, s * 0.5], g: s }]),
+      // Abdominal wall: a shallow line down the middle and two faint lines across the rectus.
+      { abs: ["cut", 11.4, 20, 0, 1.1, 7.5, 0.4, null, 1.2] },
+      { abs: ["cut", 11.4, 17.5, 0, 0.9, 0.4, 6.0, null, 1.2] },
+      { abs: ["cut", 11.8, 23, 0, 0.9, 0.4, 6.4, null, 1.2] },
       // Creases: the cleft between the glutes, and the gluteal fold where each glute meets the thigh.
       { abs: ["cut", -12.6, -3, 0, 2.6, 6.5, 0.55, null, 1.4] },
       ...[1, -1].map((s) => ({ abs: ["cut", -11.2, -10.6, s * 6.5, 3, 0.7, 5, [s * 0.18, 0, 0], 1.6] }))
@@ -488,7 +523,11 @@ function makeBody3D(THREE, mats) {
       ...[1, -1].map((s) => ["traps", 3, s * 125, 2.0, [2.6, 5.5, 3.6], 0, 3, { t: "fan", o: [-1, -24, s * 14], n: [0.3, 1, 0], r: [0, 0, s], g: s }])
     ], M([0, 51, 0]), 3.5, 4);
     // Head: a plain oval, like an anatomy mannequin.
-    add("head", { ell: [0.5, 1.6, 0, 8.6, 10.6, 7.4] }, [], M([0, 66.5, 0]), 3, 2);
+    // Cranium wider at the back and top, narrowing through the jaw to a soft chin.
+    add("head", { ell: [0.2, 2.4, 0, 8.3, 9.4, 7.2] }, [
+      { abs: [null, -2.2, 3.4, 0, 6.4, 6.4, 6.8, null, 3] },  // back of the skull
+      { abs: [null, 2.2, -4.2, 0, 5.8, 5.4, 5.3, null, 3] }   // jaw and chin
+    ], M([0, 66.5, 0]), 3, 2);
 
     [1, -1].forEach((side) => {
       const s = side > 0 ? "R" : "L";
@@ -512,7 +551,7 @@ function makeBody3D(THREE, mats) {
       ], M(elbow.toArray(), armQ), 2.6, 3);
       // Palm (faces local -x, thumb toward side * z), joined to the forearm at the wrist.
       const wrist = new THREE.Vector3(0, 27, 0).applyQuaternion(armQ).add(elbow);
-      add("hand" + s, { ell: [0, 4.6, 0, 1.6, 5.05, 3.85] }, [
+      add("hand" + s, { ell: [0, 4.8, 0, 1.4, 5.2, 3.95] }, [
         { abs: [null, -0.75, 1.8, side * 2.5, 1.55, 3.1, 1.85, null, 1.5] },  // thumb pad
         { abs: [null, -0.55, 2.6, -side * 2.5, 1.3, 3.5, 1.55, null, 1.5] }, // little-finger side pad
         { abs: [null, 0, 8.35, 0, 1.75, 1.3, 4.2, null, 1.1] }              // knuckles
@@ -653,6 +692,7 @@ function makeBody3D(THREE, mats) {
     geo.setAttribute("skinIndex", new THREE.BufferAttribute(data.skinIndex, 4));
     geo.setAttribute("skinWeight", new THREE.BufferAttribute(data.skinWeight, 4));
     geo.setAttribute("fib", new THREE.BufferAttribute(data.fib, 4));
+    geo.setAttribute("cloth", new THREE.BufferAttribute(data.cloth, 1));
     geo.setIndex(new THREE.BufferAttribute(data.index, 1));
     skinAttrs(geo);
     const skin = new THREE.SkinnedMesh(geo, mats.skin);
@@ -707,14 +747,23 @@ function createViewer3D(container, mode) {
     mat.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, fiberUniforms);
       shader.vertexShader = shader.vertexShader
-        .replace("#include <common>", "#include <common>\nattribute vec4 fib;\nattribute float act;\nvarying vec4 vFib;\nvarying float vAct;\nvarying float vWorldY;")
-        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFib = fib; vAct = act;")
+        .replace("#include <common>", "#include <common>\nattribute vec4 fib;\nattribute float act;\nattribute float cloth;\nvarying vec4 vFib;\nvarying float vAct;\nvarying float vWorldY;\nvarying float vCloth;\nvarying vec3 vObjP;")
+        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFib = fib; vAct = act; vCloth = cloth; vObjP = position;")
         .replace("#include <project_vertex>", "#include <project_vertex>\nvWorldY = (modelMatrix * vec4(transformed, 1.0)).y;");
       shader.fragmentShader = shader.fragmentShader
         .replace("#include <common>", `#include <common>
-          varying vec4 vFib; varying float vAct; varying float vWorldY;
+          varying vec4 vFib; varying float vAct; varying float vWorldY; varying float vCloth; varying vec3 vObjP;
           uniform float uTime, uEffort, uActScale, uRim, uScanY, uFiber;
           uniform vec3 uActColor, uCompColor, uRimColor, uScanColor;`)
+        // Shorts: matte fabric, with soft folds bunched around the hips and crotch.
+        .replace("#include <roughnessmap_fragment>", "#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.97, vCloth);")
+        .replace("#include <normal_fragment_maps>", `#include <normal_fragment_maps>
+          if (vCloth > 0.01) {
+            vec3 q = vObjP;
+            float fold = sin(q.y * 0.75 + 2.2 * sin(q.x * 0.21 + q.z * 0.17)) * (0.6 + 0.4 * sin(q.x * 0.09 - q.z * 0.13 + q.y * 0.05));
+            fold += 0.45 * sin(q.y * 1.5 + q.z * 0.4 + 1.3 * sin(q.x * 0.33));
+            normal = perturbNormalArb(-vViewPosition, normal, vec2(dFdx(fold), dFdy(fold)) * 0.32 * vCloth, faceDirection);
+          }`)
         .replace("#include <emissivemap_fragment>", `#include <emissivemap_fragment>
           {
             // Layers, in order: the body (charcoal skin), muscle form (soft boundary shading),
@@ -726,20 +775,23 @@ function createViewer3D(container, mode) {
             float sep = vFib.w;
             float ndv = abs(dot(normal, normalize(vViewPosition)));
             // Muscle form at rest: bellies a touch lighter, a soft shallow valley between muscles.
-            diffuseColor.rgb *= (1.0 + 0.035 * belly) * (1.0 - 0.09 * sep);
+            diffuseColor.rgb *= (1.0 + 0.06 * belly) * (1.0 - 0.15 * sep);
+            // Shorts: near-black matte fabric, a faint stitched line at the waistband and hems.
+            diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.028, 0.029, 0.032), vCloth);
+            diffuseColor.rgb *= 1.0 - 0.45 * vCloth * (1.0 - vCloth) * 4.0;
             float a = clamp(abs(vAct) * uEffort * uActScale, 0.0, 1.0);
             vec3 actColor = vAct < 0.0 ? uCompColor : uActColor;
             if (a > 0.001) {
               // Activation travels along the fibers toward the attachment as broad, slow swells.
               float travel = 0.5 + 0.5 * sin(vFib.x * 0.11 - uTime * 2.2);
-              float inside = belly * (1.0 - 0.7 * sep);
+              float inside = belly * (1.0 - 0.7 * sep) * (1.0 - 0.82 * vCloth);
               diffuseColor.rgb = mix(diffuseColor.rgb, actColor * 0.34, 0.42 * a * inside);
               // Internal glow: strongest where the muscle faces the viewer, never a bright outline.
               float glow = a * inside * (0.55 + 0.45 * ndv) * (0.78 + 0.22 * travel);
               totalEmissiveRadiance += actColor * glow * 0.27;
               // Fiber direction: short, broken fascicle strands that fade in and out along the
               // muscle (not continuous strings), faint at most and clear only with fiber detail on.
-              float fiberAmt = inside * mix(0.25 * smoothstep(0.5, 1.0, a), smoothstep(0.08, 0.6, a), uFiber);
+              float fiberAmt = (1.0 - vCloth) * inside * mix(0.25 * smoothstep(0.5, 1.0, a), smoothstep(0.08, 0.6, a), uFiber);
               float fw = fwidth(vFib.y);
               if (fiberAmt > 0.01 && fw < 0.5) {
                 float id = floor(vFib.y), rnd = fract(sin(id * 12.9898) * 43758.5453);
@@ -752,8 +804,10 @@ function createViewer3D(container, mode) {
                 totalEmissiveRadiance += actColor * f * (0.3 + 0.4 * travel) * (0.4 + 0.6 * a);
               }
             }
-            // A barely-there edge light on a correct body.
+            // A barely-there edge light on a correct body, and a faint cool edge everywhere so the
+            // dark silhouette reads against the dark stage.
             float rim = pow(1.0 - ndv, 4.0);
+            totalEmissiveRadiance += vec3(0.5, 0.6, 0.75) * pow(1.0 - ndv, 3.0) * 0.035 * (1.0 - 0.5 * vCloth);
             totalEmissiveRadiance += uRimColor * rim * uRim;
             // Scan band sweeping up the body.
             float band = exp(-pow((vWorldY - uScanY) / 3.5, 2.0));
@@ -1656,8 +1710,9 @@ function createViewer3D(container, mode) {
     ghostEnds = [ghostA, ghostB].map((q) => ({ j: solveSide(q), gz: q.gz }));
     const err = form && form.error;
     period = mode === "bad" && err && err.type === "tempo" ? (err.tempo === "slow" ? 8000 : 2300) : 4600;
-    body.setHands(!fig.hand || fig.hand === "grip");
-    if (ghost) ghost.setHands(!fig.hand || fig.hand === "grip");
+    const handMode = !fig.hand || fig.hand === "grip" ? true : fig.hand === "relaxed" ? "relaxed" : false;
+    body.setHands(handMode);
+    if (ghost) ghost.setHands(handMode);
     // A hanging or supported body holds the bar where its hands are at the start of the rep.
     holdAt = null;
     if (fig.hold === "hands") {

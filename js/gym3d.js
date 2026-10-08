@@ -571,8 +571,10 @@ const GYM3D = (() => {
     scene.add(key); scene.add(key.target);
     const fill = new THREE.DirectionalLight(0xc9d6ea, 0.55); fill.position.set(-180, 120, 160); scene.add(fill);
     const rim = new THREE.DirectionalLight(0xc4d4ff, 1.2); rim.position.set(-160, 150, -200); scene.add(rim);
+    // A second, softer cool rim from the other side, so both edges of the body read.
+    const rim2 = new THREE.DirectionalLight(0xb8c8ec, 0.7); rim2.position.set(170, 110, -190); scene.add(rim2);
     const top = new THREE.DirectionalLight(0xffffff, 0.5); top.position.set(0, 400, 0); scene.add(top);
-    return { hemi, key, fill, rim, top };
+    return { hemi, key, fill, rim, rim2, top };
   }
   // Rubber floor that fades into the dark of the stage at its far edge.
   function floor() {
