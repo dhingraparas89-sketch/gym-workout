@@ -45,6 +45,13 @@ function skinLatheR(L, y) {
   const i = Math.floor(u), t = u - i;
   return L.tab[i] + (L.tab[i + 1] - L.tab[i]) * t;
 }
+// Cross-section shape at height y: depth (front-back half-axis over the width) and how far the
+// section's centre sits toward local +x, so a profile can curve (lumbar curve, calf, chest).
+function skinLatheShape(L, y) {
+  const u = Math.min(L.N, Math.max(0, ((y - L.y0) / (L.y1 - L.y0)) * L.N));
+  const i = Math.min(L.N - 1, Math.floor(u)), t = u - i;
+  return [L.dtab[i] + (L.dtab[i + 1] - L.dtab[i]) * t, L.xtab[i] + (L.xtab[i + 1] - L.xtab[i]) * t];
+}
 // Approximate signed distance to an ellipsoid (negative inside).
 function skinEllDist(f, x, y, z) {
   const dx = x - f.cx, dy = y - f.cy, dz = z - f.cz, m = f.m;
@@ -54,12 +61,13 @@ function skinEllDist(f, x, y, z) {
   return k1 > 1e-9 ? (k0 * (k0 - 1)) / k1 : -Math.min(f.rx, f.ry, f.rz);
 }
 function skinLatheDist(L, x, y, z) {
-  const r = skinLatheR(L, y);
+  const r = skinLatheR(L, y), sh = skinLatheShape(L, y);
+  x -= sh[1];
   if (r < 0.3) {
     const ey = y < L.y0 ? L.y0 - y : y > L.y1 ? y - L.y1 : 0;
     return Math.sqrt(x * x + z * z + ey * ey) - r;
   }
-  const A = r * L.depth, ax = x / A, az = z / r, k0 = Math.sqrt(ax * ax + az * az);
+  const A = r * sh[0], ax = x / A, az = z / r, k0 = Math.sqrt(ax * ax + az * az);
   const bx = ax / A, bz = az / r, k1 = Math.sqrt(bx * bx + bz * bz);
   return k1 > 1e-9 ? (k0 * (k0 - 1)) / k1 : -A;
 }
@@ -103,6 +111,14 @@ function buildSkinData(segs) {
       local(g, x, y, z, P);
       const d = skinSegDist(g, P[0], P[1], P[2]);
       F = F === BIG ? d : skinSmin(F, d, g.k || 3);
+    }
+    // Creases (gluteal fold, the cleft between the glutes) are carved after every segment has
+    // been joined, so a neighbouring segment's blend can't fill them back in.
+    for (let s = 0; s < S; s++) {
+      const g = segs[s];
+      if (!g.cuts.length) continue;
+      local(g, x, y, z, P);
+      for (let i = 0; i < g.cuts.length; i++) { const c = g.cuts[i]; F = -skinSmin(-F, skinEllDist(c, P[0], P[1], P[2]), c.k); }
     }
     return F;
   }
@@ -294,7 +310,7 @@ function buildSkinData(segs) {
 // Built once per page and shared by every viewer: in a background worker when the browser allows
 // it, so the page stays responsive while the body is made, otherwise right here.
 const SKIN = { data: null, waiting: [], started: false };
-const SKIN_HELPERS = [skinLatheR, skinEllDist, skinLatheDist, skinSmin, skinSmooth, skinSegDist, skinFiberUV, buildSkinData];
+const SKIN_HELPERS = [skinLatheR, skinLatheShape, skinEllDist, skinLatheDist, skinSmin, skinSmooth, skinSegDist, skinFiberUV, buildSkinData];
 function requestSkin(segs, done) {
   if (SKIN.data) { Promise.resolve().then(() => done(SKIN.data)); return; }
   SKIN.waiting.push(done);
@@ -417,16 +433,24 @@ function makeBody3D(THREE, mats) {
     const add = (name, base, feats, rest, k, tau) => defs.push({ name, base, feats, rest, k, tau });
 
     // Pelvis, belly and lower back (hip -> middle of the spine, 26 units).
-    add("lowerTorso", { lathe: [[-9, 3.12], [-6.5, 10.82], [-2.5, 14.35], [2, 14.77], [7, 14.04], [12, 12.9], [17, 12.48], [22, 12.79], [26, 13.21], [29, 11.44], [31, 7.28]], depth: 0.75 }, [
+    // Rows are [y, half-width, depth/width, front offset]: the waist narrows above the iliac crest,
+    // the lumbar curve brings the waist forward, and the pelvis tapers down into the crotch so the
+    // hips' width comes from the tops of the thighs, not from a wide bowl.
+    add("lowerTorso", { lathe: [[-12, 2], [-10, 6.2, 0.9, -0.6], [-7, 9.6, 0.84, -0.9], [-3, 12.2, 0.8, -1.0], [1, 13.2, 0.77, -0.9], [5, 13.5, 0.75, -0.5],
+      [9, 13.4, 0.73, 0], [13, 13.0, 0.72, 0.6], [18, 13.2, 0.73, 0.7], [23, 13.6, 0.74, 0.4], [28, 13.6, 0.74, 0], [31, 10.5, 0.74, 0]], depth: 0.76 }, [
       // Rectus abdominis: one long strap each side of the midline, lying flat on the abdominal wall.
-      ...[1, -1].map((s) => ["abs", 13, s * 14, 0.9, [1.6, 11.5, 3.2], 0, 2.8, { t: "lin", o: [10, 26, 0], n: [0, 1, 0], c: [0, 0, 1], g: s }]),
-      // External obliques run down and forward ("hands in pockets").
-      ...[1, -1].map((s) => ["obliques", 9, s * 72, 0.6, [2.0, 8, 6], s * 0.25, 3.2, { t: "lin", o: [6, 2, s * 6], n: [0.7, -0.7, 0], c: [0.7, 0.7, 0], g: s }]),
-      // Erectors run straight up beside the spine.
-      ...[1, -1].map((s) => ["lower-back", 14, s * 164, 1.2, [2.0, 11, 2.8], 0, 2.6, { t: "lin", o: [-5, -2, s * 3], n: [0, 1, 0], c: [0, 0, 1], g: s }]),
-      // Glute max: from the pelvis and sacrum down and out to the top of the thigh bone; glute med above it at the side.
-      ...[1, -1].map((s) => ["glutes", -1, s * 145, 1.7, [4.2, 9.5, 7.6], s * 0.25, 4.6, { t: "fan", o: [-1, -3, s * 12], n: [-1, 0, s * 0.5], g: s }]),
-      ...[1, -1].map((s) => ["glutes", 7, s * 112, 0.5, [2.2, 5.5, 5.5], 0, 3.6, { t: "fan", o: [-1, -3, s * 12], n: [-1, 0, s * 0.5], g: s }])
+      ...[1, -1].map((s) => ["abs", 13, s * 14, 0.6, [1.6, 11.5, 3.2], 0, 3.2, { t: "lin", o: [10, 26, 0], n: [0, 1, 0], c: [0, 0, 1], g: s }]),
+      // External obliques run down and forward ("hands in pockets") to the iliac crest.
+      ...[1, -1].map((s) => ["obliques", 12, s * 74, 0.5, [2.0, 8, 6], s * 0.25, 3.6, { t: "lin", o: [6, 2, s * 6], n: [0.7, -0.7, 0], c: [0.7, 0.7, 0], g: s }]),
+      // Erectors run straight up beside the spine, leaving a shallow groove down the middle.
+      ...[1, -1].map((s) => ["lower-back", 13, s * 162, 0.8, [1.8, 11.5, 2.8], 0, 3.4, { t: "lin", o: [-5, -2, s * 3], n: [0, 1, 0], c: [0, 0, 1], g: s }]),
+      // Glute max: a broad, flattened quadrant from the sacrum down and out toward the thigh,
+      // its lower edge forming the gluteal fold; glute med fills the side above it.
+      ...[1, -1].map((s) => ["glutes", -2.5, s * 150, 1.6, [3.6, 8.6, 7.2], s * 0.35, 4.2, { t: "fan", o: [-1, -3, s * 12], n: [-1, 0, s * 0.5], g: s }]),
+      ...[1, -1].map((s) => ["glutes", 6, s * 112, 0.5, [2.0, 5, 5.5], 0, 3.8, { t: "fan", o: [-1, -3, s * 12], n: [-1, 0, s * 0.5], g: s }]),
+      // Creases: the cleft between the glutes, and the gluteal fold where each glute meets the thigh.
+      { abs: ["cut", -12.6, -3, 0, 2.6, 6.5, 0.55, null, 1.4] },
+      ...[1, -1].map((s) => ({ abs: ["cut", -11.2, -10.6, s * 6.5, 3, 0.7, 5, [s * 0.18, 0, 0], 1.6] }))
     ], M([0, 0, 0]), 0, 6);
 
     // Ribcage, chest, lats and upper back (middle of the spine -> shoulders).
@@ -446,11 +470,13 @@ function makeBody3D(THREE, mats) {
         // Rhomboids and mid back: from the spine down and out to the shoulder blade.
         ["upper-back", 17, s * 158, 0.9, [2.0, 7, 4.6], 0, 2.8, { t: "lin", o: [-7, 22, 0], n: [0, -0.45, s * 0.9], c: [0, s * 0.9, 0.45], g: s }],
         // Middle and lower traps toward the shoulder blade spine.
+        // Erectors fading out up the thoracic spine.
+        ["lower-back", 3, s * 164, 0.45, [1.6, 9, 2.4], 0, 3.4, { t: "lin", o: [-5, -28, s * 3], n: [0, 1, 0], c: [0, 0, 1], g: s }],
         ["traps", 18, s * 172, 0.7, [1.8, 8, 2.8], 0, 2.8, { t: "fan", o: [-4, 25, s * 12], n: [-1, 0, 0], r: [0, -4, -s * 8], g: s }],
         // Upper traps: the slope from the neck out to the shoulder tip.
-        { abs: ["traps", -1.6, 24.6, s * 7.4, 3.8, 3.0, 7.0, [s * 0.42, 0, 0], 3, { t: "fan", o: [-1, 27, s * 14], n: [-0.5, 1, 0], r: [0, 0, -s], g: s }] },
+        { abs: ["traps", -1.6, 25.2, s * 8.2, 3.4, 2.8, 7.4, [s * 0.5, 0, 0], 3.6, { t: "fan", o: [-1, 27, s * 14], n: [-0.5, 1, 0], r: [0, 0, -s], g: s }] },
         // Shoulder girdle: collarbone, shoulder blade spine and acromion carry the slope out to the arm.
-        { abs: [null, -0.6, 22.6, s * 14.4, 4.2, 2.6, 4.8, [s * 0.25, 0, 0], 3.2] }
+        { abs: [null, -0.4, 21.4, s * 13.6, 3.4, 2.0, 4.4, [s * 0.38, 0, 0], 3.8] }
       ])
     ], M([0, 26, 0]), 3, 6);
 
@@ -459,7 +485,7 @@ function makeBody3D(THREE, mats) {
       ...[1, -1].map((s) => [null, 6, s * 42, 0.7, [1.4, 6, 1.5], s * 0.55, 1.8]), // sternocleidomastoids
       ["traps", 2, 180, 1, [2.6, 5, 5.6], 0, 2.6, { t: "lin", o: [-3, -3, 0], n: [0, 1, 0], c: [0, 0, 1] }],
       // Upper traps climb the sides of the neck, so the shoulders slope down from it.
-      ...[1, -1].map((s) => ["traps", 2.5, s * 125, 1.6, [2.6, 4.6, 3.6], 0, 3, { t: "fan", o: [-1, -24, s * 14], n: [0.3, 1, 0], r: [0, 0, s], g: s }])
+      ...[1, -1].map((s) => ["traps", 3, s * 125, 2.0, [2.6, 5.5, 3.6], 0, 3, { t: "fan", o: [-1, -24, s * 14], n: [0.3, 1, 0], r: [0, 0, s], g: s }])
     ], M([0, 51, 0]), 3.5, 4);
     // Head: a plain oval, like an anatomy mannequin.
     add("head", { ell: [0.5, 1.6, 0, 8.6, 10.6, 7.4] }, [], M([0, 66.5, 0]), 3, 2);
@@ -469,11 +495,11 @@ function makeBody3D(THREE, mats) {
       // Limbs hang down (local -x is the front of the body, th = 180), side * 90 is the outer side.
       const armQ = Q(-side * armOut, Math.PI), sh = new THREE.Vector3(0, 49, side * SH);
       const elbow = new THREE.Vector3(0, 30, 0).applyQuaternion(armQ).add(sh);
-      add("upperArm" + s, { lathe: [[-1.5, 2.33], [0, 4.45], [2.5, 5.3], [6, 5.3], [12, 4.66], [20, 4.35], [27, 3.92], [31, 3.6], [33.5, 1.48]], depth: 0.95 }, [
+      add("upperArm" + s, { lathe: [[-1.5, 1.8], [0, 4.0], [2.5, 4.85], [6, 4.95], [12, 4.55], [20, 4.35], [27, 3.92], [31, 3.6], [33.5, 1.48]], depth: 0.95 }, [
         // Deltoid: front, side and rear heads wrap the joint and converge halfway down the outer arm.
-        ["shoulders", 5, side * 140, 1.3, [2.4, 7.6, 4.4], side * 0.25, 3.2, { t: "fan", o: [0, 14, side * 3.6], n: [0, -14, -side * 3.6], r: [0, 0, side] }],
-        ["shoulders", 6.5, side * 90, 1.7, [2.6, 7.6, 4.8], 0, 3.2, { t: "fan", o: [0, 14, side * 3.6], n: [0, -14, -side * 3.6], r: [0, 0, side] }],
-        ["rear-delts", 5, side * 30, 1.2, [2.4, 7.4, 4.4], side * 0.25, 3.2, { t: "fan", o: [0, 14, side * 3.6], n: [0, -14, -side * 3.6], r: [0, 0, side] }],
+        ["shoulders", 5.8, side * 140, 1.0, [2.2, 6.2, 4.2], side * 0.25, 3.4, { t: "fan", o: [0, 14, side * 3.6], n: [0, -14, -side * 3.6], r: [0, 0, side] }],
+        ["shoulders", 6.4, side * 90, 1.25, [2.4, 6.4, 4.6], 0, 3.6, { t: "fan", o: [0, 14, side * 3.6], n: [0, -14, -side * 3.6], r: [0, 0, side] }],
+        ["rear-delts", 5.8, side * 30, 1.0, [2.2, 6.2, 4.2], side * 0.25, 3.4, { t: "fan", o: [0, 14, side * 3.6], n: [0, -14, -side * 3.6], r: [0, 0, side] }],
         // Biceps in front, triceps behind: long fibers down to their tendons at the elbow.
         ["biceps", 16, 180, 1.2, [2.4, 8.6, 3.0], 0, 2.6, { t: "long", o: [0, 30, 0], n: [0, 1, 0], r: [-1, 0, 0] }],
         ["triceps", 12.5, side * 35, 1.0, [2.2, 9, 2.8], 0, 2.6, { t: "long", o: [0, 31, 0], n: [0, 1, 0], r: [1, 0, 0], g: "lat" }],
@@ -495,29 +521,45 @@ function makeBody3D(THREE, mats) {
       const legQ = Q(-side * legOut, Math.PI), hip = new THREE.Vector3(0, 0, side * HH);
       const knee = new THREE.Vector3(0, 42, 0).applyQuaternion(legQ).add(hip);
       const ankle = new THREE.Vector3(0, 42, 0).applyQuaternion(legQ).add(knee);
-      const quad = (g) => ({ t: "fan", o: [-2.6, 41.5, 0], n: [-1, 0, 0], r: [0, -1, 0], g });
-      add("thigh" + s, { lathe: [[-8, 3.15], [-5, 8.82], [-1, 9.87], [6, 9.55], [16, 8.61], [26, 7.35], [34, 6.3], [40, 5.78], [44, 5.35], [46.5, 2.1]], depth: 0.98 }, [
-        // Quads: all four heads converge on the kneecap.
-        ["quads", 19, 180, 1.1, [3.0, 15, 3.8], 0, 3.2, quad("rf")],
-        ["quads", 22, side * 128, 1.2, [3.0, 14, 4.2], 0, 3.2, quad("vl")],   // outer sweep
-        ["quads", 33.5, -side * 140, 1.3, [2.8, 6.2, 3.4], 0, 2.8, quad("vm")], // teardrop above the knee
-        [null, 10, -side * 90, 0.6, [2.6, 10, 4.2], 0, 3.2],                    // adductors
-        // Hamstrings: down the back of the thigh to the knee, two bellies side by side.
-        ["hamstrings", 20, side * 28, 1.1, [3.0, 14, 3.8], 0, 3.2, { t: "fan", o: [3, 62, 0], n: [1, 0, 0], r: [0, -1, 0], g: "bf" }],
-        ["hamstrings", 21, -side * 30, 1.0, [3.0, 14, 3.6], 0, 3.2, { t: "fan", o: [3, 62, 0], n: [1, 0, 0], r: [0, -1, 0], g: "st" }],
-        { abs: [null, -2.6, 41.5, 0, 2.0, 2.7, 3.0, null, 2.0] }                // kneecap
+      const quad = (g) => ({ t: "fan", o: [-5, 41.5, 0], n: [-1, 0, 0], r: [0, -1, 0], g });
+      // Thigh (local x points back): full at the top, a long gradual taper to the knee, the quads
+      // carrying the front forward through the middle and the hamstrings rounding the back above.
+      add("thigh" + s, { lathe: [[-9, 3], [-7, 7.0], [-4, 8.5, 1.0, 0.3], [0, 8.9, 1.02, 0.5], [5, 8.8, 1.04, 0.4], [10, 8.5, 1.02, 0.1], [16, 8.0, 1.0, -0.3],
+        [22, 7.5, 0.98, -0.45], [28, 6.8, 0.97, -0.35], [33, 6.0, 0.97, -0.1], [37, 5.4, 0.98, 0], [40, 5.1, 1.0, 0], [43, 5.0, 1.02, 0.1], [46.5, 2.2]], depth: 1 }, [
+        // Quads: rectus femoris down the front, vastus lateralis sweeping the outside, vastus
+        // medialis as the teardrop above the inner knee; all converge on the kneecap.
+        ["quads", 18, 180, 0.7, [2.6, 13, 3.4], 0, 3.6, quad("rf")],
+        ["quads", 21, side * 132, 0.8, [2.8, 13, 4.0], 0, 3.6, quad("vl")],
+        ["quads", 34, -side * 145, 0.9, [2.2, 5.2, 3.0], -side * 0.3, 3, quad("vm")],
+        [null, 8, -side * 95, 0.4, [2.2, 9, 4.2], 0, 3.6],                       // adductors on the inner thigh
+        // Hamstrings: biceps femoris on the outer back, semitendinosus/membranosus on the inner back.
+        ["hamstrings", 19, side * 30, 0.7, [2.6, 13, 3.4], 0, 3.6, { t: "fan", o: [3, 62, 0], n: [1, 0, 0], r: [0, -1, 0], g: "bf" }],
+        ["hamstrings", 20, -side * 32, 0.7, [2.6, 13, 3.4], 0, 3.6, { t: "fan", o: [3, 62, 0], n: [1, 0, 0], r: [0, -1, 0], g: "st" }],
+        // Knee: the kneecap stands slightly proud of the front, the femoral condyles widen it a little.
+        { abs: [null, -4.7, 41.8, 0, 1.4, 2.4, 2.3, null, 1.5] },
+        { abs: [null, -0.5, 42.5, -side * 3.6, 2.2, 2.6, 1.6, null, 1.8] }, { abs: [null, -0.2, 42.8, side * 3.4, 2.0, 2.4, 1.5, null, 1.8] }
       ], M(hip.toArray(), legQ), 3.2, 3.5);
-      add("shin" + s, { lathe: [[-3.5, 4.78], [-1, 5.41], [3, 5.51], [8, 5.62], [14, 5.1], [21, 3.95], [28, 3.12], [35, 2.7], [40, 2.6], [43, 2.39], [45, 1.04]], depth: 0.95 }, [
-        // Calves: both heads of the gastrocnemius converge on the Achilles tendon; soleus underneath.
-        ["calves", 10, -side * 28, 1.5, [2.5, 9, 3.0], 0, 2.8, { t: "fan", o: [2, 37, 0], n: [1, 0, 0], r: [0, -1, 0], g: 1 }],
-        ["calves", 9.5, side * 30, 1.2, [2.4, 8.2, 2.8], 0, 2.8, { t: "fan", o: [2, 37, 0], n: [1, 0, 0], r: [0, -1, 0], g: 2 }],
-        ["calves", 20, 0, 0.6, [2.2, 9, 3.6], 0, 3, { t: "fan", o: [2, 37, 0], n: [1, 0, 0], r: [0, -1, 0], g: 3 }],
-        [null, 12, side * 150, 0.5, [1.8, 10, 2.0], 0, 3],                       // tibialis anterior
-        { abs: [null, 0, 42, side * 2.4, 1.4, 1.6, 1.2, null, 1.2] }, { abs: [null, 0, 42, -side * 2.4, 1.4, 1.6, 1.2, null, 1.2] } // ankle bones
+      // Lower leg (local x points back): calf volume high on the back, tapering through the
+      // Achilles to a narrow ankle; the shin bone runs straight down the front.
+      add("shin" + s, { lathe: [[-3.5, 4.8, 1, 0], [0, 4.9, 1, 0.2], [3, 5.0, 1.02, 0.6], [7, 5.2, 1.05, 1.0], [11, 5.2, 1.05, 1.1], [15, 4.8, 1.0, 1.0],
+        [20, 4.1, 0.95, 0.6], [25, 3.5, 0.92, 0.3], [30, 3.0, 0.95, 0.1], [35, 2.7, 1.0, 0.1], [39, 2.6, 1.08, 0.2], [42, 2.7, 1.15, 0.3], [44.5, 1.4]], depth: 1 }, [
+        // Patellar tendon from the kneecap to the top of the shin.
+        { abs: [null, -4.3, 3.2, 0, 0.9, 3.2, 1.4, null, 1.4] },
+        // Gastrocnemius: the inner head bigger and lower than the outer; soleus wider below them.
+        ["calves", 10, -side * 32, 1.2, [2.3, 7.5, 2.8], 0, 3, { t: "fan", o: [2, 37, 0], n: [1, 0, 0], r: [0, -1, 0], g: 1 }],
+        ["calves", 8.5, side * 34, 0.9, [2.1, 6.5, 2.6], 0, 3, { t: "fan", o: [2, 37, 0], n: [1, 0, 0], r: [0, -1, 0], g: 2 }],
+        ["calves", 19, 0, 0.4, [2.0, 8, 4.0], 0, 3.4, { t: "fan", o: [2, 37, 0], n: [1, 0, 0], r: [0, -1, 0], g: 3 }],
+        ["calves", 35, 0, 0.35, [0.9, 6, 1.1], 0, 1.8, { t: "lin", o: [2, 42, 0], n: [0, 1, 0], c: [0, 0, 1], g: 4 }], // Achilles tendon
+        [null, 12, 180 - side * 28, 0.4, [1.6, 9, 1.8], 0, 3],                   // tibialis anterior
+        // Ankle bones: the inner one sits higher than the outer one.
+        { abs: [null, 0.2, 41.6, -side * 2.9, 1.1, 1.4, 1.0, null, 1.2] }, { abs: [null, 0.5, 42.8, side * 2.8, 1.1, 1.4, 1.0, null, 1.2] }
       ], M(knee.toArray(), legQ), 3, 3);
-      add("foot" + s, { ell: [-1.2, 6.6, 0, 2.3, 7.4, 3.4] }, [
-        { abs: [null, -0.6, 0.8, 0, 2.9, 3.4, 2.9, null, 1.4] },                // heel
-        { abs: [null, -0.9, 12.2, 0, 1.6, 2.6, 3.4, null, 1.2] }                // toes
+      // Foot (local x points down, y forward): heel, arch, ball and toes, about 26 cm long and
+      // 9-10 cm wide at the ball, with a flat sole about 7.5 cm below the ankle joint.
+      add("foot" + s, { ell: [3.6, 6.5, 0, 3.0, 8.6, 3.9] }, [
+        { abs: [null, 4.8, -2.6, 0, 2.7, 3.4, 2.9, null, 2.2] },                  // heel
+        { abs: [null, 5.6, 13.6, side * 0.3, 1.8, 3.8, 4.6, null, 2.2] },          // ball of the foot
+        { abs: [null, 6.0, 18.6, side * 0.5, 1.4, 2.6, 4.1, null, 1.6] }           // toes
       ], M(ankle.toArray(), Q(-side * legOut, -Math.PI / 2)), 2.6, 2.5);
     });
     return defs;
@@ -540,7 +582,16 @@ function makeBody3D(THREE, mats) {
         const a = pts[j], b = pts[j + 1], t = b.y > a.y ? Math.min(1, Math.max(0, (y - a.y) / (b.y - a.y))) : 0;
         tab[i] = Math.max(0, a.x + (b.x - a.x) * t);
       }
-      seg.lathe = { y0, y1, N, tab, depth: d.base.depth };
+      // Optional per-row [y, r, depth, x offset]: eased between rows, held past the ends.
+      const dtab = new Float32Array(N + 1), xtab = new Float32Array(N + 1), ease = (t) => t * t * (3 - 2 * t);
+      for (let i = 0; i <= N; i++) {
+        const y = y0 + ((y1 - y0) * i) / N;
+        let k = 0; while (k < prof.length - 2 && prof[k + 1][0] < y) k++;
+        const A = prof[k], B = prof[k + 1], t = ease(Math.min(1, Math.max(0, (y - A[0]) / (B[0] - A[0]))));
+        const dA = A[2] ?? d.base.depth, dB = B[2] ?? d.base.depth, xA = A[3] ?? 0, xB = B[3] ?? 0;
+        dtab[i] = dA + (dB - dA) * t; xtab[i] = xA + (xB - xA) * t;
+      }
+      seg.lathe = { y0, y1, N, tab, dtab, xtab, depth: d.base.depth };
     } else seg.ell = ellipsoid(null, ...d.base.ell, null, 1);
     seg.feats = d.feats.map((f) => {
       if (f.abs) {
@@ -549,17 +600,19 @@ function makeBody3D(THREE, mats) {
       }
       // On the surface: find the base surface point at (y, th) and its outward normal there.
       const [id, y, th, h, [rn, ry, rt], spin, k, fiber] = f;
-      const a = (th * Math.PI) / 180, r = skinLatheR(seg.lathe, y), A = r * seg.lathe.depth;
+      const a = (th * Math.PI) / 180, r = skinLatheR(seg.lathe, y), [dp, xo] = skinLatheShape(seg.lathe, y), A = r * dp;
       const n = new THREE.Vector3(Math.cos(a) / A, 0, Math.sin(a) / r).normalize();
-      const c = new THREE.Vector3(A * Math.cos(a), y, r * Math.sin(a)).addScaledVector(n, h - rn);
+      const c = new THREE.Vector3(xo + A * Math.cos(a), y, r * Math.sin(a)).addScaledVector(n, h - rn);
       const up = new THREE.Vector3(0, 1, 0), t = new THREE.Vector3().crossVectors(n, up).normalize();
       const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(n, up, t));
       if (spin) q.premultiply(new THREE.Quaternion().setFromAxisAngle(n, spin));
       return ellipsoid(id, c.x, c.y, c.z, rn, ry, rt, q, k, fiber);
     });
+    // { abs: ["cut", ...] } carves a soft crease instead of adding volume.
+    seg.cuts = seg.feats.filter((f) => f.id === "cut"); seg.feats = seg.feats.filter((f) => f.id !== "cut");
     // World-space bounds (in the rest pose), so far-away segments are skipped quickly. Wider than
     // any blend, so skipping a segment never cuts a blend off.
-    const box = new THREE.Box3(), r = seg.lathe ? Math.max(...seg.lathe.tab) : seg.ell.br, e = seg.ell;
+    const box = new THREE.Box3(), r = seg.lathe ? Math.max(...seg.lathe.tab) * Math.max(1, ...seg.lathe.dtab) + Math.max(...seg.lathe.xtab.map(Math.abs)) : seg.ell.br, e = seg.ell;
     if (seg.lathe) box.set(new THREE.Vector3(-r, seg.lathe.y0, -r), new THREE.Vector3(r, seg.lathe.y1, r));
     else box.set(new THREE.Vector3(e.cx - r, e.cy - r, e.cz - r), new THREE.Vector3(e.cx + r, e.cy + r, e.cz + r));
     seg.feats.forEach((f) => { box.expandByPoint(new THREE.Vector3(f.cx - f.br, f.cy - f.br, f.cz - f.br)); box.expandByPoint(new THREE.Vector3(f.cx + f.br, f.cy + f.br, f.cz + f.br)); });
