@@ -297,7 +297,7 @@ body[data-style="lab"] .hero h1 { background: linear-gradient(180deg, #ffffff 35
 .spec dt { font: 600 10.5px var(--font-body); letter-spacing: .1em; text-transform: uppercase; color: var(--faint); margin-bottom: 4px; }
 .spec dd { margin: 0; font-size: 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .spec dd .lvl { margin-right: 2px; }
-.spec .mchip { font-size: 12.5px; padding: 5px 10px; }
+.spec .mchip { font-size: 12.5px; padding: 5px 10px; white-space: normal; line-height: 1.35; border-radius: 12px; max-width: 100%; }
 
 .panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
 .panel-head h3 { display: flex; align-items: center; gap: 8px; font: 600 11px/1 var(--font-body); letter-spacing: .12em; text-transform: uppercase; color: var(--fg-2); }
