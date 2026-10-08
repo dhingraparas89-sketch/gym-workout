@@ -1327,12 +1327,24 @@ function createViewer3D(container, mode, opts = {}) {
       const thighDir = far ? p.t2 : p.thigh + 180;
       const shinDir = far ? p.s2 : p.shin + 180;
       const footDir = far ? (p.f2 ?? 90) : (p.foot ?? 90);
-      const legOut = fig3.legAbd ? new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0).applyQuaternion(cur.parts.lowerTorso.quaternion), (-side * fig3.legAbd * Math.PI) / 180) : null;
+      const la = p.legAbd ?? fig3.legAbd;
+      const legAxis = new THREE.Vector3(...(fig3.legAbdAxis === "spine" ? [0, 1, 0] : [1, 0, 0])).applyQuaternion(cur.parts.lowerTorso.quaternion);
+      const legOut = la ? new THREE.Quaternion().setFromAxisAngle(legAxis, (-side * la * Math.PI) / 180) : null;
       placeAngle(cur.parts["thigh" + s], hip3, thighDir, legOut);
-      const knee = endOf(cur.parts["thigh" + s], 42);
+      let knee = endOf(cur.parts["thigh" + s], 42);
       placeAngle(cur.parts["shin" + s], knee, shinDir, legOut);
       const ankle = endOf(cur.parts["shin" + s], 42);
+      // Knees out (or in, negative): turn thigh and shin about the hip-ankle line; the foot stays planted.
+      const ko = p.kneeOut ?? fig3.kneeOut;
+      if (ko) {
+        const q = new THREE.Quaternion().setFromAxisAngle(ankle.clone().sub(hip3).normalize(), (side * ko * Math.PI) / 180);
+        cur.parts["thigh" + s].quaternion.premultiply(q);
+        knee = endOf(cur.parts["thigh" + s], 42);
+        cur.parts["shin" + s].position.copy(knee);
+        cur.parts["shin" + s].quaternion.premultiply(q);
+      }
       placeAngle(cur.parts["foot" + s], ankle, footDir, legOut);
+      if (ko) cur.parts["foot" + s].quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), (-side * ko * 0.6 * Math.PI) / 180));
     });
 
     // Hanging and supported moves (pull-up, dips): the hands stay locked on the bar and the

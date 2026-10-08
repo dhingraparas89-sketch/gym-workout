@@ -103,6 +103,8 @@ function lerpPose(a, b, t) {
   });
   const base = { ...b, x: mix(a.x, b.x), y: mix(a.y, b.y), bend: mix(a.bend || 0, b.bend || 0), abd: mix(a.abd || 0, b.abd || 0) };
   if (a.gz != null && b.gz != null) base.gz = mix(a.gz, b.gz);
+  // 3D-only leg spread (degrees) and knees-out turn, when the poses give them.
+  ["legAbd", "kneeOut"].forEach((k) => { if (a[k] != null || b[k] != null) base[k] = mix(a[k] ?? 0, b[k] ?? 0); });
   return fromJoints(q, base);
 }
 
