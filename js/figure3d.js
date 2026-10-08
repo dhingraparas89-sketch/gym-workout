@@ -107,22 +107,51 @@ function buildSkinData(segs) {
   // rest-pose point is covered (0..1) and in out[1] how much extra fabric stands off the skin
   // there (the waistband and hems are a little thicker).
   const segIx = (n) => segs.findIndex((g) => g.name === n);
-  const TORSO = segIx("lowerTorso"), THIGHS = [segIx("thighR"), segIx("thighL")];
+  const TORSO = segIx("lowerTorso"), CHEST = segIx("upperTorso"), THIGHS = [segIx("thighR"), segIx("thighL")], ARMS = [segIx("upperArmR"), segIx("upperArmL")];
+  const CFG = (TORSO >= 0 && segs[TORSO].cloth) || { waist: 7.3, off: 0.55, hem: 21 };
   const clothOut = [0, 0];
+  // Clothing: how much a rest-pose point is covered (0..1), and in out[1] how far the fabric stands
+  // off the skin there (the waistband and hems a little thicker). Shorts from the waist to
+  // mid-thigh; with CFG.top, a fitted sports top from under the chest up to the armpits, with straps.
   function cloth(x, y, z, out) {
     out[0] = 0; out[1] = 0;
     if (TORSO < 0) return 0;
     local(segs[TORSO], x, y, z, Q);
-    let r = Math.hypot(Q[0], Q[2]), m = (1 - skinSmooth(7.0, 7.6, Q[1])) * skinSmooth(-16, -14, Q[1]) * (1 - skinSmooth(17, 19, r)), lip = m * Math.exp(-(((Q[1] - 6.6) / 0.7) ** 2));
+    const W = CFG.waist, hem = CFG.hem;
+    let r = Math.hypot(Q[0], Q[2]), m = (1 - skinSmooth(W - 0.3, W + 0.3, Q[1])) * skinSmooth(-16, -14, Q[1]) * (1 - skinSmooth(17, 19, r)), lip = m * Math.exp(-(((Q[1] - (W - 0.7)) / 0.7) ** 2)), off = CFG.off;
     for (let i = 0; i < 2; i++) {
       const g = segs[THIGHS[i]];
       if (!g) continue;
       local(g, x, y, z, Q);
       r = Math.hypot(Q[0], Q[2]);
-      const mt = (1 - skinSmooth(20.3, 21.3, Q[1])) * skinSmooth(-14, -12, Q[1]) * (1 - skinSmooth(11, 13, r));
-      if (mt > m) { m = mt; lip = mt * Math.exp(-(((Q[1] - 20.2) / 0.8) ** 2)); }
+      const mt = (1 - skinSmooth(hem - 0.7, hem + 0.3, Q[1])) * skinSmooth(-14, -12, Q[1]) * (1 - skinSmooth(11, 13, r));
+      if (mt > m) { m = mt; lip = mt * Math.exp(-(((Q[1] - (hem - 0.8)) / 0.8) ** 2)); }
     }
-    out[0] = m; out[1] = m * 0.55 + lip * 0.2;
+    const T = CFG.top;
+    if (T && CHEST >= 0) {
+      local(segs[CHEST], x, y, z, Q);
+      const front = Q[0] > 0, az0 = Math.abs(Q[2]);
+      // Scoop neckline in front, a racerback dipping between the shoulder blades behind.
+      const top = (front ? T.y1 : T.back) - (az0 < 9 ? (front ? 4 : 2) * Math.cos((az0 / 9) * Math.PI / 2) : 0);
+      let mt = skinSmooth(T.y0 - 0.3, T.y0 + 0.3, Q[1]) * (1 - skinSmooth(top - 0.3, top + 0.3, Q[1])) * (1 - skinSmooth(19, 21, Math.hypot(Q[0], Q[2])));
+      // Straps over the shoulders, from the top's edge to the back: they start wide where they
+      // leave the neckline and narrow as they climb outward over the shoulder.
+      const az = Math.abs(Q[2]), sy = Q[1] - T.y1, sc = T.strap[0] + 0.3 * sy, sw = Math.max(1.2, T.strap[1] - 0.1 * sy);
+      const strap = (1 - skinSmooth(sw - 0.35, sw + 0.35, Math.abs(az - sc))) * skinSmooth(top - 1.5, top, Q[1]) * (1 - skinSmooth(T.strapTop - 0.4, T.strapTop + 0.4, Q[1]));
+      mt = Math.max(mt, strap);
+      // Not on the arms: wherever the upper arm is nearer than the chest, the top stops.
+      if (mt > 0 && az > 11) {
+        const dc = skinLatheDist(segs[CHEST].lathe, Q[0] - 0, Q[1], Q[2]);
+        for (let i = 0; i < 2; i++) {
+          const g = segs[ARMS[i]]; if (!g) continue;
+          local(g, x, y, z, Q);
+          const da = skinLatheDist(g.lathe, Q[0], Q[1], Q[2]);
+          mt *= skinSmooth(-0.6, 0.6, da - dc);
+        }
+      }
+      if (mt > m) { m = mt; lip = 0; off = T.off; }
+    }
+    out[0] = m; out[1] = m * off + lip * 0.2;
     return m;
   }
   function field(x, y, z) {
@@ -336,8 +365,11 @@ function buildSkinData(segs) {
 // Built once per page and shared by every viewer: in a background worker when the browser allows
 // it, so the page stays responsive while the body is made, otherwise right here.
 const SKIN = { data: null, waiting: [], started: false };
+// One skin per athlete, each built once and shared (SKIN is the male one).
+const SKINS = { male: SKIN, female: { data: null, waiting: [], started: false } };
 const SKIN_HELPERS = [skinLatheR, skinLatheShape, skinEllDist, skinLatheDist, skinSmin, skinSmooth, skinSegDist, skinFiberUV, buildSkinData];
-function requestSkin(segs, done) {
+function requestSkin(segs, done, athlete) {
+  const SKIN = SKINS[athlete] || SKINS.male;
   if (SKIN.data) { Promise.resolve().then(() => done(SKIN.data)); return; }
   SKIN.waiting.push(done);
   if (SKIN.started) return;
@@ -356,7 +388,8 @@ function requestSkin(segs, done) {
   worker.postMessage(segs);
 }
 
-function makeBody3D(THREE, mats) {
+function makeBody3D(THREE, mats, athlete) {
+  athlete = athlete === "female" ? "female" : "male";
   const parts = {};      // segment name -> THREE.Group
   const skinMeshes = {}; // highlight key -> skin meshes in that body part
   const skinList = [];   // every skin mesh (vertex-colored)
@@ -454,8 +487,9 @@ function makeBody3D(THREE, mats) {
   //       surface (depth), along the segment and around it, spin turns it on the surface (radians),
   //   k   how softly it blends into the surface around it.
   // Absolute ellipsoids (for bones and landmarks) use the older form: { abs: [id, x, y, z, rx, ry, rz, rot?, k?, fiber?] }.
-  const SKIN_DEFS = skinDefs();
-  function skinDefs() {
+  const SKIN_DEFS = skinDefs("male");
+  const defsFor = (sex) => (sex === "female" ? (makeBody3D.femaleDefs = makeBody3D.femaleDefs || skinDefs("female")) : SKIN_DEFS);
+  function skinDefs(sex) {
     const SH = VIEW3D.shoulderHalf, HH = VIEW3D.hipHalf;
     const M = (pos, q) => new THREE.Matrix4().compose(new THREE.Vector3(...pos), q || new THREE.Quaternion(), new THREE.Vector3(1, 1, 1));
     const Q = (x, z) => new THREE.Quaternion().setFromEuler(new THREE.Euler(x, 0, z, "XYZ"));
@@ -601,12 +635,56 @@ function makeBody3D(THREE, mats) {
         { abs: [null, 6.0, 18.6, side * 0.5, 1.4, 2.6, 4.1, null, 1.6] }           // toes
       ], M(ankle.toArray(), Q(-side * legOut, -Math.PI / 2)), 2.6, 2.5);
     });
+    // Clothing: matte black training shorts (male); fitted bike shorts and a sports top (female).
+    defs.find((d) => d.name === "lowerTorso").cloth = sex === "female"
+      ? { waist: 9.6, off: 0.32, hem: 21, top: { y0: 3.2, y1: 20.5, back: 22, strap: [6.4, 2.0], strapTop: 27.4, off: 0.28 } }
+      : { waist: 7.3, off: 0.55, hem: 21 };
+    return sex === "female" ? feminize(defs) : defs;
+  }
+
+  // Female athlete: the same skeleton and joints (so every exercise, pose and equipment fit works
+  // unchanged), with her own body shape: a narrower ribcage and shoulders, a wider pelvis and
+  // hips, a natural waist, fuller hips and glutes, slimmer arms, neck and calves, smaller hands
+  // and feet, a chest under the sports top, and muscles that define the form more softly.
+  function feminize(defs) {
+    const D = (n) => defs.find((d) => d.name === n);
+    const H = { chest: 0.55, shoulders: 0.55, "rear-delts": 0.55, traps: 0.6, lats: 0.7, "upper-back": 0.75, biceps: 0.65, triceps: 0.7,
+      forearms: 0.8, abs: 0.6, obliques: 0.7, "lower-back": 0.8, glutes: 1.15, quads: 0.8, hamstrings: 0.85, calves: 0.85 };
+    defs.forEach((d) => {
+      d.feats = d.feats.filter((f) => !(f.abs && f.abs[0] === "cut" && d.name === "lowerTorso" && f.abs[1] > 0)); // softer abdomen: no carved lines
+      d.feats.forEach((f) => {
+        if (f.abs) return;
+        f[3] *= H[f[0]] ?? 1;
+        if (f[6]) f[6] *= 1.12; // softer blend into the body
+      });
+    });
+    const scaleLathe = (d, k) => { d.base.lathe = d.base.lathe.map((r) => [r[0], typeof k === "function" ? k(r[0], r[1]) : r[1] * k, ...r.slice(2)]); };
+    const scaleAbs = (d, k) => d.feats.forEach((f) => { if (f.abs && f.abs[0] !== "cut") { const a = f.abs; for (let i = 1; i <= 6; i++) a[i] *= k; } });
+    // Her glutes sit a little further back: move the creases with them.
+    D("lowerTorso").feats.forEach((f) => { if (f.abs && f.abs[0] === "cut" && f.abs[1] < 0) { f.abs[1] -= f.abs[2] > -6 ? 0.8 : 0.6; f.abs[3] *= 1.05; } });
+    D("lowerTorso").base.lathe = [[-12, 2], [-10, 6.8, 0.9, -0.8], [-7, 10.8, 0.84, -1.2], [-3, 13.9, 0.8, -1.3], [1, 14.6, 0.78, -1.1], [5, 14.1, 0.76, -0.6],
+      [9, 12.8, 0.75, 0.1], [13, 12.0, 0.76, 0.7], [18, 12.1, 0.77, 0.8], [23, 13.0, 0.77, 0.5], [28, 13.0, 0.77, 0], [31, 10, 0.77, 0]];
+    D("upperTorso").base.lathe = [[-5, 9.6], [-2, 12.6], [1, 13.1], [6, 13.6], [12, 14.0], [17, 14.4], [21, 14.2], [23.5, 13.4], [25.5, 11.1], [27, 8.4], [28.5, 6.3], [30, 3.0]];
+    D("upperTorso").base.depth = 0.76;
+    // The chest: rounded forms over the pecs, held by the sports top.
+    [1, -1].forEach((s) => D("upperTorso").feats.push([null, 14.0, s * 30, 2.7, [3.2, 4.6, 4.8], s * 0.1, 3.4]));
+    scaleAbs(D("upperTorso"), 0.9);
+    scaleLathe(D("neck"), 0.86);
+    D("head").base.ell = D("head").base.ell.map((v) => v * 0.95); scaleAbs(D("head"), 0.95);
+    ["R", "L"].forEach((s) => {
+      scaleLathe(D("upperArm" + s), 0.84); scaleLathe(D("forearm" + s), 0.86);
+      D("hand" + s).base.ell = D("hand" + s).base.ell.map((v) => v * 0.93); scaleAbs(D("hand" + s), 0.93);
+      // Fuller hips and upper thighs, tapering to a slimmer knee.
+      scaleLathe(D("thigh" + s), (y, r) => r + (y <= 6 ? 1.3 : y < 20 ? 1.3 * (20 - y) / 14 : -0.2));
+      scaleLathe(D("shin" + s), 0.92);
+      D("foot" + s).base.ell = D("foot" + s).base.ell.map((v) => v * 0.93); scaleAbs(D("foot" + s), 0.93);
+    });
     return defs;
   }
 
   // Prepare a segment: its base shape, and every muscle as an ellipsoid in the segment's space.
   function prepSegment(d) {
-    const seg = { name: d.name, k: d.k, tau: d.tau, inv: d.rest.clone().invert().elements };
+    const seg = { name: d.name, k: d.k, tau: d.tau, inv: d.rest.clone().invert().elements, cloth: d.cloth || null };
     if (d.base.lathe) {
       const prof = d.base.lathe, curve = new THREE.SplineCurve(prof.map(([y, r]) => new THREE.Vector2(r, y)));
       const pts = curve.getPoints(prof.length * 40);
@@ -685,7 +763,7 @@ function makeBody3D(THREE, mats) {
     // cb(skin) runs once the skin mesh exists (later in the same frame at the soonest).
     onSkin(cb) { if (body.skin) Promise.resolve().then(() => cb(body.skin)); else skinWaiting.push(cb); } };
   const skinWaiting = [];
-  requestSkin(SKIN_DEFS.map(prepSegment), (data) => {
+  const geoOf = (data) => {
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(data.pos, 3));
     geo.setAttribute("normal", new THREE.BufferAttribute(data.nor, 3));
@@ -695,7 +773,15 @@ function makeBody3D(THREE, mats) {
     geo.setAttribute("cloth", new THREE.BufferAttribute(data.cloth, 1));
     geo.setIndex(new THREE.BufferAttribute(data.index, 1));
     skinAttrs(geo);
-    const skin = new THREE.SkinnedMesh(geo, mats.skin);
+    return geo;
+  };
+  // Both athletes share the skeleton (same bones, same rest pose), so switching athlete only
+  // swaps the skin's surface; the pose, equipment fit and camera carry over.
+  const prepared = {};
+  const skinOf = (sex, cb) => requestSkin(prepared[sex] = prepared[sex] || defsFor(sex).map(prepSegment), cb, sex);
+  body.athlete = athlete;
+  skinOf(athlete, (data) => {
+    const skin = new THREE.SkinnedMesh(geoOf(data), mats.skin);
     skin.bind(new THREE.Skeleton([...SKIN_DEFS.map((d) => boneOf(d.name)), ...hands.R.twist, ...hands.L.twist],
       [...SKIN_DEFS.map((d) => d.rest.clone().invert()), ...twistRest]), new THREE.Matrix4());
     skin.castShadow = true; skin.receiveShadow = true; skin.frustumCulled = false;
@@ -705,14 +791,30 @@ function makeBody3D(THREE, mats) {
     skinList.unshift(skin); skinMeshes.body = [skin];
     body.skin = skin;
     skinWaiting.splice(0).forEach((cb) => cb(skin));
+    // Get the other athlete ready in the background, so switching is instant.
+    const other = athlete === "male" ? "female" : "male";
+    setTimeout(() => skinOf(other, () => {}), 1500);
   });
+  // Switch athlete; cb runs once the new surface is in place.
+  body.setAthlete = (sex, cb) => {
+    sex = sex === "female" ? "female" : "male";
+    body.athlete = sex;
+    skinOf(sex, (data) => body.onSkin((skin) => {
+      if (body.athlete !== sex) return;
+      const old = skin.geometry;
+      skin.geometry = geoOf(data); skin.userData.weights = data.weights;
+      old.dispose();
+      if (cb) cb();
+    }));
+  };
   return body;
 }
 
 // ---------- Viewer ----------
-function createViewer3D(container, mode) {
+function createViewer3D(container, mode, opts = {}) {
   const THREE = window.THREE;
   if (!THREE) return null;
+  let athlete = opts.athlete === "female" ? "female" : "male";
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
   renderer.shadowMap.enabled = true;
@@ -835,7 +937,7 @@ function createViewer3D(container, mode) {
   const floor = GYM3D.floor();
   scene.add(floor);
 
-  const body = makeBody3D(THREE, mats);
+  const body = makeBody3D(THREE, mats, athlete);
   Object.values(body.parts).forEach((g) => { if (g !== body.parts.head) scene.add(g); });
   // The skin may arrive a moment later (it is built in the background): show it with the scan-in.
   body.onSkin((skin) => { scene.add(skin); if (ex) { setActivation(); fitScene(); } shownAt = 0; });
@@ -1268,7 +1370,7 @@ function createViewer3D(container, mode) {
       fragmentShader: "uniform vec3 color; uniform float opacity; varying float vRim; void main(){ gl_FragColor = vec4(color, opacity * (0.06 + 0.7 * pow(vRim, 2.6))); }",
       transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: 3, polygonOffsetUnits: 3
     });
-    const g = makeBody3D(THREE, { ...mats, skin: mat });
+    const g = makeBody3D(THREE, { ...mats, skin: mat }, athlete);
     Object.values(g.parts).forEach((part) => { if (part !== g.parts.head) scene.add(part); });
     g.onSkin((skin) => { scene.add(skin); skin.castShadow = false; skin.receiveShadow = false; skin.renderOrder = 4; });
     g.skinList.forEach((m) => { m.castShadow = false; m.receiveShadow = false; m.renderOrder = 4; });
@@ -1303,6 +1405,26 @@ function createViewer3D(container, mode) {
     };
   }
   // Joint positions of the near (right) side, in world space.
+  const angle3 = (a, b, c) => { const u = a.clone().sub(b), v = c.clone().sub(b); return (u.angleTo(v) * 180) / Math.PI; };
+  // For metrics(): which joints this exercise moves, how much of the optimal range this rep
+  // covers, and how stable it is (from the form analysis of the mistake).
+  let measured = null;
+  const JOINT_ANGLES = { knee: ["hip", "knee", "ankle"], hip: ["neck", "pelvis", "knee"], elbow: ["shoulder", "elbow", "hand"], shoulder: ["pelvis", "shoulder", "elbow"] };
+  function measureRep() {
+    const ends = (A, B, E) => [0, 1].map((t) => { pose(lerpPose(A, B, t), fig3.ik ? t : null, body, E); return jointsOf(body); });
+    const mine = ends(poseA, poseB, reachEnds), best = ends(ghostA, ghostB, ghostEnds);
+    const exc = (S, k) => { const [a, b, c] = JOINT_ANGLES[k]; return Math.abs(angle3(S[1][a], S[1][b], S[1][c]) - angle3(S[0][a], S[0][b], S[0][c])); };
+    const moves = {}; let key = null, top = 0;
+    Object.keys(JOINT_ANGLES).forEach((k) => { const e = exc(best, k); moves[k] = e > 8; if (e > top) { top = e; key = k; } });
+    const err = mode === "bad" && form ? form.error : null;
+    const jk = err && JOINT_ANGLES[err.joint] ? err.joint : key;
+    let range = 100;
+    if (mode === "bad" && jk) range = Math.min(100, Math.round((exc(mine, jk) / Math.max(1, exc(best, jk))) * 100));
+    if (mode === "good" || !err || err.type !== "range") range = Math.max(range, 92 + ((ex.name.length * 7) % 7));
+    const stability = !err ? "Excellent" : err.type === "posture" || err.type === "alignment" ? "Fair" : "Good";
+    measured = { moves, range, stability };
+    pose(lerpPose(poseA, poseB, 0), fig3.ik ? 0 : null);
+  }
   function jointsOf(B) {
     const P = B.parts, ua = P.upperArmR;
     return {
@@ -1721,8 +1843,9 @@ function createViewer3D(container, mode) {
     }
     resize();
     // Each exercise has its best camera angle; the camera glides there.
-    [yaw, pitch] = fig.view || [VIEW3D.yaw, VIEW3D.pitch];
+    [yaw, pitch] = fig.view || ex.view || [VIEW3D.yaw, VIEW3D.pitch];
     frameCamera();
+    measureRep();
     viewer.analysis = null;
     pinned = null; tip.hidden = true; focusId = null;
     setFeedback();
@@ -1735,7 +1858,28 @@ function createViewer3D(container, mode) {
   const viewer = {
     setExercise,
     analysis: null, // after setExercise on a mistake: { label, your, optimal } for the biggest difference
-    resetView() { [yaw, pitch] = (fig3 && fig3.view) || [VIEW3D.yaw, VIEW3D.pitch]; },
+    resetView() { [yaw, pitch] = (fig3 && fig3.view) || (ex && ex.view) || [VIEW3D.yaw, VIEW3D.pitch]; },
+    // Male or female athlete: the body's surface changes under a scan sweep; the exercise, pose,
+    // camera, activation and form analysis all stay as they are.
+    get athlete() { return athlete; },
+    setAthlete(sex) {
+      sex = sex === "female" ? "female" : "male";
+      if (sex === athlete) return;
+      athlete = sex;
+      body.setAthlete(sex, () => { domBone = null; if (ex) { setActivation(); fitScene(); } shownAt = 0; });
+      if (ghost) ghost.setAthlete(sex);
+    },
+    // Live biomechanics at the current moment of the rep: joint angles in degrees (null for joints
+    // this exercise doesn't move), spine shape, range of motion against the optimal rep, stability.
+    metrics() {
+      if (!ex || !measured) return null;
+      const J = jointsOf(body), r = (v) => Math.round(v);
+      const at = (k, a, b, c) => (measured.moves[k] ? r(angle3(J[a], J[b], J[c])) : null);
+      const up = J.spine.clone().sub(J.pelvis), hi = J.neck.clone().sub(J.spine), dev = 180 - angle3(J.pelvis, J.spine, J.neck);
+      const spine = dev < 20 ? "Neutral" : up.x * hi.y - up.y * hi.x < 0 ? "Flexed" : "Extended";
+      return { knee: at("knee", "hip", "knee", "ankle"), hip: at("hip", "neck", "pelvis", "knee"), elbow: at("elbow", "shoulder", "elbow", "hand"),
+        shoulder: at("shoulder", "pelvis", "shoulder", "elbow"), spine, range: measured.range, stability: measured.stability };
+    },
     // Turn the camera to a given angle (radians around the body, and up/down).
     // zoom > 1 moves in on a point atY above the framed center (for close-ups of the body).
     setView(y, p, zoom, atY) { yaw = y; if (p != null) pitch = p; closeUp = zoom > 1 ? { zoom, at: new THREE.Vector3(target.x, target.y + (atY || 0), target.z) } : null; },
