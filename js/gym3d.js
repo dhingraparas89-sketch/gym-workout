@@ -1327,6 +1327,9 @@ GYM3D.kits = (() => {
 
   return {
     K,
+    // Shared building blocks, so kits in other files (js/kits/*.js) can reuse benches, racks,
+    // bars, dumbbells, cable towers and handles instead of redrawing them.
+    lib: { V, mid, flatBench, benchRack, platform, PLATFORM_T, barbell, dumbbells, cableTower, dHandleRig, ropeRig, vBarRig, latBarRig, cableKit, adjBench, powerRack, mat },
     // Where the floor goes: under the "feet", under the whole "body" (floor exercises), far
     // below a "hang"ing body, or where the kit decides.
     groundOf(name, fig) { return fig.ground || (K[name] && K[name].ground) || "feet"; },
