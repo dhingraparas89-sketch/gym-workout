@@ -1023,7 +1023,7 @@ function createViewer3D(container, mode, opts = {}) {
     const S = [];
     for (let i = 0; i <= n; i++) {
       const t = i / n;
-      pose(lerpPose(poseA, poseB, t), fig3.ik ? t : null);
+      pose(lerp3(poseA, poseB, t), fig3.ik ? t : null);
       S.push({ t, pts: skinWorld(null, null), grip: { R: gripPoint("R"), L: gripPoint("L") }, axis: { R: gripAxis("R"), L: gripAxis("L") },
         handQ: { R: body.handQ.R.clone(), L: body.handQ.L.clone() }, J: jointsOf(body) });
     }
@@ -1109,7 +1109,7 @@ function createViewer3D(container, mode, opts = {}) {
     const tr = {}; Object.keys(PATH_SRC).forEach((k) => { tr[k] = []; });
     for (let i = 0; i <= 32; i++) {
       const t = i / 32;
-      pose(lerpPose(poseA, poseB, t), fig3.ik ? t : null);
+      pose(lerp3(poseA, poseB, t), fig3.ik ? t : null);
       Object.keys(PATH_SRC).forEach((k) => tr[k].push(PATH_SRC[k]()));
     }
     const travel = (k) => tr[k].reduce((a, p, i) => a + (i ? p.distanceTo(tr[k][i - 1]) : 0), 0);
@@ -1159,7 +1159,7 @@ function createViewer3D(container, mode, opts = {}) {
     contactShadows(P.shadows);
     buildPaths();
     fitted = true;
-    pose(lerpPose(poseA, poseB, 0), fig3.ik ? 0 : null);
+    pose(lerp3(poseA, poseB, 0), fig3.ik ? 0 : null);
     frameScene(ctx);
   }
 
@@ -1270,6 +1270,14 @@ function createViewer3D(container, mode, opts = {}) {
     const a = a0 + (a1 - a0) * pz;
     return new THREE.Vector3(C.x + Math.cos(a) * R, C.y + Math.sin(a) * R, A.z + (B.z - A.z) * pz);
   }
+  // Rep interpolation plus two 3D-only pose angles (degrees): `twist`, the chest and arms turned
+  // about the spine (Russian twist, one-arm rows), and `roll`, the whole body turned about its
+  // long axis (side plank).
+  function lerp3(a, b, t) {
+    const p = lerpPose(a, b, t);
+    ["twist", "roll"].forEach((k) => { if (a[k] != null || b[k] != null) p[k] = (a[k] || 0) + ((b[k] || 0) - (a[k] || 0)) * t; });
+    return p;
+  }
   function pose(p, t, target = body, ends = reachEnds) {
     cur = target; curEnds = ends;
     const j = solveSide(p);
@@ -1347,6 +1355,19 @@ function createViewer3D(container, mode, opts = {}) {
       if (ko) cur.parts["foot" + s].quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), (-side * ko * 0.6 * Math.PI) / 180));
     });
 
+    const turn = (list, pivot, q) => {
+      list.forEach((g) => { g.position.sub(pivot).applyQuaternion(q).add(pivot); g.quaternion.premultiply(q); });
+      cur.handQ.R.premultiply(q); cur.handQ.L.premultiply(q);
+    };
+    if (p.twist) {
+      const P = cur.parts, axis = new THREE.Vector3(0, 1, 0).applyQuaternion(P.lowerTorso.quaternion).normalize();
+      turn([P.upperTorso, P.neck, P.upperArmR, P.upperArmL, P.forearmR, P.forearmL], P.upperTorso.position.clone(),
+        new THREE.Quaternion().setFromAxisAngle(axis, (p.twist * Math.PI) / 180));
+    }
+    if (p.roll) {
+      const P = cur.parts, axis = new THREE.Vector3(0, 1, 0).applyQuaternion(P.lowerTorso.quaternion).normalize();
+      turn(Object.values(P).filter((g) => g !== P.head), P.lowerTorso.position.clone(), new THREE.Quaternion().setFromAxisAngle(axis, (p.roll * Math.PI) / 180));
+    }
     // Hanging and supported moves (pull-up, dips): the hands stay locked on the bar and the
     // body moves around them, like a real closed chain.
     if (fig3.hold === "hands" && holdAt) {
@@ -1426,7 +1447,7 @@ function createViewer3D(container, mode, opts = {}) {
   let measured = null;
   const JOINT_ANGLES = { knee: ["hip", "knee", "ankle"], hip: ["neck", "pelvis", "knee"], elbow: ["shoulder", "elbow", "hand"], shoulder: ["pelvis", "shoulder", "elbow"] };
   function measureRep() {
-    const ends = (A, B, E) => [0, 1].map((t) => { pose(lerpPose(A, B, t), fig3.ik ? t : null, body, E); return jointsOf(body); });
+    const ends = (A, B, E) => [0, 1].map((t) => { pose(lerp3(A, B, t), fig3.ik ? t : null, body, E); return jointsOf(body); });
     const mine = ends(poseA, poseB, reachEnds), best = ends(ghostA, ghostB, ghostEnds);
     const exc = (S, k) => { const [a, b, c] = JOINT_ANGLES[k]; return Math.abs(angle3(S[1][a], S[1][b], S[1][c]) - angle3(S[0][a], S[0][b], S[0][c])); };
     const moves = {}; let key = null, top = 0;
@@ -1438,7 +1459,7 @@ function createViewer3D(container, mode, opts = {}) {
     if (mode === "good" || !err || err.type !== "range") range = Math.max(range, 92 + ((ex.name.length * 7) % 7));
     const stability = !err ? "Excellent" : err.type === "posture" || err.type === "alignment" ? "Fair" : "Good";
     measured = { moves, range, stability };
-    pose(lerpPose(poseA, poseB, 0), fig3.ik ? 0 : null);
+    pose(lerp3(poseA, poseB, 0), fig3.ik ? 0 : null);
   }
   function jointsOf(B) {
     const P = B.parts, ua = P.upperArmR;
@@ -1528,9 +1549,9 @@ function createViewer3D(container, mode, opts = {}) {
     let best = null;
     for (let i = 0; i <= 32; i++) {
       const t = i / 32;
-      pose(lerpPose(ghostA, ghostB, t), fig3.ik ? t : null, ghost, ghostEnds);
+      pose(lerp3(ghostA, ghostB, t), fig3.ik ? t : null, ghost, ghostEnds);
       const G = jointsOf(ghost);
-      pose(lerpPose(poseA, poseB, t), fig3.ik ? t : null);
+      pose(lerp3(poseA, poseB, t), fig3.ik ? t : null);
       const Y = jointsOf(body);
       cands.forEach((c) => { yourPath[c].push(Y[c]); idealPath[c].push(G[c]); });
       const g = measure(G, joint), y = measure(Y, joint);
@@ -1789,10 +1810,10 @@ function createViewer3D(container, mode, opts = {}) {
     const t = heldAt ?? (reduce ? 1 : easeT(now, period));
     if (ghost) {
       const gt = heldAt ?? (reduce ? 1 : easeT(now));
-      pose(lerpPose(ghostA, ghostB, gt), fig3.ik ? gt : null, ghost, ghostEnds);
+      pose(lerp3(ghostA, ghostB, gt), fig3.ik ? gt : null, ghost, ghostEnds);
       ghost.mat.uniforms.opacity.value = (ghostOn ? 0.3 : 0) * smooth((k - 450) / 650);
     }
-    pose(lerpPose(poseA, poseB, t), fig3.ik ? t : null);
+    pose(lerp3(poseA, poseB, t), fig3.ik ? t : null);
     // Activation follows the effort of the rep: strongest while the weight is moving.
     const speed = lastNow ? Math.abs(t - lastT) / Math.max(1, now - lastNow) : 0;
     effort += ((reduce ? 1 : 0.55 + 0.45 * Math.min(1, speed / 0.0009)) - effort) * 0.08;
@@ -1833,10 +1854,10 @@ function createViewer3D(container, mode, opts = {}) {
   function setExercise(next) {
     ex = next;
     form = (typeof FORM !== "undefined" ? FORM : {})[ex.name] || null;
-    const fig = { ...ex.figure, ...(ex.figure3d || {}) };
+    const fig = { ...ex.figure, ...(ex.figure3d || {}), ...((ex.figure3d || {}).x3d || {}) };
     fig3 = fig;
     clearEquipment();
-    const fault = mode === "bad" ? { ...ex.bad, ...(ex.bad3d || {}) } : null;
+    const fault = mode === "bad" ? { ...ex.bad, ...(ex.bad3d || {}), ...((ex.bad3d || {}).x3d || {}) } : null;
     const extra = { armsOut: fig.armsOut, abd: fig.abd, abdAxis: fig.abdAxis };
     // fig.mix: 3D-only joint angles applied to both ends of the rep (e.g. hands on a machine's handles).
     poseA = { ...extra, ...fig.a, ...fig.mix, ...(fault && fault.a) };
@@ -1853,7 +1874,7 @@ function createViewer3D(container, mode, opts = {}) {
     // A hanging or supported body holds the bar where its hands are at the start of the rep.
     holdAt = null;
     if (fig.hold === "hands") {
-      pose(lerpPose(ghostA, ghostB, 0), fig.ik ? 0 : null);
+      pose(lerp3(ghostA, ghostB, 0), fig.ik ? 0 : null);
       holdAt = gripPoint("R").add(gripPoint("L")).multiplyScalar(0.5);
     }
     resize();
@@ -1917,7 +1938,7 @@ function createViewer3D(container, mode, opts = {}) {
         bounds: (() => { const b = ctx.bounds(); return [v3(b.min), v3(b.max)]; })(),
         report: rig && rig.report ? rig.report(ctx) : null
       };
-      pose(lerpPose(poseA, poseB, 0), fig3.ik ? 0 : null);
+      pose(lerp3(poseA, poseB, 0), fig3.ik ? 0 : null);
       return out;
     },
     dispose() {
