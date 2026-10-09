@@ -928,9 +928,9 @@ function makeBody3D(THREE, mats, athlete) {
     const mesh = new THREE.Mesh(geo, mat);
     mesh.castShadow = true; mesh.frustumCulled = false; mesh.matrixAutoUpdate = false; mesh.visible = false;
 
-    // Guide chain (world space): verlet points with a rod-like stiffness near the band.
+    // Guide chain (world space): relaxed under gravity each frame, stiffer near the band.
     const P = [...Array(K + 1)].map(() => new THREE.Vector3());
-    let ready = false, barA = null, barB = null, lastRoot = null;
+    let ready = false, barA = null, barB = null, lastRoot = null, slide = 0;
     const swing = new THREE.Vector3(), swingV = new THREE.Vector3(), side = new THREE.Vector3();
     const V = new THREE.Vector3(), W = new THREE.Vector3(), root = new THREE.Vector3(), rdir = new THREE.Vector3();
     const tQ = new THREE.Quaternion(), fwd = new THREE.Vector3(), up = new THREE.Vector3(), inv = new THREE.Matrix4();
@@ -956,11 +956,16 @@ function makeBody3D(THREE, mats, athlete) {
       const l = p.clone().applyMatrix4(inv), e = torsoAt(l.y);
       if (e && l.y > -6) {
         const ax = e[0] + r, az = e[1] + r, k = (l.x / ax) ** 2 + (l.z / az) ** 2;
-        if (k < 1) { const sc = 1 / Math.sqrt(k || 1e-6); l.x *= sc; l.z *= sc; p.copy(l.applyMatrix4(ut.matrixWorld)); }
+        if (k < 1) {
+          // Bent over, hair that lands on the back slides off to the side rather than resting there.
+          if (slide > 0.3 && Math.abs(l.x) < ax) l.z = (l.z < 0 ? -1 : 1) * az * Math.sqrt(1 - (l.x / ax) ** 2);
+          else { const sc = 1 / Math.sqrt(k || 1e-6); l.x *= sc; l.z *= sc; }
+          p.copy(l.applyMatrix4(ut.matrixWorld));
+        }
       }
     }
     body.hair = {
-      mesh, band, P, //DBGH
+      mesh, band,
       update(dt, still, floorY) {
         const on = body.hairOn === true;
         mesh.visible = on; band.visible = on;
@@ -995,22 +1000,28 @@ function makeBody3D(THREE, mats, athlete) {
         }
         lastRoot = (lastRoot || new THREE.Vector3()).copy(root);
         side.set(0, 0, 1).applyQuaternion(tQ);
+        // Bent over (the band faces up): the tail leaves the band to one side and falls past the
+        // head and neck instead of resting along the back.
+        const bent = Math.min(1, Math.max(0, rdir.y * 2)) * (1 - supine); slide = bent;
+        if (bent > 0) rdir.lerp(V.copy(side).multiplyScalar(0.8).add(W.set(0, -0.6, 0)), bent).normalize();
         P[0].copy(root);
         // Rod stiffness: near the band the hair keeps the direction it leaves the band in.
         for (let i = 1; i <= K; i++) {
           // Hair does not stand up: the band's hold gives way when it points upward (bent over).
-          const stiff = (i === 1 ? 0.6 : i === 2 ? 0.15 : 0.035 * Math.exp(-(i - 3) / 2)) * (1 - 0.85 * Math.max(0, rdir.y));
+          const stiff = (i === 1 ? 0.6 : i === 2 ? 0.15 : 0.035 * Math.exp(-(i - 3) / 2)) ;
           if (i === 1) up.copy(rdir); else up.subVectors(P[i - 1], P[i - 2]).normalize();
           P[i].lerp(W.copy(P[i - 1]).addScaledVector(up, SEG), stiff);
         }
-        for (let it = 0; it < 10; it++) {
+        // More passes on a long frame (slow devices), so the tail keeps up with a fast-moving head.
+        const passes = still ? 40 : Math.min(40, Math.ceil(10 * Math.max(1, dt * 60)));
+        for (let it = 0; it < passes; it++) {
           P[0].copy(root);
           for (let i = 1; i <= K; i++) {
             P[i].y -= SEG * 0.15; // gravity, relaxed a little at every pass so it settles within a few frames
-            P[i].addScaledVector(side, SEG * 0.03); // a slight sideways drift so it never balances on the crown
+            if (bent > 0) P[i].addScaledVector(side, SEG * 0.08 * bent); // a slight sideways drift so it never balances on the crown
             V.subVectors(P[i], P[i - 1]); const d = V.length() || 1;
             P[i].copy(P[i - 1]).addScaledVector(V, SEG / d);
-            const r = 1.6 * (1 - (0.6 * i) / K);
+            const r = 2.5 * (1 - (0.45 * i) / K); // the bundle's own radius, so its clumps stay outside the skin
             if (i > 1) collide(P[i], i > 3 ? r : r * 0.4);
             if (plane && supine > 0) { V.subVectors(P[i], plane); const dd = V.dot(fwd) - r * 0.6; if (dd < 0) P[i].addScaledVector(fwd, -dd); }
             if (floorY != null && P[i].y < floorY + r) P[i].y = floorY + r;
@@ -1228,13 +1239,13 @@ function createViewer3D(container, mode, opts = {}) {
   Object.values(body.parts).forEach((g) => { if (g !== body.parts.head) scene.add(g); });
   // The skin may arrive a moment later (it is built in the background): show it with the scan-in.
   body.onSkin((skin) => { scene.add(skin); if (ex) { setActivation(); fitScene(); } shownAt = 0; });
-  scene.add(body.makeHair().mesh); window.__hair = body.hair; //DBGH
+  scene.add(body.makeHair().mesh);
   // Per frame, just before drawing: ease the display mode in, and let the hair settle.
   let hairAt = 0;
   scene.onBeforeRender = () => {
     const u = fiberUniforms, now = performance.now(), dt = Math.min(0.05, Math.max(0, (now - (hairAt || now)) / 1000)); hairAt = now;
     u.uMap.value += (display.map - u.uMap.value) * (reduce ? 1 : 0.08);
-    if (body.updateHair) body.updateHair(dt, reduce, floor.position.y); window.__fy = floor.position.y; //DBGH
+    if (body.updateHair) body.updateHair(dt, reduce, floor.position.y);
   };
   const equipment = new THREE.Group();
   scene.add(equipment);
