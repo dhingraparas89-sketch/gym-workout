@@ -4,10 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rep Sheet</title>
-<meta name="theme-color" content="#0b0d10">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@400;600;700&family=Big+Shoulders+Display:wght@700;900&family=Barlow:wght@400;500;600&family=Familjen+Grotesk:wght@500;700&family=Manrope:wght@400;500;700&family=IBM+Plex+Mono:wght@500&family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@500;600;700&family=JetBrains+Mono:wght@500&display=swap">
+<meta name="theme-color" content="#0e0f11">
+<meta name="description" content="Explore human anatomy, discover exercises, and understand how muscles work through interactive 3D visualization.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@500;600;700&family=JetBrains+Mono:wght@500&display=swap">
 <link rel="stylesheet" href="styles/base.css">
 <link rel="stylesheet" href="styles/themes.css">
+<link rel="stylesheet" href="styles/app.css">
 </head>
 <body data-style="lab">
 <!-- APP START -->
@@ -17,30 +19,39 @@
     <a class="brand" href="#/" aria-label="Rep Sheet home">
       <span class="brand-mark" aria-hidden="true"></span>
       <span class="brand-name">Rep Sheet</span>
-      <span class="brand-sub">Biomechanics</span>
     </a>
-    <nav class="nav" aria-label="Main">
-      <a href="#/" data-nav="">Dashboard</a>
-      <a href="#/library" data-nav="library">Exercises</a>
-      <a href="#/muscles" data-nav="muscles">Muscles</a>
-      <a href="#/my" data-nav="my">My exercises</a>
-      <a href="#/plans" data-nav="plans">Plans</a>
+    <nav class="nav" id="main-nav" aria-label="Main">
+      <a href="#/" data-nav="">Home</a>
+      <a href="#/library" data-nav="library">Exercise Library</a>
+      <a href="#/muscles" data-nav="muscles">Muscle Explorer</a>
+      <a href="#/analysis" data-nav="analysis">Exercise Analysis</a>
+      <a href="#/favorites" data-nav="favorites">Favorites</a>
+      <a href="#/recent" data-nav="recent">Recently Viewed</a>
     </nav>
-    <label class="style-wrap" title="Visual style"><span class="sr">Visual style</span>
-      <select id="style-switch" aria-label="Visual style"></select>
+    <label class="level-wrap"><span class="level-label">Guide</span>
+      <select id="level-switch" aria-label="Guide level">
+        <option value="beginner">Beginner</option>
+        <option value="standard">Standard</option>
+        <option value="advanced">Advanced anatomy</option>
+      </select>
     </label>
-    <button type="button" class="menu-btn" aria-label="Menu" aria-expanded="false"><span></span><span></span></button>
+    <button type="button" class="menu-btn" aria-label="Menu" aria-expanded="false" aria-controls="main-nav"><span></span><span></span></button>
   </div>
 </header>
 <main id="app" class="page" tabindex="-1"></main>
-<footer class="foot"><div class="foot-in"><span class="brand-mini"><span class="brand-mark" aria-hidden="true"></span>Rep Sheet</span><span>Form guidance is educational. Start light, own the movement, then load it.</span></div></footer>
+<footer class="foot"><div class="foot-in"><span class="brand-mini"><span class="brand-mark" aria-hidden="true"></span>Rep Sheet</span><span>Instructional guidance only. Muscle percentages are estimated involvement, not measurements. <a href="#/plans">Sample plans</a> · <a href="#/compare">Compare exercises</a></span></div></footer>
 <!-- APP END -->
 <script src="data/exercises.js"></script>
 <script src="data/form.js"></script>
 <script src="data/library/upper.js"></script>
 <script src="data/library/pull-core.js"></script>
 <script src="data/library/lower.js"></script>
+<script src="data/library/v3-upper.js"></script>
+<script src="data/library/v3-lower.js"></script>
+<script src="data/library/v3-core-full.js"></script>
+<script src="data/library/v3-fields.js"></script>
 <script src="data/library/meta.js"></script>
+<script src="data/anatomy.js"></script>
 <script src="data/plans.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 <script src="js/figure.js"></script>
@@ -48,11 +59,16 @@
 <script src="js/kits/upper.js"></script>
 <script src="js/kits/pull-core.js"></script>
 <script src="js/kits/lower.js"></script>
+<script src="js/kits/v3-equipment.js"></script>
 <script src="js/figure3d.js"></script>
 <script src="js/bodymap.js"></script>
+<script src="js/ui/store.js"></script>
 <script src="js/ui/core.js"></script>
+<script src="js/ui/player.js"></script>
+<script src="js/ui/feedback.js"></script>
 <script src="js/ui/detail.js"></script>
 <script src="js/ui/muscles.js"></script>
+<script src="js/ui/pages.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

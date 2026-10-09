@@ -3,15 +3,20 @@
 
 // ---------- Categories ----------
 // The seven browse categories. An exercise belongs to its `group` plus any `categories`.
-if (!GROUPS.some((g) => g.id === "glutes")) GROUPS.push({ id: "glutes", name: "Glutes" });
+[["glutes", "Glutes"], ["calves", "Calves"], ["fullbody", "Full body"]].forEach(([id, name]) => {
+  if (!GROUPS.some((g) => g.id === id)) GROUPS.push({ id, name });
+});
 const CATEGORIES = [
   { id: "chest", name: "Chest" }, { id: "back", name: "Back" }, { id: "shoulders", name: "Shoulders" },
-  { id: "arms", name: "Arms" }, { id: "legs", name: "Legs" }, { id: "glutes", name: "Glutes" }, { id: "core", name: "Core" }
+  { id: "arms", name: "Arms" }, { id: "legs", name: "Legs" }, { id: "glutes", name: "Glutes" }, { id: "calves", name: "Calves" },
+  { id: "core", name: "Core" }, { id: "fullbody", name: "Full body" }
 ];
 const EQUIPMENT_TYPES = [
-  { id: "barbell", name: "Barbell" }, { id: "dumbbell", name: "Dumbbell" }, { id: "cable", name: "Cable" },
-  { id: "machine", name: "Machine" }, { id: "bodyweight", name: "Bodyweight" }
+  { id: "barbell", name: "Barbell" }, { id: "dumbbell", name: "Dumbbell" }, { id: "kettlebell", name: "Kettlebell" }, { id: "cable", name: "Cable" },
+  { id: "machine", name: "Machine" }, { id: "bodyweight", name: "Bodyweight" }, { id: "other", name: "Other (sled, ropes, box)" }
 ];
+// Movement patterns (data/SCHEMA.md `pattern`).
+const PATTERNS = ["push", "pull", "squat", "hinge", "lunge", "carry", "rotation", "anti-rotation", "isolation", "plyometric", "conditioning"];
 const DIFFICULTIES = [
   { id: "beginner", name: "Beginner" }, { id: "intermediate", name: "Intermediate" }, { id: "advanced", name: "Advanced" }
 ];
@@ -447,5 +452,23 @@ EXERCISES.forEach((ex, i) => {
     if (!ex.categories) ex.categories = [];
     if (!ex.athlete) ex.athlete = alt++ % 2 ? "female" : "male";
     if (!ex.movement) ex.movement = "";
+    // v3 fields (data/SCHEMA.md).
+    if (!ex.id) ex.id = ex.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    if (!ex.instructions || !ex.instructions.length) {
+      // Numbered steps from the phases: "Descent: lower under control" -> "Lower under control."
+      ex.instructions = ex.phases.map((p) => {
+        const t = String(p).replace(/^[^:]{1,24}:\s*/, "").trim();
+        return t.charAt(0).toUpperCase() + t.slice(1) + (/[.!?]$/.test(t) ? "" : ".");
+      });
+    }
+    if (!PATTERNS.includes(ex.pattern)) ex.pattern = ex.movementType === "isolation" ? "isolation" : "push";
+    if (!ex.stabilizers) ex.stabilizers = [];
+    if (!ex.alternatives) ex.alternatives = [];
+    if (!ex.aliases) ex.aliases = [];
+    if (!ex.demo) ex.demo = "ready";
+    if (!ex.camera) {
+      const v = (ex.figure3d && ex.figure3d.view) || null;
+      ex.camera = v ? { view: "threeQuarter", yaw: v[0], pitch: v[1] } : { view: "threeQuarter" };
+    }
   });
 })();

@@ -25,6 +25,13 @@ for (const ex of ctx.EXERCISES) {
       "3D mistake a": { ...(f3.a || f.a), ...(b3.a || ex.bad.a || {}) }, "3D mistake b": { ...(f3.b || f.b), ...(b3.b || ex.bad.b || {}) }
     });
   }
+  // Multi-key reps: every key pose between a and b (3D only).
+  ((f3 && f3.keys) || []).forEach((k, i) => {
+    const base = { ...(f3.a || f.a), ...(f3.mix || {}) };
+    poses[`3D key ${i + 1}`] = { ...base, ...k };
+    const bk = (ex.bad3d && ex.bad3d.keys && ex.bad3d.keys[i]) || null;
+    if (bk) poses[`3D mistake key ${i + 1}`] = { ...base, ...((ex.bad3d || {}).a || ex.bad.a || {}), ...k, ...bk };
+  });
   for (const [name, p] of Object.entries(poses)) {
     const issues = ctx.checkPose(p, name.startsWith("3D") ? (f3.armsOut ?? f.armsOut) : f.armsOut);
     if (issues.length) { problems++; console.log(`${ex.name} (${name}): ${issues.join(", ")}`); }

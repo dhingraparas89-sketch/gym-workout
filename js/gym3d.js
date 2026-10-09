@@ -563,17 +563,20 @@ const GYM3D = (() => {
   // rim from behind, and the overhead panels' sky light.
   function lights(scene) {
     const THREE = T();
-    const hemi = new THREE.HemisphereLight(0xe6ebf2, 0x141414, 0.45); scene.add(hemi);
-    const key = new THREE.DirectionalLight(0xfff4ea, 2.3);
-    key.position.set(70, 320, 150); key.castShadow = true;
-    key.shadow.mapSize.set(2048, 2048); key.shadow.bias = -0.00025; key.shadow.normalBias = 0.5; key.shadow.radius = 5; key.shadow.blurSamples = 12;
+    // Studio balance for a dark matte body: one warm-neutral key (soft shadows), a weaker cool
+    // fill from the other front side, a low sky/ground ambient, and two neutral rims from behind
+    // that trace the silhouette without turning the back blue.
+    const hemi = new THREE.HemisphereLight(0xdfe4ea, 0x1a1a1c, 0.3); scene.add(hemi);
+    const key = new THREE.DirectionalLight(0xfff2e6, 2.5);
+    key.position.set(110, 240, 190); key.castShadow = true;
+    key.shadow.mapSize.set(2048, 2048); key.shadow.bias = -0.0002; key.shadow.normalBias = 0.6; key.shadow.radius = 6; key.shadow.blurSamples = 16;
     Object.assign(key.shadow.camera, { left: -170, right: 170, top: 170, bottom: -170, near: 50, far: 800 });
     scene.add(key); scene.add(key.target);
-    const fill = new THREE.DirectionalLight(0xc9d6ea, 0.55); fill.position.set(-180, 120, 160); scene.add(fill);
-    const rim = new THREE.DirectionalLight(0xc4d4ff, 1.2); rim.position.set(-160, 150, -200); scene.add(rim);
-    // A second, softer cool rim from the other side, so both edges of the body read.
-    const rim2 = new THREE.DirectionalLight(0xb8c8ec, 0.7); rim2.position.set(170, 110, -190); scene.add(rim2);
-    const top = new THREE.DirectionalLight(0xffffff, 0.5); top.position.set(0, 400, 0); scene.add(top);
+    const fill = new THREE.DirectionalLight(0xd4dceb, 0.7); fill.position.set(-200, 110, 150); scene.add(fill);
+    const rim = new THREE.DirectionalLight(0xdfe6f5, 1.25); rim.position.set(-170, 170, -210); scene.add(rim);
+    // A second, softer rim from the other side, so both edges of the body read.
+    const rim2 = new THREE.DirectionalLight(0xd6dded, 0.8); rim2.position.set(180, 120, -190); scene.add(rim2);
+    const top = new THREE.DirectionalLight(0xffffff, 0.1); top.position.set(0, 400, 0); scene.add(top);
     return { hemi, key, fill, rim, rim2, top };
   }
   // Rubber floor that fades into the dark of the stage at its far edge.

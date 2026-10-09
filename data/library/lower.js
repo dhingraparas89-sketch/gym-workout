@@ -21,7 +21,7 @@
       good: { cue: "Elbows up, torso upright, sit between the heels until the hips pass the knees.", highlight: ["spine", "knee"] },
       bad: { cue: "The elbows drop and the chest folds forward, so the bar rolls and the lower back takes the load.", highlight: ["spine", "back"],
         b: { torso: 46, neck: 42, bend: 6 } },
-      figure3d: { kit: "barbell", bar: { rack: true }, ik: { grip: 22, pole: [1, 0.1, 0.6] }, mix: { ua: 0, fa: 142 } },
+      figure3d: { kit: "barbell", bar: { rack: true }, ik: { grip: 22, pole: [1, 0.75, 0.3] }, mix: { ua: 0, fa: 142 } },
       figure: { armsOut: true, abd: 20, load: { type: "barbell", at: "shoulder", offset: [9, -2], r: 18 },
         a: { ...ST, x: 96, ua: 70, fa: -110 },
         b: { ...ST, x: 96, shin: 34, thigh: -85, torso: 22, neck: 12, ua: 92, fa: -88 } }
@@ -85,9 +85,10 @@
       bad: { cue: "The chest collapses over the front thigh, the back rounds and the lower back strains to stand back up.", highlight: ["spine", "back"],
         b: { torso: 50, neck: 52, bend: 8 } },
       figure3d: { kit: "loBulgarian", db: [7.6, 6.4], grip: "neutral", abd: 11 },
+      // Rear foot laces-down on the bench: the instep lies nearly flat (pointed as far as the ankle allows).
       figure: { load: { type: "dumbbell" },
-        a: { ...ST, x: 120, shin: -5, thigh: -17, torso: 8, neck: 6, t2: 202.5, s2: 272.5, f2: 250 },
-        b: { ...ST, x: 120, shin: 10, thigh: -79.5, torso: 15, neck: 10, t2: 202.9, s2: 325.7, f2: 260 } }
+        a: { ...ST, x: 120, shin: -5, thigh: -17, torso: 8, neck: 6, t2: 202.5, s2: 272.5, f2: 257 },
+        b: { ...ST, x: 120, shin: 10, thigh: -79.5, torso: 15, neck: 10, t2: 202.9, s2: 325.7, f2: 266 } }
     },
     {
       name: "Reverse lunge", group: "legs", categories: ["glutes"], equipment: "Dumbbells", equip: "dumbbell", setup: "Dumbbells",
@@ -231,7 +232,11 @@
       good: { cue: "Whole foot on the box, drive through the lead heel and stand all the way up.", highlight: ["hip", "knee"] },
       bad: { cue: "Folding forward and bouncing off the back foot, so the lead glute does far less of the lift.", highlight: ["spine", "hip"],
         a: { torso: 52, neck: 54, bend: 6 }, b: { torso: 24, neck: 22, bend: 4 } },
-      figure3d: { kit: "loStepUp", db: [7.6, 6.4], grip: "neutral", abd: 11 },
+      // The trail toes stay on the floor until the lead leg has done the first part of the drive,
+      // then the trail foot leaves the floor and swings up beside the lead foot.
+      figure3d: { kit: "loStepUp", db: [7.6, 6.4], grip: "neutral", abd: 11,
+        keys: [{ at: 0.25, shin: 21.8, thigh: -63.5, torso: 20.6, neck: 14.4, t2: 187.4, s2: 189.2, f2: 140 },
+          { at: 0.65, shin: 8, thigh: -24, torso: 9, neck: 6, t2: 168, s2: 214, f2: 120 }] },
       figure: { props: [{ rect: [100, 154, 50, 34] }], load: { type: "dumbbell" },
         a: { ...ST, x: 120, y: 151, shin: 27.3, thigh: -79.4, torso: 25, neck: 18, t2: 169.5, s2: 214.3, f2: 115 },
         b: { ...ST, x: 120, y: 151, shin: 0, thigh: 0, torso: 3, neck: 0, t2: 180, s2: 180, f2: 90 } }

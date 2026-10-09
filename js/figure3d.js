@@ -16,7 +16,7 @@ const VIEW3D = {
   hipHalf: 8.5,
   yaw: 0.62,      // default camera angle around the figure (radians from a pure side view)
   pitch: 0.12,
-  skin: "#45484d",       // matte charcoal mannequin
+  skin: "#3d4045",       // matte dark charcoal body
   active: "#3cc9ad",     // muscle activation on the optimal form (main movers full, helpers softer)
   activeBad: "#5a9bd0",  // muscle activation on the mistake
   compensate: "#e0913f", // muscles taking over the work in a mistake
@@ -103,55 +103,80 @@ function buildSkinData(segs) {
     out[0] = e[0] * x + e[4] * y + e[8] * z + e[12]; out[1] = e[1] * x + e[5] * y + e[9] * z + e[13]; out[2] = e[2] * x + e[6] * y + e[10] * z + e[14];
   };
   const P = [0, 0, 0], Q = [0, 0, 0];
-  // Shorts: matte training shorts from just below the navel to mid-thigh. Returns how much a
-  // rest-pose point is covered (0..1) and in out[1] how much extra fabric stands off the skin
-  // there (the waistband and hems are a little thicker).
+  // Clothing and hair, as masks over the rest-pose body. cloth(x, y, z, out) returns how much a
+  // point is covered by fabric (0..1) and fills out = [fabric, how far fabric/hair stands off the
+  // skin, hair (0..1), seam line (0..1)]. Edges ramp over about a grid cell so the shader can draw
+  // them as a crisp line at the 0.5 crossing instead of a staircase of vertices.
+  //   Shorts (both athletes): waist to mid-thigh, a thicker waistband and hems.
+  //   CFG.top (female): a fitted sports bra, an elastic underband with a seam, scoop neckline,
+  //   straps over the shoulders into a racerback.
+  //   CFG.hair (female): hair combed back over the skull from a natural hairline to a high tie.
   const segIx = (n) => segs.findIndex((g) => g.name === n);
-  const TORSO = segIx("lowerTorso"), CHEST = segIx("upperTorso"), THIGHS = [segIx("thighR"), segIx("thighL")], ARMS = [segIx("upperArmR"), segIx("upperArmL")];
+  const TORSO = segIx("lowerTorso"), CHEST = segIx("upperTorso"), HEAD = segIx("head"), THIGHS = [segIx("thighR"), segIx("thighL")], ARMS = [segIx("upperArmR"), segIx("upperArmL")];
   const CFG = (TORSO >= 0 && segs[TORSO].cloth) || { waist: 7.3, off: 0.55, hem: 21 };
-  const clothOut = [0, 0];
-  // Clothing: how much a rest-pose point is covered (0..1), and in out[1] how far the fabric stands
-  // off the skin there (the waistband and hems a little thicker). Shorts from the waist to
-  // mid-thigh; with CFG.top, a fitted sports top from under the chest up to the armpits, with straps.
+  const clothOut = [0, 0, 0, 0];
+  const band = (v, c, w) => Math.exp(-(((v - c) / w) ** 2));
   function cloth(x, y, z, out) {
-    out[0] = 0; out[1] = 0;
+    out[0] = 0; out[1] = 0; out[2] = 0; out[3] = 0;
     if (TORSO < 0) return 0;
     local(segs[TORSO], x, y, z, Q);
     const W = CFG.waist, hem = CFG.hem;
-    let r = Math.hypot(Q[0], Q[2]), m = (1 - skinSmooth(W - 0.3, W + 0.3, Q[1])) * skinSmooth(-16, -14, Q[1]) * (1 - skinSmooth(17, 19, r)), lip = m * Math.exp(-(((Q[1] - (W - 0.7)) / 0.7) ** 2)), off = CFG.off;
+    let r = Math.hypot(Q[0], Q[2]), m = (1 - skinSmooth(W - 0.7, W + 0.7, Q[1])) * skinSmooth(-16, -14, Q[1]) * (1 - skinSmooth(21, 23, r));
+    let lip = m * band(Q[1], W - 0.9, 0.9), seam = Q[1] - (W - 2.2), off = CFG.off;
     for (let i = 0; i < 2; i++) {
       const g = segs[THIGHS[i]];
       if (!g) continue;
       local(g, x, y, z, Q);
       r = Math.hypot(Q[0], Q[2]);
-      const mt = (1 - skinSmooth(hem - 0.7, hem + 0.3, Q[1])) * skinSmooth(-14, -12, Q[1]) * (1 - skinSmooth(11, 13, r));
-      if (mt > m) { m = mt; lip = mt * Math.exp(-(((Q[1] - (hem - 0.8)) / 0.8) ** 2)); }
+      const mt = (1 - skinSmooth(hem - 0.7, hem + 0.7, Q[1])) * skinSmooth(-4, -2, Q[1]) * (1 - skinSmooth(11, 13, r));
+      if (mt > m) { m = mt; lip = mt * band(Q[1], hem - 0.9, 0.9); seam = Q[1] - (hem - 2.0); }
     }
     const T = CFG.top;
     if (T && CHEST >= 0) {
       local(segs[CHEST], x, y, z, Q);
       const front = Q[0] > 0, az0 = Math.abs(Q[2]);
       // Scoop neckline in front, a racerback dipping between the shoulder blades behind.
-      const top = (front ? T.y1 : T.back) - (az0 < 9 ? (front ? 4 : 2) * Math.cos((az0 / 9) * Math.PI / 2) : 0);
-      let mt = skinSmooth(T.y0 - 0.3, T.y0 + 0.3, Q[1]) * (1 - skinSmooth(top - 0.3, top + 0.3, Q[1])) * (1 - skinSmooth(19, 21, Math.hypot(Q[0], Q[2])));
-      // Straps over the shoulders, from the top's edge to the back: they start wide where they
-      // leave the neckline and narrow as they climb outward over the shoulder.
-      const az = Math.abs(Q[2]), sy = Q[1] - T.y1, sc = T.strap[0] + 0.3 * sy, sw = Math.max(1.2, T.strap[1] - 0.1 * sy);
-      const strap = (1 - skinSmooth(sw - 0.35, sw + 0.35, Math.abs(az - sc))) * skinSmooth(top - 1.5, top, Q[1]) * (1 - skinSmooth(T.strapTop - 0.4, T.strapTop + 0.4, Q[1]));
+      const top = (front ? T.y1 : T.back) - (az0 < 9 ? (front ? 3.2 : 2) * Math.cos((az0 / 9) * Math.PI / 2) : 0);
+      let mt = skinSmooth(T.y0 - 0.6, T.y0 + 0.6, Q[1]) * (1 - skinSmooth(top - 0.6, top + 0.6, Q[1])) * (1 - skinSmooth(19, 21, Math.hypot(Q[0], Q[2])));
+      // Straps over the shoulders, from the top's edge to the back: wide where they leave the
+      // neckline, narrowing as they climb outward over the shoulder.
+      const az = Math.abs(Q[2]), sy = Q[1] - T.y1, sc = T.strap[0] + 0.3 * sy, sw = Math.max(1.3, T.strap[1] - 0.1 * sy);
+      const strap = (1 - skinSmooth(sw - 0.6, sw + 0.6, Math.abs(az - sc))) * skinSmooth(top - 1.5, top, Q[1]) * (1 - skinSmooth(T.strapTop - 0.6, T.strapTop + 0.6, Q[1]));
       mt = Math.max(mt, strap);
       // Not on the arms: wherever the upper arm is nearer than the chest, the top stops.
       if (mt > 0 && az > 11) {
-        const dc = skinLatheDist(segs[CHEST].lathe, Q[0] - 0, Q[1], Q[2]);
+        const dc = skinLatheDist(segs[CHEST].lathe, Q[0], Q[1], Q[2]);
         for (let i = 0; i < 2; i++) {
           const g = segs[ARMS[i]]; if (!g) continue;
           local(g, x, y, z, Q);
-          const da = skinLatheDist(g.lathe, Q[0], Q[1], Q[2]);
-          mt *= skinSmooth(-0.6, 0.6, da - dc);
+          mt *= skinSmooth(-0.8, 0.8, skinLatheDist(g.lathe, Q[0], Q[1], Q[2]) - dc);
         }
       }
-      if (mt > m) { m = mt; lip = 0; off = T.off; }
+      if (mt > m) {
+        m = mt; off = T.off;
+        // Elastic underband: a little thicker, with a stitched seam along its top edge.
+        lip = mt * 0.6 * (1 - skinSmooth(T.y0 + 2.6, T.y0 + 3.4, Q[1]));
+        seam = Q[1] - (T.y0 + 3.0);
+      }
     }
-    out[0] = m; out[1] = m * off + lip * 0.2;
+    out[0] = m; out[1] = m * off + lip * 0.22; out[3] = 0.5 + Math.max(-1.5, Math.min(1.5, seam)) / 3;
+    const Hc = CFG.hair;
+    if (Hc && HEAD >= 0) {
+      local(segs[HEAD], x, y, z, Q);
+      const dx = Q[0] - Hc.c[0], dy = Q[1] - Hc.c[1], dz = Q[2] - Hc.c[2], l = Math.hypot(dx, dy, dz) || 1;
+      if (l < 16) {
+        // Hairline: across the top of the forehead, down in front of the ears, behind them to the nape.
+        const nx = dx / l, ny = dy / l, nz = dz / l;
+        const s = ny * 0.85 - nx * 0.6 + 0.36 - 0.14 * Math.max(0, nx) * Math.abs(nz);
+        const hm = skinSmooth(-0.07, 0.07, s);
+        if (hm > 0) {
+          const tx = Q[0] - Hc.tie[0], ty = Q[1] - Hc.tie[1], tz = Q[2] - Hc.tie[2];
+          // Thin at the hairline, fuller over the crown and gathered toward the tie.
+          const th = (0.3 + 0.32 * Math.max(0, ny) + 0.55 * Math.exp(-(tx * tx + ty * ty + tz * tz) / 14)) * skinSmooth(0, 0.35, s);
+          out[2] = hm; out[1] = Math.max(out[1], th * hm);
+        }
+      }
+    }
     return m;
   }
   function field(x, y, z) {
@@ -166,7 +191,7 @@ function buildSkinData(segs) {
     // Creases (gluteal fold, the cleft between the glutes, the lines across the abdomen) are
     // carved after every segment has been joined, so a neighbouring segment's blend can't fill
     // them back in. Fabric bridges the creases it covers and stands a little off the skin.
-    const cm = cloth(x, y, z, clothOut), off = clothOut[1];
+    const cm = Math.max(cloth(x, y, z, clothOut), clothOut[2]), off = clothOut[1];
     const F0 = F;
     for (let s = 0; s < S; s++) {
       const g = segs[s];
@@ -290,6 +315,7 @@ function buildSkinData(segs) {
   // Per vertex: which muscles shape it (for activation), its fiber coordinates, and how much
   // each segment moves it (skin weights: one segment away from the joints, a blend near them).
   const weights = {}, fib = new Float32Array(nv * 4), bw = new Float32Array(nv * S), clothV = new Float32Array(nv);
+  const aux = new Float32Array(nv * 4), AO_D = [1, 2.2, 4, 6.5], AO_W = [0.35, 0.3, 0.22, 0.15];
   segs.forEach((g) => g.feats.forEach((f) => { if (f.id && !weights[f.id]) weights[f.id] = new Float32Array(nv); }));
   const fds = segs.map((g) => new Float32Array(g.feats.length)), ds = new Float32Array(S), L = [0, 0, 0];
   for (let v = 0; v < nv; v++) {
@@ -304,7 +330,7 @@ function buildSkinData(segs) {
       g.feats.forEach((f, i) => {
         if (!f.id) return;
         const e = fds[s][i];
-        weights[f.id][v] = Math.max(weights[f.id][v], 1 - skinSmooth(0.4, 3.2, e));
+        weights[f.id][v] = Math.max(weights[f.id][v], 1 - skinSmooth(0.3, 2.6, e));
         if (!top || e < t1) { if (top && f.group !== top.group) t2 = Math.min(t2, t1); top = f; t1 = e; topSeg = s; }
         else if (f.group !== top.group) t2 = Math.min(t2, e);
       });
@@ -314,14 +340,23 @@ function buildSkinData(segs) {
     for (let s = 0; s < S; s++) bw[v * S + s] /= sum || 1;
     // Two different muscles meeting near the surface: a faint groove between them.
     clothV[v] = cloth(x, y, z, clothOut);
-    const sep = (t2 < BIG ? (1 - skinSmooth(0, 1.4, t2 - t1)) * (1 - skinSmooth(0.8, 2.6, t2)) : 0) * (1 - clothV[v]);
+    aux[v * 4 + 1] = clothOut[2]; aux[v * 4 + 2] = clothOut[3];
+    const sep = (t2 < BIG ? (1 - skinSmooth(0, 1.4, t2 - t1)) * (1 - skinSmooth(0.8, 2.6, t2)) : 0) * (1 - clothV[v]) * (1 - clothOut[2]);
     fib[v * 4 + 3] = sep;
+    // Ambient occlusion from the field: step out along the normal and see how much of the body
+    // is still close (armpits, the crotch, between the glutes, under the chest stay darker).
+    let occ = 0;
+    for (let i = 0; i < AO_D.length; i++) {
+      const d = AO_D[i], f = field(x + nor[v * 3] * d, y + nor[v * 3 + 1] * d, z + nor[v * 3 + 2] * d);
+      occ += AO_W[i] * Math.max(0, d - f) / d;
+    }
+    aux[v * 4] = Math.max(0.3, 1 - 1.15 * occ);
     if (top && top.spec) {
       local(segs[topSeg], x, y, z, L);
       const [u, w] = skinFiberUV(top.spec, L[0], L[1], L[2]);
       fib[v * 4] = u; fib[v * 4 + 1] = w; fib[v * 4 + 2] = 1 - skinSmooth(0.3, 2.8, t1);
     }
-    pos[v * 3] -= nor[v * 3] * 0.3 * sep; pos[v * 3 + 1] -= nor[v * 3 + 1] * 0.3 * sep; pos[v * 3 + 2] -= nor[v * 3 + 2] * 0.3 * sep;
+    pos[v * 3] -= nor[v * 3] * 0.12 * sep; pos[v * 3 + 1] -= nor[v * 3 + 1] * 0.12 * sep; pos[v * 3 + 2] -= nor[v * 3 + 2] * 0.12 * sep;
   }
   // Smooth the skin weights over the surface so joints bend in a soft band, then keep the top four.
   const bw2 = new Float32Array(bw.length);
@@ -359,7 +394,15 @@ function buildSkinData(segs) {
     const tot = order.reduce((t, s) => t + wb[v * B + s], 0) || 1;
     order.forEach((s, i) => { skinIndex[v * 4 + i] = s; skinWeight[v * 4 + i] = wb[v * B + s] / tot; });
   }
-  return { pos, nor, index: new Uint32Array(index), fib, cloth: clothV, weights, skinIndex, skinWeight };
+  // Finer muscles also light their parent group (front and side delts -> "shoulders"), so data that
+  // names the older ids keeps working.
+  const PAR = (TORSO >= 0 && segs[TORSO].parents) || {};
+  Object.keys(PAR).forEach((id) => {
+    const p = PAR[id], w = weights[id]; if (!w) return;
+    const pw = weights[p] || (weights[p] = new Float32Array(nv));
+    for (let v = 0; v < nv; v++) if (w[v] > pw[v]) pw[v] = w[v];
+  });
+  return { pos, nor, index: new Uint32Array(index), fib, cloth: clothV, aux, weights, skinIndex, skinWeight };
 }
 
 // Built once per page and shared by every viewer: in a background worker when the browser allows
@@ -378,7 +421,7 @@ function requestSkin(segs, done, athlete) {
   const here = () => setTimeout(() => finish(buildSkinData(segs)), 0);
   let worker = null;
   try {
-    const src = SKIN_HELPERS.map(String).join("\n") + "\nonmessage = (e) => { const d = buildSkinData(e.data); postMessage(d, [d.pos.buffer, d.nor.buffer, d.index.buffer, d.fib.buffer, d.cloth.buffer, d.skinIndex.buffer, d.skinWeight.buffer, ...Object.values(d.weights).map((w) => w.buffer)]); };";
+    const src = SKIN_HELPERS.map(String).join("\n") + "\nonmessage = (e) => { const d = buildSkinData(e.data); postMessage(d, [d.pos.buffer, d.nor.buffer, d.index.buffer, d.fib.buffer, d.cloth.buffer, d.aux.buffer, d.skinIndex.buffer, d.skinWeight.buffer, ...Object.values(d.weights).map((w) => w.buffer)]); };";
     worker = new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
   } catch (err) { worker = null; }
   if (!worker) { here(); return; }
@@ -424,6 +467,7 @@ function makeBody3D(THREE, mats, athlete) {
     if (!geo.attributes.fib) geo.setAttribute("fib", new THREE.Float32BufferAttribute(new Float32Array(n * 4), 4));
     if (!geo.attributes.cloth) geo.setAttribute("cloth", new THREE.Float32BufferAttribute(new Float32Array(n), 1));
     if (!geo.attributes.act) geo.setAttribute("act", new THREE.Float32BufferAttribute(new Float32Array(n), 1));
+    if (!geo.attributes.aux) { const a = new Float32Array(n * 4); for (let i = 0; i < n; i++) { a[i * 4] = 1; a[i * 4 + 2] = 1; } geo.setAttribute("aux", new THREE.Float32BufferAttribute(a, 4)); } // ao 1, no seam
   }
   function seg(name) { const g = new THREE.Group(); parts[name] = g; return g; }
   function addSkin(group, key, geo) {
@@ -489,78 +533,112 @@ function makeBody3D(THREE, mats, athlete) {
   // Absolute ellipsoids (for bones and landmarks) use the older form: { abs: [id, x, y, z, rx, ry, rz, rot?, k?, fiber?] }.
   const SKIN_DEFS = skinDefs("male");
   const defsFor = (sex) => (sex === "female" ? (makeBody3D.femaleDefs = makeBody3D.femaleDefs || skinDefs("female")) : SKIN_DEFS);
+  // Both athletes share the skeleton (joints, bones and rest pose, so every exercise, pose and
+  // equipment fit works unchanged) but each has her or his own surface: v(male, female) picks the
+  // number. The female body is not a rescaled male: a smaller ribcage and narrower shoulders over a
+  // wider pelvis, a natural waist, fuller hips, glutes and upper thighs, slimmer arms and calves,
+  // breasts under a sports bra, softer muscle separation, and hair.
   function skinDefs(sex) {
+    const F = sex === "female", v = (m, f) => (F ? f : m);
     const SH = VIEW3D.shoulderHalf, HH = VIEW3D.hipHalf;
     const M = (pos, q) => new THREE.Matrix4().compose(new THREE.Vector3(...pos), q || new THREE.Quaternion(), new THREE.Vector3(1, 1, 1));
     const Q = (x, z) => new THREE.Quaternion().setFromEuler(new THREE.Euler(x, 0, z, "XYZ"));
+    const Qy = (y) => new THREE.Quaternion().setFromEuler(new THREE.Euler(0, y, 0));
     const armOut = 0.35, legOut = 0.16; // rest pose: arms and legs held a little away from the body
     const defs = [];
     const add = (name, base, feats, rest, k, tau) => defs.push({ name, base, feats, rest, k, tau });
+    const ro = (rows, k) => rows.map((r) => [r[0], r[1] * k, ...r.slice(2)]); // scale a lathe's widths
 
     // Pelvis, belly and lower back (hip -> middle of the spine, 26 units).
     // Rows are [y, half-width, depth/width, front offset]: the waist narrows above the iliac crest,
     // the lumbar curve brings the waist forward, and the pelvis tapers down into the crotch so the
     // hips' width comes from the tops of the thighs, not from a wide bowl.
-    add("lowerTorso", { lathe: [[-12, 2], [-10, 6.2, 0.9, -0.6], [-7, 9.6, 0.84, -0.9], [-3, 12.2, 0.8, -1.0], [1, 13.2, 0.77, -0.9], [5, 13.5, 0.75, -0.5],
-      [9, 13.4, 0.73, 0], [13, 13.0, 0.72, 0.6], [18, 13.2, 0.73, 0.7], [23, 13.6, 0.74, 0.4], [28, 13.6, 0.74, 0], [31, 10.5, 0.74, 0]], depth: 0.76 }, [
+    const glute = { t: "fan", o: [-1, -3, 12], n: [-1, 0, 0.5] };
+    const gfib = (s) => ({ ...glute, o: [-1, -3, s * 12], n: [-1, 0, s * 0.5], g: s });
+    add("lowerTorso", { lathe: v(
+      [[-12, 2], [-10, 6.2, 0.9, -0.6], [-7, 9.6, 0.84, -0.9], [-3, 12.2, 0.8, -1.0], [1, 13.2, 0.77, -0.9], [5, 13.5, 0.75, -0.5],
+        [9, 13.4, 0.73, 0], [13, 13.0, 0.72, 0.6], [18, 13.1, 0.73, 0.7], [23, 13.6, 0.74, 0.4], [28, 13.6, 0.74, 0], [31, 10.5, 0.74, 0]],
+      // Hers: a broader, deeper pelvis, the waist narrowest a little above the navel, a deeper lumbar curve.
+      [[-12, 2], [-10, 7.0, 0.92, -0.9], [-7, 11.2, 0.86, -1.4], [-3, 14.2, 0.8, -1.5], [1, 14.9, 0.78, -1.3], [5, 14.4, 0.77, -0.8],
+        [9, 13.0, 0.77, 0.1], [13, 11.9, 0.78, 0.9], [17, 11.5, 0.79, 1.1], [21, 11.7, 0.8, 0.9], [25, 12.0, 0.8, 0.4], [28, 12.1, 0.8, 0], [31, 9.4, 0.8, 0]]),
+    depth: v(0.76, 0.79) }, [
       // Rectus abdominis: one long strap each side of the midline, lying flat on the abdominal wall.
-      ...[1, -1].map((s) => ["abs", 13, s * 14, 0.6, [1.6, 11.5, 3.2], 0, 3.2, { t: "lin", o: [10, 26, 0], n: [0, 1, 0], c: [0, 0, 1], g: s }]),
+      ...[1, -1].map((s) => ["abs", 13, s * 14, v(0.6, 0.22), [1.6, 11.5, 3.2], 0, v(3.2, 4), { t: "lin", o: [10, 26, 0], n: [0, 1, 0], c: [0, 0, 1], g: s }]),
       // External obliques run down and forward ("hands in pockets") to the iliac crest.
-      ...[1, -1].map((s) => ["obliques", 12, s * 74, 0.5, [2.0, 8, 6], s * 0.25, 3.6, { t: "lin", o: [6, 2, s * 6], n: [0.7, -0.7, 0], c: [0.7, 0.7, 0], g: s }]),
+      ...[1, -1].map((s) => ["obliques", 12, s * 74, v(0.55, 0.25), [2.0, 8, 6], s * 0.25, v(3.6, 4.4), { t: "lin", o: [6, 2, s * 6], n: [0.7, -0.7, 0], c: [0.7, 0.7, 0], g: s }]),
       // Erectors run straight up beside the spine, leaving a shallow groove down the middle.
-      ...[1, -1].map((s) => ["lower-back", 13, s * 162, 0.8, [1.8, 11.5, 2.8], 0, 3.4, { t: "lin", o: [-5, -2, s * 3], n: [0, 1, 0], c: [0, 0, 1], g: s }]),
-      // Glute max: a broad, flattened quadrant from the sacrum down and out toward the thigh,
-      // its lower edge forming the gluteal fold; glute med fills the side above it.
-      ...[1, -1].map((s) => ["glutes", -2.5, s * 150, 1.6, [3.6, 8.6, 7.2], s * 0.35, 4.2, { t: "fan", o: [-1, -3, s * 12], n: [-1, 0, s * 0.5], g: s }]),
-      ...[1, -1].map((s) => ["glutes", 6, s * 112, 0.5, [2.0, 5, 5.5], 0, 3.8, { t: "fan", o: [-1, -3, s * 12], n: [-1, 0, s * 0.5], g: s }]),
-      // Abdominal wall: a shallow line down the middle and two faint lines across the rectus.
-      { abs: ["cut", 11.4, 20, 0, 1.1, 7.5, 0.4, null, 1.2] },
-      { abs: ["cut", 11.4, 17.5, 0, 0.9, 0.4, 6.0, null, 1.2] },
-      { abs: ["cut", 11.8, 23, 0, 0.9, 0.4, 6.4, null, 1.2] },
+      ...[1, -1].map((s) => ["lower-back", 13, s * 162, v(0.85, 0.55), [1.8, 11.5, 2.8], 0, 3.4, { t: "lin", o: [-5, -2, s * 3], n: [0, 1, 0], c: [0, 0, 1], g: s }]),
+      // Glute max: a broad, rounded quadrant from the sacrum down and out toward the thigh, its lower
+      // edge forming the gluteal fold; glute med fills the side above it. Hers fuller and rounder.
+      ...[1, -1].map((s) => ["glutes", v(-2.5, -3.2), s * v(150, 147), v(1.6, 2.5), v([3.6, 8.6, 7.2], [4.4, 9.0, 7.9]), s * 0.35, v(4.2, 4.8), gfib(s)]),
+      ...[1, -1].map((s) => ["glutes", v(6, 5), s * 112, v(0.5, 0.8), [2.0, 5, 5.5], 0, 3.8, gfib(s)]),
+      // Tensor fasciae latae / hip: carries the outline from the waist over the hip to the thigh.
+      ...[1, -1].map((s) => [null, v(1, 0.5), s * 94, v(0.5, 1.1), v([2.0, 6, 4], [2.6, 7, 5]), 0, 4]),
+      ...(F ? [
+        [null, 6, 0, 0.5, [2.2, 5, 8], 0, 4.5] // a softly rounded lower belly
+      ] : [
+        // Abdominal wall: a shallow line down the middle and two faint lines across the rectus.
+        { abs: ["cut", 11.6, 20, 0, 0.7, 7.5, 0.4, null, 1.6] },
+        { abs: ["cut", 11.6, 17.5, 0, 0.42, 0.45, 6.0, null, 1.8] },
+        { abs: ["cut", 11.9, 23, 0, 0.42, 0.45, 6.4, null, 1.8] }
+      ]),
       // Creases: the cleft between the glutes, and the gluteal fold where each glute meets the thigh.
-      { abs: ["cut", -12.6, -3, 0, 2.6, 6.5, 0.55, null, 1.4] },
-      ...[1, -1].map((s) => ({ abs: ["cut", -11.2, -10.6, s * 6.5, 3, 0.7, 5, [s * 0.18, 0, 0], 1.6] }))
+      { abs: ["cut", v(-12.6, -14.2), v(-3, -3.8), 0, 2.6, 6.5, 0.55, null, 1.4] },
+      ...[1, -1].map((s) => ({ abs: ["cut", v(-11.2, -12.2), v(-10.6, -11.6), s * v(6.5, 7), 3, 0.7, 5, [s * 0.18, 0, 0], v(1.6, 2)] }))
     ], M([0, 0, 0]), 0, 6);
 
     // Ribcage, chest, lats and upper back (middle of the spine -> shoulders).
     const pec = (s) => ({ t: "fan", o: [3, 22, s * 15], n: [1, 0, 0], r: [0, -3, -s * 8], g: s });
-    add("upperTorso", { lathe: [[-5, 10.07], [-2, 13.04], [1, 13.78], [6, 15.05], [12, 15.9], [17, 16.22], [21, 15.9], [23.5, 14.84], [25.5, 12.19], [27, 9.01], [28.5, 6.78], [30, 3.18]], depth: 0.74 }, [
+    const UT = [[-5, 10.07], [-2, 13.04], [1, 13.78], [6, 15.05], [12, 15.9], [17, 16.22], [21, 15.9], [23.5, 14.84], [25.5, 12.19], [27, 9.01], [28.5, 6.78], [30, 3.18]];
+    add("upperTorso", { lathe: v(UT,
+      // Hers: a smaller ribcage, narrowing more toward the shoulders.
+      [[-5, 9.4], [-2, 12.0], [1, 12.4], [6, 13.0], [12, 13.6], [17, 13.9], [21, 13.6], [23.5, 12.9], [25.5, 10.9], [27, 8.3], [28.5, 6.2], [30, 2.9]]),
+    depth: v(0.74, 0.78) }, [
       ...[1, -1].flatMap((s) => [
         // Pec major: a flat, curved plate over the ribs that narrows into a tendon at the armpit.
-        ["chest", 16.5, s * 27, 1.3, [2.4, 5.0, 6.6], s * -0.12, 2.4, pec(s)],
-        ["chest", 21.2, s * 32, 1.0, [2.0, 2.8, 6.2], s * 0.1, 2.8, pec(s)],
-        ["chest", 20.4, s * 60, 0.9, [2.0, 2.4, 3.6], s * 0.3, 2.8, pec(s)],
+        ["chest", v(15.2, 16.2), s * 25, v(1.35, 0.55), v([2.4, 5.4, 6.8], [2.0, 4.6, 6.0]), s * -0.12, v(2.6, 3.4), pec(s)],
+        ["chest", 20.8, s * 33, v(1.0, 0.45), [2.0, 3.0, 6.0], s * 0.12, v(2.8, 3.4), pec(s)],
+        ["chest", 19.8, s * 58, v(0.9, 0.5), [2.0, 2.5, 3.8], s * 0.35, 2.8, pec(s)],
         // Upper rectus abdominis, over the lower ribs up to the chest.
-        ["abs", 4, s * 14, 0.8, [1.5, 6, 3.0], 0, 2.8, { t: "lin", o: [10, 0, 0], n: [0, 1, 0], c: [0, 0, 1], g: s }],
+        ["abs", 4, s * 14, v(0.7, 0.2), [1.5, 6, 3.0], 0, v(2.8, 4), { t: "lin", o: [10, 0, 0], n: [0, 1, 0], c: [0, 0, 1], g: s }],
         // Serratus: slips running up and back toward the shoulder blade.
-        ["obliques", 8, s * 80, 0.5, [1.6, 5, 3.4], s * 0.5, 2.6, { t: "lin", o: [-3, 14, s * 12], n: [-0.6, 0.8, 0], c: [0.8, 0.6, 0], g: s }],
+        ["obliques", 8, s * 80, v(0.5, 0.2), [1.6, 5, 3.4], s * 0.5, 2.6, { t: "lin", o: [-3, 14, s * 12], n: [-0.6, 0.8, 0], c: [0.8, 0.6, 0], g: s }],
         // Lats: from the low back and pelvis up under the armpit to the front of the upper arm.
-        ["lats", 12, s * 128, 1.4, [2.6, 11, 6.2], s * -0.2, 3.2, { t: "fan", o: [0, 21, s * 13.5], n: [-1, 0, s * 0.6], g: s }],
-        // Rhomboids and mid back: from the spine down and out to the shoulder blade.
-        ["upper-back", 17, s * 158, 0.9, [2.0, 7, 4.6], 0, 2.8, { t: "lin", o: [-7, 22, 0], n: [0, -0.45, s * 0.9], c: [0, s * 0.9, 0.45], g: s }],
-        // Middle and lower traps toward the shoulder blade spine.
+        ["lats", 12, s * 128, v(1.5, 0.6), [2.6, 11, 6.2], s * -0.2, v(3.2, 3.8), { t: "fan", o: [0, 21, s * 13.5], n: [-1, 0, s * 0.6], g: s }],
+        // Rhomboids: from the spine down and out to the inner edge of the shoulder blade.
+        ["rhomboids", 17, s * 160, v(0.8, 0.4), [2.0, 6.5, 4.0], 0, 2.8, { t: "lin", o: [-7, 22, 0], n: [0, -0.45, s * 0.9], c: [0, s * 0.9, 0.45], g: s }],
+        // Infraspinatus and teres over the shoulder blade, under the rear delt.
+        [null, 16, s * 142, v(0.6, 0.3), [1.8, 4.6, 4.0], s * 0.4, 3],
         // Erectors fading out up the thoracic spine.
-        ["lower-back", 3, s * 164, 0.45, [1.6, 9, 2.4], 0, 3.4, { t: "lin", o: [-5, -28, s * 3], n: [0, 1, 0], c: [0, 0, 1], g: s }],
-        ["traps", 18, s * 172, 0.7, [1.8, 8, 2.8], 0, 2.8, { t: "fan", o: [-4, 25, s * 12], n: [-1, 0, 0], r: [0, -4, -s * 8], g: s }],
+        ["lower-back", 3, s * 164, v(0.45, 0.3), [1.6, 9, 2.4], 0, 3.4, { t: "lin", o: [-5, -28, s * 3], n: [0, 1, 0], c: [0, 0, 1], g: s }],
+        // Middle and lower traps toward the shoulder blade spine.
+        ["traps", 18, s * 172, v(0.7, 0.35), [1.8, 8, 2.8], 0, 2.8, { t: "fan", o: [-4, 25, s * 12], n: [-1, 0, 0], r: [0, -4, -s * 8], g: s }],
         // Upper traps: the slope from the neck out to the shoulder tip.
-        { abs: ["traps", -1.6, 25.2, s * 8.2, 3.4, 2.8, 7.4, [s * 0.5, 0, 0], 3.6, { t: "fan", o: [-1, 27, s * 14], n: [-0.5, 1, 0], r: [0, 0, -s], g: s }] },
+        { abs: ["traps", -1.6, 25.8, s * v(8.6, 8.0), v(3.4, 2.9), v(3.0, 2.4), v(7.6, 6.8), [s * 0.42, 0, 0], 3.8, { t: "fan", o: [-1, 27, s * 14], n: [-0.5, 1, 0], r: [0, 0, -s], g: s }] },
         // Shoulder girdle: collarbone, shoulder blade spine and acromion carry the slope out to the arm.
-        { abs: [null, -0.4, 21.4, s * 13.6, 3.4, 2.0, 4.4, [s * 0.38, 0, 0], 3.8] }
+        { abs: [null, -0.5, 23.6, s * v(15.4, 15.0), v(3.6, 3.1), v(2.8, 2.4), v(4.2, 3.9), [s * 0.25, 0, 0], 4.0] },
+        ...(F ? [
+          // Breasts: a fuller lower curve (gravity), the upper slope melting into the pec, each turned
+          // a little outward; held together by the sports bra, so only a shallow dip between them.
+          { abs: [null, 8.8, 10.8, s * 8.4, 3.5, 5.0, 5.1, [0, s * 0.32, 0], 4.2] },
+          { abs: [null, 9.5, 9.3, s * 8.7, 3.3, 3.5, 4.5, [s * 0.1, s * 0.35, 0], 2.4] },
+          ...(s > 0 ? [{ abs: [null, 10.2, 9.8, 0, 1.7, 3.2, 4.6, null, 2.6] }] : [])
+        ] : [])
       ])
     ], M([0, 26, 0]), 3, 6);
 
-    // Neck (the head rides on it).
-    add("neck", { lathe: [[-4, 6.9], [0, 6.0], [4, 5.3], [8, 5.0], [11, 4.9], [14, 3]], depth: 1.05 }, [
-      ...[1, -1].map((s) => [null, 6, s * 42, 0.7, [1.4, 6, 1.5], s * 0.55, 1.8]), // sternocleidomastoids
-      ["traps", 2, 180, 1, [2.6, 5, 5.6], 0, 2.6, { t: "lin", o: [-3, -3, 0], n: [0, 1, 0], c: [0, 0, 1] }],
+    // Neck (the head rides on it), leaning a little forward as it rises.
+    add("neck", { lathe: ro([[-4, 6.9, 1.05, -0.6], [0, 6.0, 1.02, -0.4], [4, 5.4, 1.0, 0], [8, 5.1, 1.0, 0.3], [11, 5.0, 1.0, 0.3], [14, 3]], v(1, 0.86)), depth: 1.02 }, [
+      ...[1, -1].map((s) => [null, 6, s * 42, v(0.6, 0.35), [1.4, 6, 1.5], s * 0.55, 1.8]), // sternocleidomastoids
+      ["traps", 2, 180, v(1, 0.6), [2.6, 5, 5.6], 0, 2.6, { t: "lin", o: [-3, -3, 0], n: [0, 1, 0], c: [0, 0, 1] }],
       // Upper traps climb the sides of the neck, so the shoulders slope down from it.
-      ...[1, -1].map((s) => ["traps", 3, s * 125, 2.0, [2.6, 5.5, 3.6], 0, 3, { t: "fan", o: [-1, -24, s * 14], n: [0.3, 1, 0], r: [0, 0, s], g: s }])
+      ...[1, -1].map((s) => ["traps", v(3.5, 2.5), s * 118, v(2.6, 1.3), [2.8, v(6.5, 5.5), 4.0], 0, 3.2, { t: "fan", o: [-1, -24, s * 14], n: [0.3, 1, 0], r: [0, 0, s], g: s }])
     ], M([0, 51, 0]), 3.5, 4);
-    // Head: a plain oval, like an anatomy mannequin.
-    // Cranium wider at the back and top, narrowing through the jaw to a soft chin.
-    add("head", { ell: [0.2, 2.4, 0, 8.3, 9.4, 7.2] }, [
-      { abs: [null, -2.2, 3.4, 0, 6.4, 6.4, 6.8, null, 3] },  // back of the skull
-      { abs: [null, 2.2, -4.2, 0, 5.8, 5.4, 5.3, null, 3] }   // jaw and chin
+    // Head: a plain faceless oval like an anatomy mannequin: the cranium fuller at the back, the
+    // jaw narrower than the skull and the chin a little forward, so the neck meets it from below.
+    add("head", { ell: v([0.2, 2.4, 0, 7.9, 9.0, 6.9], [0.2, 2.6, 0, 7.5, 8.6, 6.5]) }, [
+      { abs: [null, v(-2.1, -2.0), 3.4, 0, v(6.1, 5.8), v(6.1, 5.8), v(6.6, 6.2), null, 3] },        // back of the skull
+      { abs: [null, v(2.5, 2.3), v(-4.4, -4.0), 0, v(5.4, 5.0), v(4.9, 4.6), v(4.9, 4.4), [0, 0, -0.25], 2.6] } // jaw and chin
     ], M([0, 66.5, 0]), 3, 2);
 
     [1, -1].forEach((side) => {
@@ -568,123 +646,116 @@ function makeBody3D(THREE, mats, athlete) {
       // Limbs hang down (local -x is the front of the body, th = 180), side * 90 is the outer side.
       const armQ = Q(-side * armOut, Math.PI), sh = new THREE.Vector3(0, 49, side * SH);
       const elbow = new THREE.Vector3(0, 30, 0).applyQuaternion(armQ).add(sh);
-      add("upperArm" + s, { lathe: [[-1.5, 1.8], [0, 4.0], [2.5, 4.85], [6, 4.95], [12, 4.55], [20, 4.35], [27, 3.92], [31, 3.6], [33.5, 1.48]], depth: 0.95 }, [
-        // Deltoid: front, side and rear heads wrap the joint and converge halfway down the outer arm.
-        ["shoulders", 5.8, side * 140, 1.0, [2.2, 6.2, 4.2], side * 0.25, 3.4, { t: "fan", o: [0, 14, side * 3.6], n: [0, -14, -side * 3.6], r: [0, 0, side] }],
-        ["shoulders", 6.4, side * 90, 1.25, [2.4, 6.4, 4.6], 0, 3.6, { t: "fan", o: [0, 14, side * 3.6], n: [0, -14, -side * 3.6], r: [0, 0, side] }],
-        ["rear-delts", 5.8, side * 30, 1.0, [2.2, 6.2, 4.2], side * 0.25, 3.4, { t: "fan", o: [0, 14, side * 3.6], n: [0, -14, -side * 3.6], r: [0, 0, side] }],
-        // Biceps in front, triceps behind: long fibers down to their tendons at the elbow.
-        ["biceps", 16, 180, 1.2, [2.4, 8.6, 3.0], 0, 2.6, { t: "long", o: [0, 30, 0], n: [0, 1, 0], r: [-1, 0, 0] }],
-        ["triceps", 12.5, side * 35, 1.0, [2.2, 9, 2.8], 0, 2.6, { t: "long", o: [0, 31, 0], n: [0, 1, 0], r: [1, 0, 0], g: "lat" }],
-        ["triceps", 15.5, -side * 25, 0.9, [2.2, 8.5, 2.6], 0, 2.6, { t: "long", o: [0, 31, 0], n: [0, 1, 0], r: [1, 0, 0], g: "long" }],
-        { abs: [null, 0, 30, 0, 3.3, 3.3, 3.3, null, 1.8] } // elbow
+      const delt = { t: "fan", o: [0, 14, side * 3.6], n: [0, -14, -side * 3.6], r: [0, 0, side] };
+      const dm = v(1, 0.42), am = v(1, 0.5);
+      add("upperArm" + s, { lathe: ro([[v(-1.2, -0.4), v(2.6, 2.4)], [0, 3.9], [1.5, 4.4], [3, 4.7], [6, 4.65], [12, 4.3], [20, 4.1], [26, 3.8], [30, 3.6], [33.5, 1.5]], v(1, 0.84)), depth: 0.95 }, [
+        // Deltoid: front, side and rear heads cap the joint from above and converge on the outer arm
+        // a third of the way down; each head's fibers run its own way to that insertion.
+        ["front-delts", 3.8, side * 150, 1.0 * dm, [2.3, 7.4, 4.0], side * 0.3, 3.2, delt],
+        ["side-delts", 4.0, side * 95, 1.2 * dm, [2.5, 7.6, 4.6], 0, 3.4, delt],
+        ["rear-delts", 3.8, side * 38, 0.95 * dm, [2.3, 7.4, 4.0], -side * 0.3, 3.2, delt],
+        // Biceps in front, triceps behind (long head inside, lateral head outside): long fibers down
+        // to their tendons at the elbow; brachialis shows low on the outer side between them.
+        ["biceps", 15.5, 180, 1.35 * am, [2.5, 7.6, 2.9], 0, 2.6, { t: "long", o: [0, 30, 0], n: [0, 1, 0], r: [-1, 0, 0] }],
+        ["triceps", 11.5, side * 45, 1.05 * am, [2.2, 7, 2.8], 0, 2.6, { t: "long", o: [0, 31, 0], n: [0, 1, 0], r: [1, 0, 0], g: "lat" }],
+        ["triceps", 14.5, -side * 25, 1.0 * am, [2.2, 8.5, 2.7], 0, 2.6, { t: "long", o: [0, 31, 0], n: [0, 1, 0], r: [1, 0, 0], g: "long" }],
+        [null, 22, side * 140, 0.6 * am, [1.6, 5, 2.2], 0, 2.6],
+        // Elbow: the joint, the point of the elbow behind, the two bony knobs either side.
+        { abs: [null, 0.3, 30, 0, v(3.0, 2.6), v(3.0, 2.6), v(3.0, 2.6), null, 1.8] },
+        { abs: [null, 2.4, 30.6, 0, 1.3, 1.7, 1.5, null, 1.4] },
+        { abs: [null, 0.3, 29.4, -side * v(3.2, 2.8), 1.2, 1.4, 1.0, null, 1.4] }
       ], M(sh.toArray(), armQ), 2.6, 3);
-      add("forearm" + s, { lathe: [[-2.5, 3.15], [0, 4.09], [4, 4.51], [9, 4.2], [16, 3.36], [22, 2.62], [27, 2.31], [29.5, 1.68], [30.5, 0.11]], depth: 0.85 }, [
-        ["forearms", 7, side * 115, 1.0, [2.0, 8, 2.6], 0, 2.6, { t: "long", o: [0, 27, 0], n: [0, 1, 0], g: "ext" }],
-        ["forearms", 8, -side * 135, 0.9, [2.0, 8, 2.6], 0, 2.6, { t: "long", o: [0, 27, 0], n: [0, 1, 0], g: "flex" }]
+      add("forearm" + s, { lathe: ro([[-2.5, 3.1], [0, 3.95], [4, 4.35], [9, 4.05], [16, 3.3], [22, 2.62], [27, 2.31], [29.5, 1.68], [30.5, 0.11]], v(1, 0.86)), depth: 0.85 }, [
+        // Brachioradialis on the thumb side, extensors behind it, flexors on the inner front.
+        ["forearms", 5, side * 140, v(1.0, 0.55), [1.9, 7.5, 2.4], 0, 2.6, { t: "long", o: [0, 27, 0], n: [0, 1, 0], g: "br" }],
+        ["forearms", 8, side * 70, v(0.8, 0.45), [2.0, 8, 2.6], 0, 2.6, { t: "long", o: [0, 27, 0], n: [0, 1, 0], g: "ext" }],
+        ["forearms", 8, -side * 140, v(0.9, 0.5), [2.0, 8, 2.6], 0, 2.6, { t: "long", o: [0, 27, 0], n: [0, 1, 0], g: "flex" }]
       ], M(elbow.toArray(), armQ), 2.6, 3);
       // Palm (faces local -x, thumb toward side * z), joined to the forearm at the wrist.
-      const wrist = new THREE.Vector3(0, 27, 0).applyQuaternion(armQ).add(elbow);
-      add("hand" + s, { ell: [0, 4.8, 0, 1.4, 5.2, 3.95] }, [
-        { abs: [null, -0.75, 1.8, side * 2.5, 1.55, 3.1, 1.85, null, 1.5] },  // thumb pad
-        { abs: [null, -0.55, 2.6, -side * 2.5, 1.3, 3.5, 1.55, null, 1.5] }, // little-finger side pad
-        { abs: [null, 0, 8.35, 0, 1.75, 1.3, 4.2, null, 1.1] }              // knuckles
+      const wrist = new THREE.Vector3(0, 27, 0).applyQuaternion(armQ).add(elbow), hk = v(1, 0.92);
+      add("hand" + s, { ell: [0, 4.8 * hk, 0, 1.4 * hk, 5.2 * hk, 3.95 * hk] }, [
+        { abs: [null, -0.75 * hk, 1.8 * hk, side * 2.5 * hk, 1.55 * hk, 3.1 * hk, 1.85 * hk, null, 1.5] },  // thumb pad
+        { abs: [null, -0.55 * hk, 2.6 * hk, -side * 2.5 * hk, 1.3 * hk, 3.5 * hk, 1.55 * hk, null, 1.5] }, // little-finger side pad
+        { abs: [null, 0, 8.35, 0, 1.75 * hk, 1.3 * hk, 4.2 * hk, null, 1.1] }                              // knuckles
       ], M(wrist.toArray(), armQ), 2, 2);
 
       const legQ = Q(-side * legOut, Math.PI), hip = new THREE.Vector3(0, 0, side * HH);
       const knee = new THREE.Vector3(0, 42, 0).applyQuaternion(legQ).add(hip);
       const ankle = new THREE.Vector3(0, 42, 0).applyQuaternion(legQ).add(knee);
       const quad = (g) => ({ t: "fan", o: [-5, 41.5, 0], n: [-1, 0, 0], r: [0, -1, 0], g });
+      const qm = v(1, 0.55);
       // Thigh (local x points back): full at the top, a long gradual taper to the knee, the quads
       // carrying the front forward through the middle and the hamstrings rounding the back above.
-      add("thigh" + s, { lathe: [[-9, 3], [-7, 7.0], [-4, 8.5, 1.0, 0.3], [0, 8.9, 1.02, 0.5], [5, 8.8, 1.04, 0.4], [10, 8.5, 1.02, 0.1], [16, 8.0, 1.0, -0.3],
-        [22, 7.5, 0.98, -0.45], [28, 6.8, 0.97, -0.35], [33, 6.0, 0.97, -0.1], [37, 5.4, 0.98, 0], [40, 5.1, 1.0, 0], [43, 5.0, 1.02, 0.1], [46.5, 2.2]], depth: 1 }, [
+      add("thigh" + s, { lathe: v(
+        [[-9, 3], [-7, 7.0], [-4, 8.5, 1.0, 0.3], [0, 8.9, 1.02, 0.5], [5, 8.8, 1.04, 0.4], [10, 8.5, 1.02, 0.1], [16, 8.0, 1.0, -0.3],
+          [22, 7.5, 0.98, -0.45], [28, 6.8, 0.97, -0.35], [33, 6.0, 0.97, -0.1], [37, 5.4, 0.98, 0], [40, 5.1, 1.0, 0], [43, 5.0, 1.02, 0.1], [46.5, 2.2]],
+        // Hers: fuller at the hip and upper thigh, a smooth taper to a slimmer knee.
+        [[-9, 3.3], [-7, 7.8], [-4, 9.6, 1.0, 0.4], [0, 10.0, 1.02, 0.6], [5, 9.7, 1.03, 0.5], [10, 9.1, 1.02, 0.2], [16, 8.3, 1.0, -0.2],
+          [22, 7.5, 0.98, -0.35], [28, 6.6, 0.97, -0.3], [33, 5.7, 0.97, -0.1], [37, 5.1, 0.98, 0], [40, 4.8, 1.0, 0], [43, 4.7, 1.02, 0.1], [46.5, 2.1]]),
+      depth: 1 }, [
         // Quads: rectus femoris down the front, vastus lateralis sweeping the outside, vastus
         // medialis as the teardrop above the inner knee; all converge on the kneecap.
-        ["quads", 18, 180, 0.7, [2.6, 13, 3.4], 0, 3.6, quad("rf")],
-        ["quads", 21, side * 132, 0.8, [2.8, 13, 4.0], 0, 3.6, quad("vl")],
-        ["quads", 34, -side * 145, 0.9, [2.2, 5.2, 3.0], -side * 0.3, 3, quad("vm")],
-        [null, 8, -side * 95, 0.4, [2.2, 9, 4.2], 0, 3.6],                       // adductors on the inner thigh
+        ["quads", 18, 180, 0.75 * qm, [2.6, 13, 3.4], 0, 3.6, quad("rf")],
+        ["quads", 19, side * 128, 0.9 * qm, [2.8, 14, 4.0], 0, 3.6, quad("vl")],
+        ["quads", 34, -side * 145, 0.95 * qm, [2.2, 5.4, 3.0], -side * 0.3, 3, quad("vm")],
+        // Adductors on the inner thigh, fanning from the pubis down to the thigh bone.
+        ["adductors", 8, -side * 95, v(0.5, 0.7), [2.2, 9, 4.2], 0, v(3.6, 4.2), { t: "fan", o: [0, -6, -side * 6], n: [1, 0, 0], r: [0, 1, 0] }],
         // Hamstrings: biceps femoris on the outer back, semitendinosus/membranosus on the inner back.
-        ["hamstrings", 19, side * 30, 0.7, [2.6, 13, 3.4], 0, 3.6, { t: "fan", o: [3, 62, 0], n: [1, 0, 0], r: [0, -1, 0], g: "bf" }],
-        ["hamstrings", 20, -side * 32, 0.7, [2.6, 13, 3.4], 0, 3.6, { t: "fan", o: [3, 62, 0], n: [1, 0, 0], r: [0, -1, 0], g: "st" }],
+        ["hamstrings", 19, side * 30, v(0.75, 0.5), [2.6, 13, 3.4], 0, 3.6, { t: "fan", o: [3, 62, 0], n: [1, 0, 0], r: [0, -1, 0], g: "bf" }],
+        ["hamstrings", 20, -side * 32, v(0.75, 0.5), [2.6, 13, 3.4], 0, 3.6, { t: "fan", o: [3, 62, 0], n: [1, 0, 0], r: [0, -1, 0], g: "st" }],
         // Knee: the kneecap stands slightly proud of the front, the femoral condyles widen it a little.
-        { abs: [null, -4.7, 41.8, 0, 1.4, 2.4, 2.3, null, 1.5] },
-        { abs: [null, -0.5, 42.5, -side * 3.6, 2.2, 2.6, 1.6, null, 1.8] }, { abs: [null, -0.2, 42.8, side * 3.4, 2.0, 2.4, 1.5, null, 1.8] }
+        { abs: [null, -4.6, 41.8, 0, 1.3, 2.3, 2.2, null, 1.8] },
+        { abs: [null, -0.5, 42.5, -side * 3.5, 2.1, 2.6, 1.5, null, 2] }, { abs: [null, -0.2, 42.8, side * 3.3, 1.9, 2.4, 1.4, null, 2] }
       ], M(hip.toArray(), legQ), 3.2, 3.5);
       // Lower leg (local x points back): calf volume high on the back, tapering through the
       // Achilles to a narrow ankle; the shin bone runs straight down the front.
-      add("shin" + s, { lathe: [[-3.5, 4.8, 1, 0], [0, 4.9, 1, 0.2], [3, 5.0, 1.02, 0.6], [7, 5.2, 1.05, 1.0], [11, 5.2, 1.05, 1.1], [15, 4.8, 1.0, 1.0],
-        [20, 4.1, 0.95, 0.6], [25, 3.5, 0.92, 0.3], [30, 3.0, 0.95, 0.1], [35, 2.7, 1.0, 0.1], [39, 2.6, 1.08, 0.2], [42, 2.7, 1.15, 0.3], [44.5, 1.4]], depth: 1 }, [
+      const cfib = (g) => ({ t: "fan", o: [2, 37, 0], n: [1, 0, 0], r: [0, -1, 0], g });
+      add("shin" + s, { lathe: v(
+        [[-3.5, 4.8, 1, 0], [0, 4.9, 1, 0.2], [3, 5.0, 1.02, 0.6], [7, 5.2, 1.05, 1.0], [11, 5.2, 1.05, 1.1], [15, 4.8, 1.0, 1.0],
+          [20, 4.1, 0.95, 0.6], [25, 3.55, 0.94, 0.35], [30, 3.15, 1.0, 0.3], [35, 2.9, 1.1, 0.4], [39, 2.85, 1.18, 0.5], [42, 2.95, 1.22, 0.5], [44.5, 1.5]],
+        // Hers: a smoother, more evenly tapered calf with its fullest point a little lower.
+        [[-3.5, 4.4, 1, 0], [0, 4.5, 1, 0.2], [3, 4.6, 1.02, 0.5], [7, 4.8, 1.04, 0.85], [11, 4.9, 1.05, 1.0], [15, 4.6, 1.0, 0.9],
+          [20, 3.9, 0.95, 0.55], [25, 3.3, 0.94, 0.3], [30, 2.9, 1.0, 0.3], [35, 2.65, 1.1, 0.4], [39, 2.6, 1.18, 0.5], [42, 2.7, 1.22, 0.5], [44.5, 1.4]]),
+      depth: 1 }, [
         // Patellar tendon from the kneecap to the top of the shin.
-        { abs: [null, -4.3, 3.2, 0, 0.9, 3.2, 1.4, null, 1.4] },
+        { abs: [null, -4.2, 3.2, 0, 0.9, 3.2, 1.4, null, 1.6] },
         // Gastrocnemius: the inner head bigger and lower than the outer; soleus wider below them.
-        ["calves", 10, -side * 32, 1.2, [2.3, 7.5, 2.8], 0, 3, { t: "fan", o: [2, 37, 0], n: [1, 0, 0], r: [0, -1, 0], g: 1 }],
-        ["calves", 8.5, side * 34, 0.9, [2.1, 6.5, 2.6], 0, 3, { t: "fan", o: [2, 37, 0], n: [1, 0, 0], r: [0, -1, 0], g: 2 }],
-        ["calves", 19, 0, 0.4, [2.0, 8, 4.0], 0, 3.4, { t: "fan", o: [2, 37, 0], n: [1, 0, 0], r: [0, -1, 0], g: 3 }],
+        ["calves", v(10, 11), -side * 32, v(1.2, 0.75), [2.3, 7.5, 2.8], 0, v(3, 3.6), cfib(1)],
+        ["calves", v(8.5, 10), side * 34, v(0.9, 0.6), [2.1, 6.5, 2.6], 0, v(3, 3.6), cfib(2)],
+        ["soleus", 19, 0, v(0.45, 0.35), [2.0, 8, 4.0], 0, 3.4, cfib(3)],
+        ["soleus", 21, side * 80, v(0.4, 0.3), [1.6, 7, 2.6], 0, 3, cfib(3)],
         ["calves", 35, 0, 0.35, [0.9, 6, 1.1], 0, 1.8, { t: "lin", o: [2, 42, 0], n: [0, 1, 0], c: [0, 0, 1], g: 4 }], // Achilles tendon
-        [null, 12, 180 - side * 28, 0.4, [1.6, 9, 1.8], 0, 3],                   // tibialis anterior
+        // Tibialis anterior beside the shin bone, down to the inner foot.
+        ["tibialis", 13, 180 - side * 30, v(0.45, 0.3), [1.6, 9, 1.8], 0, 3, { t: "lin", o: [-3, 40, 0], n: [0, 1, 0], c: [0, 0, 1] }],
         // Ankle bones: the inner one sits higher than the outer one.
         { abs: [null, 0.2, 41.6, -side * 2.9, 1.1, 1.4, 1.0, null, 1.2] }, { abs: [null, 0.5, 42.8, side * 2.8, 1.1, 1.4, 1.0, null, 1.2] }
       ], M(knee.toArray(), legQ), 3, 3);
-      // Foot (local x points down, y forward): heel, arch, ball and toes, about 26 cm long and
-      // 9-10 cm wide at the ball, with a flat sole about 7.5 cm below the ankle joint.
-      add("foot" + s, { ell: [3.6, 6.5, 0, 3.0, 8.6, 3.9] }, [
-        { abs: [null, 4.8, -2.6, 0, 2.7, 3.4, 2.9, null, 2.2] },                  // heel
-        { abs: [null, 5.6, 13.6, side * 0.3, 1.8, 3.8, 4.6, null, 2.2] },          // ball of the foot
-        { abs: [null, 6.0, 18.6, side * 0.5, 1.4, 2.6, 4.1, null, 1.6] }           // toes
+      // Foot (local x points down, y forward, z = outward for this side): heel, a high instep that
+      // falls toward the toes, the ball, and toes with the big toe longest on the inside; about
+      // 25 cm long, 9.5 wide at the ball, the sole 7.5 below the ankle joint.
+      const fk = v(1, 0.93);
+      add("foot" + s, { ell: [3.7 * fk, 6.2 * fk, 0, 3.6 * fk, 8.4 * fk, 3.6 * fk] }, [
+        { abs: [null, 4.9 * fk, -1.9 * fk, 0, 2.6 * fk, 2.8 * fk, 2.6 * fk, null, 3] },                       // heel
+        { abs: [null, 2.4 * fk, 4.4 * fk, -side * 0.4, 2.6 * fk, 5.4 * fk, 3.4 * fk, [0, 0, -0.3], 2.6] },    // instep
+        { abs: [null, 5.5 * fk, 13.2 * fk, side * 0.3, 2.0 * fk, 3.4 * fk, 4.7 * fk, null, 2.4] },            // ball of the foot
+        { abs: [null, 6.0 * fk, 17.4 * fk, side * 0.9, 1.45 * fk, 2.6 * fk, 3.3 * fk, null, 1.8] },           // small toes
+        { abs: [null, 5.9 * fk, 18.4 * fk, -side * 2.0, 1.55 * fk, 2.4 * fk, 1.7 * fk, null, 1.6] }          // big toe
       ], M(ankle.toArray(), Q(-side * legOut, -Math.PI / 2)), 2.6, 2.5);
     });
-    // Clothing: matte black training shorts (male); fitted bike shorts and a sports top (female).
-    defs.find((d) => d.name === "lowerTorso").cloth = sex === "female"
-      ? { waist: 9.6, off: 0.32, hem: 21, top: { y0: 3.2, y1: 20.5, back: 22, strap: [6.4, 2.0], strapTop: 27.4, off: 0.28 } }
-      : { waist: 7.3, off: 0.55, hem: 21 };
-    return sex === "female" ? feminize(defs) : defs;
-  }
-
-  // Female athlete: the same skeleton and joints (so every exercise, pose and equipment fit works
-  // unchanged), with her own body shape: a narrower ribcage and shoulders, a wider pelvis and
-  // hips, a natural waist, fuller hips and glutes, slimmer arms, neck and calves, smaller hands
-  // and feet, a chest under the sports top, and muscles that define the form more softly.
-  function feminize(defs) {
-    const D = (n) => defs.find((d) => d.name === n);
-    const H = { chest: 0.55, shoulders: 0.55, "rear-delts": 0.55, traps: 0.6, lats: 0.7, "upper-back": 0.75, biceps: 0.65, triceps: 0.7,
-      forearms: 0.8, abs: 0.6, obliques: 0.7, "lower-back": 0.8, glutes: 1.15, quads: 0.8, hamstrings: 0.85, calves: 0.85 };
-    defs.forEach((d) => {
-      d.feats = d.feats.filter((f) => !(f.abs && f.abs[0] === "cut" && d.name === "lowerTorso" && f.abs[1] > 0)); // softer abdomen: no carved lines
-      d.feats.forEach((f) => {
-        if (f.abs) return;
-        f[3] *= H[f[0]] ?? 1;
-        if (f[6]) f[6] *= 1.12; // softer blend into the body
-      });
-    });
-    const scaleLathe = (d, k) => { d.base.lathe = d.base.lathe.map((r) => [r[0], typeof k === "function" ? k(r[0], r[1]) : r[1] * k, ...r.slice(2)]); };
-    const scaleAbs = (d, k) => d.feats.forEach((f) => { if (f.abs && f.abs[0] !== "cut") { const a = f.abs; for (let i = 1; i <= 6; i++) a[i] *= k; } });
-    // Her glutes sit a little further back: move the creases with them.
-    D("lowerTorso").feats.forEach((f) => { if (f.abs && f.abs[0] === "cut" && f.abs[1] < 0) { f.abs[1] -= f.abs[2] > -6 ? 0.8 : 0.6; f.abs[3] *= 1.05; } });
-    D("lowerTorso").base.lathe = [[-12, 2], [-10, 6.8, 0.9, -0.8], [-7, 10.8, 0.84, -1.2], [-3, 13.9, 0.8, -1.3], [1, 14.6, 0.78, -1.1], [5, 14.1, 0.76, -0.6],
-      [9, 12.8, 0.75, 0.1], [13, 12.0, 0.76, 0.7], [18, 12.1, 0.77, 0.8], [23, 13.0, 0.77, 0.5], [28, 13.0, 0.77, 0], [31, 10, 0.77, 0]];
-    D("upperTorso").base.lathe = [[-5, 9.6], [-2, 12.6], [1, 13.1], [6, 13.6], [12, 14.0], [17, 14.4], [21, 14.2], [23.5, 13.4], [25.5, 11.1], [27, 8.4], [28.5, 6.3], [30, 3.0]];
-    D("upperTorso").base.depth = 0.76;
-    // The chest: rounded forms over the pecs, held by the sports top.
-    [1, -1].forEach((s) => D("upperTorso").feats.push([null, 14.0, s * 30, 2.7, [3.2, 4.6, 4.8], s * 0.1, 3.4]));
-    scaleAbs(D("upperTorso"), 0.9);
-    scaleLathe(D("neck"), 0.86);
-    D("head").base.ell = D("head").base.ell.map((v) => v * 0.95); scaleAbs(D("head"), 0.95);
-    ["R", "L"].forEach((s) => {
-      scaleLathe(D("upperArm" + s), 0.84); scaleLathe(D("forearm" + s), 0.86);
-      D("hand" + s).base.ell = D("hand" + s).base.ell.map((v) => v * 0.93); scaleAbs(D("hand" + s), 0.93);
-      // Fuller hips and upper thighs, tapering to a slimmer knee.
-      scaleLathe(D("thigh" + s), (y, r) => r + (y <= 6 ? 1.3 : y < 20 ? 1.3 * (20 - y) / 14 : -0.2));
-      scaleLathe(D("shin" + s), 0.92);
-      D("foot" + s).base.ell = D("foot" + s).base.ell.map((v) => v * 0.93); scaleAbs(D("foot" + s), 0.93);
-    });
+    const lt = defs.find((d) => d.name === "lowerTorso");
+    // Clothing: matte black training shorts (male); fitted shorts, a sports bra and hair (female).
+    lt.cloth = F
+      ? { waist: 10.2, off: 0.3, hem: 17, top: { y0: 2.8, y1: 20.6, back: 21.5, strap: [6.2, 2.1], strapTop: 32, off: 0.3 },
+        hair: { c: [0.2, 2.6, 0], tie: [-6.9, 5.6, 0] } }
+      : { waist: 8.2, off: 0.55, hem: 21 };
+    // Finer muscles and the group each belongs to (see buildSkinData).
+    lt.parents = { "front-delts": "shoulders", "side-delts": "shoulders", rhomboids: "upper-back", soleus: "calves" };
     return defs;
   }
 
   // Prepare a segment: its base shape, and every muscle as an ellipsoid in the segment's space.
   function prepSegment(d) {
-    const seg = { name: d.name, k: d.k, tau: d.tau, inv: d.rest.clone().invert().elements, cloth: d.cloth || null };
+    const seg = { name: d.name, k: d.k, tau: d.tau, inv: d.rest.clone().invert().elements, cloth: d.cloth || null, parents: d.parents || null };
     if (d.base.lathe) {
       const prof = d.base.lathe, curve = new THREE.SplineCurve(prof.map(([y, r]) => new THREE.Vector2(r, y)));
       const pts = curve.getPoints(prof.length * 40);
@@ -771,6 +842,7 @@ function makeBody3D(THREE, mats, athlete) {
     geo.setAttribute("skinWeight", new THREE.BufferAttribute(data.skinWeight, 4));
     geo.setAttribute("fib", new THREE.BufferAttribute(data.fib, 4));
     geo.setAttribute("cloth", new THREE.BufferAttribute(data.cloth, 1));
+    geo.setAttribute("aux", new THREE.BufferAttribute(data.aux, 4));
     geo.setIndex(new THREE.BufferAttribute(data.index, 1));
     skinAttrs(geo);
     return geo;
@@ -790,6 +862,7 @@ function makeBody3D(THREE, mats, athlete) {
     skinList.forEach((m) => { m.visible = true; });
     skinList.unshift(skin); skinMeshes.body = [skin];
     body.skin = skin;
+    body.hairOn = athlete === "female";
     skinWaiting.splice(0).forEach((cb) => cb(skin));
     // Get the other athlete ready in the background, so switching is instant.
     const other = athlete === "male" ? "female" : "male";
@@ -804,9 +877,179 @@ function makeBody3D(THREE, mats, athlete) {
       const old = skin.geometry;
       skin.geometry = geoOf(data); skin.userData.weights = data.weights;
       old.dispose();
+      body.hairOn = sex === "female";
       if (cb) cb();
     }));
   };
+  // ----- Ponytail (female athlete) -----
+  // Hair over the skull is part of the skin (see cloth() in buildSkinData). The ponytail hangs from
+  // a band at the back of the crown: many tapered strand clumps that follow one guide chain, which
+  // swings a little as the head moves (a damped spring; held still under reduced motion), stays out
+  // of the head, neck and back, and lies flat along a bench (or the floor) when the athlete lies down.
+  body.makeHair = () => {
+    if (body.hair) return body.hair;
+    const head = parts.head, HAIR_COLOR = new THREE.Color(0x15161a);
+    const tieL = new THREE.Vector3(-7.4, 5.6, 0), dirL = new THREE.Vector3(-1, -0.42, 0).normalize();
+    const K = 12, LEN = 25, SEG = LEN / K, NC = 18, RS = 6;
+    // The band: a short elastic cylinder around the gathered hair.
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(1.25, 1.35, 1.3, 16, 1),
+      new THREE.MeshStandardMaterial({ color: 0x0b0b0d, roughness: 0.75, metalness: 0 }));
+    band.position.copy(tieL).addScaledVector(dirL, 0.9);
+    band.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dirL);
+    band.castShadow = true;
+    head.add(band);
+    // Clumps: each a tapered tube offset around the guide chain, fanning out after the band and
+    // gathering again toward the tips; lengths, thickness and twist vary per clump.
+    const rnd = (i) => { const x = Math.sin(i * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+    const clumps = [...Array(NC)].map((_, j) => ({
+      a: (j / NC) * Math.PI * 2 + rnd(j) * 0.5, r: 0.3 + 0.7 * rnd(j + 7), len: 0.75 + 0.25 * rnd(j + 13),
+      th: 0.85 + 0.45 * rnd(j + 21), tw: (rnd(j + 31) - 0.5) * 1.2, shade: 0.8 + 0.4 * rnd(j + 41)
+    }));
+    const RING = K + 1, nv = NC * RING * RS;
+    const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), col = new Float32Array(nv * 3), idx = [];
+    clumps.forEach((c, j) => {
+      for (let i = 0; i < RING; i++) for (let k = 0; k < RS; k++) {
+        const v = (j * RING + i) * RS + k;
+        const sh = c.shade * (0.9 + 0.1 * Math.cos(k * 2.1 + j));
+        col[v * 3] = HAIR_COLOR.r * sh; col[v * 3 + 1] = HAIR_COLOR.g * sh; col[v * 3 + 2] = HAIR_COLOR.b * sh;
+        if (i < K) {
+          const a = v, b = (j * RING + i) * RS + (k + 1) % RS, c2 = a + RS, d = b + RS;
+          idx.push(a, c2, b, b, c2, d);
+        }
+      }
+    });
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute("normal", new THREE.BufferAttribute(nor, 3));
+    geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    geo.setIndex(idx);
+    const mat = new THREE.MeshPhysicalMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.5, metalness: 0,
+      sheen: 0.35, sheenRoughness: 0.5, sheenColor: new THREE.Color(0x2c3038), specularIntensity: 0.25, envMapIntensity: 0.2 });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.castShadow = true; mesh.frustumCulled = false; mesh.matrixAutoUpdate = false; mesh.visible = false;
+
+    // Guide chain (world space): verlet points with a rod-like stiffness near the band.
+    const P = [...Array(K + 1)].map(() => new THREE.Vector3());
+    let ready = false, barA = null, barB = null, lastRoot = null;
+    const swing = new THREE.Vector3(), swingV = new THREE.Vector3(), side = new THREE.Vector3();
+    const V = new THREE.Vector3(), W = new THREE.Vector3(), root = new THREE.Vector3(), rdir = new THREE.Vector3();
+    const tQ = new THREE.Quaternion(), fwd = new THREE.Vector3(), up = new THREE.Vector3(), inv = new THREE.Matrix4();
+    const spheres = [[0.2, 2.6, 0, 7.6], [-2.0, 3.6, 0, 6.0], [1.6, -3.6, 0, 5.4]].map((s) => ({ c: new THREE.Vector3(s[0], s[1], s[2]), r: s[3], w: new THREE.Vector3() }));
+    // Torso cross-section (local half-depth, half-width) by height, for pushing hair off the back.
+    const torsoAt = (y) => (y > 31 ? null : y > 27 ? [7.5, 9] : y > 24 ? [9.8, 12.5] : [11.2, 14]);
+    function collide(p, r) {
+      spheres.forEach((s) => { V.subVectors(p, s.w); const d = V.length(), m = s.r + r; if (d < m && d > 1e-6) p.addScaledVector(V, (m - d) / d); });
+      // Neck: a capsule from the base of the neck to the head.
+      const n0 = W.setFromMatrixPosition(parts.neck.matrixWorld), n1 = V.setFromMatrixPosition(head.matrixWorld);
+      const ab = n1.clone().sub(n0), t = Math.min(1, Math.max(0, p.clone().sub(n0).dot(ab) / ab.lengthSq()));
+      const q = n0.clone().addScaledVector(ab, t), dq = p.clone().sub(q), dl = dq.length(), mr = 6.2 + r;
+      if (dl < mr && dl > 1e-6) p.addScaledVector(dq, (mr - dl) / dl);
+      // A bar held in both hands (back squat, presses): the line between the palms.
+      if (barA && barB) {
+        const bb = barB.clone().sub(barA), bt = Math.min(1, Math.max(0, p.clone().sub(barA).dot(bb) / bb.lengthSq()));
+        const bq = barA.clone().addScaledVector(bb, bt), bd = p.clone().sub(bq), bl = bd.length(), br = 2.6 + r;
+        if (bl < br && bl > 1e-6) p.addScaledVector(bd, (br - bl) / bl);
+      }
+      // Upper back: an elliptical cross-section in the ribcage's own frame.
+      const ut = parts.upperTorso;
+      inv.copy(ut.matrixWorld).invert();
+      const l = p.clone().applyMatrix4(inv), e = torsoAt(l.y);
+      if (e && l.y > -6) {
+        const ax = e[0] + r, az = e[1] + r, k = (l.x / ax) ** 2 + (l.z / az) ** 2;
+        if (k < 1) { const sc = 1 / Math.sqrt(k || 1e-6); l.x *= sc; l.z *= sc; p.copy(l.applyMatrix4(ut.matrixWorld)); }
+      }
+    }
+    body.hair = {
+      mesh, band, P, //DBGH
+      update(dt, still, floorY) {
+        const on = body.hairOn === true;
+        mesh.visible = on; band.visible = on;
+        if (!on) { ready = false; return; }
+        head.updateWorldMatrix(true, false);
+        root.copy(tieL).applyMatrix4(head.matrixWorld);
+        head.getWorldQuaternion(tQ);
+        spheres.forEach((s) => s.w.copy(s.c).applyMatrix4(head.matrixWorld));
+        barA = hands.R.pivot.localToWorld(new THREE.Vector3(0, 5, 0)); barB = hands.L.pivot.localToWorld(new THREE.Vector3(0, 5, 0));
+        if (barA.distanceTo(barB) > 120) barA = barB = null;
+        // Lying face up: the ribcage's front points up; the tail is laid back past the crown and a
+        // little to the side, along the bench, instead of under the neck.
+        const ut = parts.upperTorso;
+        fwd.set(1, 0, 0).applyQuaternion(ut.getWorldQuaternion(new THREE.Quaternion())).normalize();
+        const supine = Math.min(1, Math.max(0, (fwd.y - 0.35) / 0.4));
+        rdir.copy(dirL).lerp(V.set(-0.35, 1, 0.45).normalize(), supine * 0.85).normalize().applyQuaternion(tQ);
+        const plane = supine > 0 ? W.set(-11.6, 18, 0).applyMatrix4(ut.matrixWorld).clone() : null;
+        if (!ready) {
+          for (let i = 0; i <= K; i++) P[i].copy(root).addScaledVector(rdir, Math.min(i, 2) * SEG).y -= Math.max(0, i - 2) * SEG;
+          ready = true;
+        }
+        // The chain relaxes to where gravity and the body let it hang (no stored velocity, so it
+        // never jitters or flies off); the sway is a separate damped spring: when the head moves,
+        // the tail lags behind and swings back, more toward the tip.
+        if (still || !lastRoot) { swing.set(0, 0, 0); swingV.set(0, 0, 0); }
+        else {
+          const h = Math.min(dt, 1 / 30);
+          swing.addScaledVector(V.subVectors(root, lastRoot), -0.7);
+          swingV.addScaledVector(swing, -70 * h).multiplyScalar(Math.max(0, 1 - 5 * h));
+          swing.addScaledVector(swingV, h);
+          if (swing.length() > 7) swing.setLength(7);
+        }
+        lastRoot = (lastRoot || new THREE.Vector3()).copy(root);
+        side.set(0, 0, 1).applyQuaternion(tQ);
+        P[0].copy(root);
+        // Rod stiffness: near the band the hair keeps the direction it leaves the band in.
+        for (let i = 1; i <= K; i++) {
+          // Hair does not stand up: the band's hold gives way when it points upward (bent over).
+          const stiff = (i === 1 ? 0.6 : i === 2 ? 0.15 : 0.035 * Math.exp(-(i - 3) / 2)) * (1 - 0.85 * Math.max(0, rdir.y));
+          if (i === 1) up.copy(rdir); else up.subVectors(P[i - 1], P[i - 2]).normalize();
+          P[i].lerp(W.copy(P[i - 1]).addScaledVector(up, SEG), stiff);
+        }
+        for (let it = 0; it < 10; it++) {
+          P[0].copy(root);
+          for (let i = 1; i <= K; i++) {
+            P[i].y -= SEG * 0.15; // gravity, relaxed a little at every pass so it settles within a few frames
+            P[i].addScaledVector(side, SEG * 0.03); // a slight sideways drift so it never balances on the crown
+            V.subVectors(P[i], P[i - 1]); const d = V.length() || 1;
+            P[i].copy(P[i - 1]).addScaledVector(V, SEG / d);
+            const r = 1.6 * (1 - (0.6 * i) / K);
+            if (i > 1) collide(P[i], i > 3 ? r : r * 0.4);
+            if (plane && supine > 0) { V.subVectors(P[i], plane); const dd = V.dot(fwd) - r * 0.6; if (dd < 0) P[i].addScaledVector(fwd, -dd); }
+            if (floorY != null && P[i].y < floorY + r) P[i].y = floorY + r;
+          }
+        }
+        // Clump tubes along the chain: a parallel-transported frame, offsets fanning out after the band.
+        const T = new THREE.Vector3(), N = new THREE.Vector3(), B = new THREE.Vector3(), c0 = new THREE.Vector3(), q = new THREE.Vector3();
+        N.set(0, 1, 0).applyQuaternion(tQ);
+        let vi = 0;
+        clumps.forEach((c) => {
+          let n = N.clone();
+          for (let i = 0; i <= K; i++) {
+            const t = i / K, tc = Math.min(1, t / c.len);
+            if (i < K) T.subVectors(P[i + 1], P[i]).normalize(); else T.subVectors(P[i], P[i - 1]).normalize();
+            n.addScaledVector(T, -n.dot(T)).normalize(); B.crossVectors(T, n);
+            // Along this clump's own length the chain is sampled at tc (shorter clumps end earlier).
+            const f = tc * K, i0 = Math.min(K - 1, Math.floor(f)), fr = f - i0;
+            c0.lerpVectors(P[i0], P[i0 + 1], fr).addScaledVector(swing, 0.6 * Math.pow(tc, 1.3));
+            const spread = (0.45 + 1.25 * Math.sin(Math.min(1, tc * 1.4) * Math.PI * 0.7)) * c.r * (1 - 0.5 * tc * tc);
+            const ang = c.a + c.tw * tc;
+            c0.addScaledVector(n, Math.cos(ang) * spread).addScaledVector(B, Math.sin(ang) * spread);
+            const rad = c.th * (0.75 + 0.3 * Math.sin(Math.min(1, tc * 2) * Math.PI * 0.5) - 0.85 * Math.pow(tc, 1.6)) + 0.08;
+            for (let k = 0; k < RS; k++) {
+              const a = (k / RS) * Math.PI * 2, ca = Math.cos(a), sa = Math.sin(a);
+              // Flattened clumps (ribbons) read as strands rather than tubes.
+              q.copy(n).multiplyScalar(ca * Math.cos(ang) - sa * 0.45 * Math.sin(ang)).addScaledVector(B, ca * Math.sin(ang) + sa * 0.45 * Math.cos(ang));
+              const o = vi * 3;
+              pos[o] = c0.x + q.x * rad; pos[o + 1] = c0.y + q.y * rad; pos[o + 2] = c0.z + q.z * rad;
+              q.normalize(); nor[o] = q.x; nor[o + 1] = q.y; nor[o + 2] = q.z;
+              vi++;
+            }
+          }
+        });
+        geo.attributes.position.needsUpdate = true; geo.attributes.normal.needsUpdate = true;
+      }
+    };
+    return body.hair;
+  };
+  body.updateHair = (dt, still, floorY) => { if (body.hair) body.hair.update(dt, still, floorY); };
   return body;
 }
 
@@ -839,99 +1082,143 @@ function createViewer3D(container, mode, opts = {}) {
   // muscles that take over in a mistake, the energy rim around a correct body, and the scan band
   // that sweeps up the body when an exercise is first analyzed.
   const fiberUniforms = {
-    uTime: { value: 0 }, uEffort: { value: 1 }, uActScale: { value: 0 }, uFiber: { value: 0 },
+    uTime: { value: 0 }, uEffort: { value: 1 }, uActScale: { value: 0 }, uFiber: { value: 0 }, uMap: { value: 1 },
     uActColor: { value: new THREE.Color(mode === "bad" ? VIEW3D.activeBad : VIEW3D.active) },
     uCompColor: { value: new THREE.Color(VIEW3D.compensate) },
     uRim: { value: 0 }, uRimColor: { value: new THREE.Color(mode === "bad" ? VIEW3D.bad : VIEW3D.good) },
-    uScanY: { value: -999 }, uScanColor: { value: new THREE.Color(mode === "bad" ? VIEW3D.bad : VIEW3D.good) }
+    uScanY: { value: -999 }, uScanColor: { value: new THREE.Color(mode === "bad" ? VIEW3D.bad : VIEW3D.good) },
+    uHairTie: { value: new THREE.Vector3(-6.9, 72.1, 0) } // the ponytail's tie, rest pose (see skinDefs hair)
   };
+  // Display modes: surface (bare body and clothing), map (activation), fiber (activation plus an
+  // illustrative fiber-direction overlay). uMap and uFiber ease toward these targets every frame.
+  const display = { mode: "map", map: 1 };
+  // Skin shader, in layers: the body (dark charcoal, slightly varied roughness, a faint procedural
+  // micro-surface, cavity occlusion from the skin builder), clothing (near-black matte fabric with
+  // crisp edges, seams and soft folds) and hair (dark, combed back, a soft sheen), then activation
+  // held inside the worked muscles, the fiber overlay, and form feedback.
+  const SKIN_GLSL = `
+    float h3(vec3 p) { p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+    float vn3(vec3 x) {
+      vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+      return mix(mix(mix(h3(i), h3(i + vec3(1, 0, 0)), f.x), mix(h3(i + vec3(0, 1, 0)), h3(i + vec3(1, 1, 0)), f.x), f.y),
+                 mix(mix(h3(i + vec3(0, 0, 1)), h3(i + vec3(1, 0, 1)), f.x), mix(h3(i + vec3(0, 1, 1)), h3(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+    }
+    vec3 bumpN(vec3 p, vec3 n, float hgt, float fd) {
+      vec3 sx = dFdx(p), sy = dFdy(p), r1 = cross(sy, n), r2 = cross(n, sx);
+      float det = dot(sx, r1) * fd;
+      vec3 g = sign(det) * (dFdx(hgt) * r1 + dFdy(hgt) * r2);
+      return normalize(abs(det) * n - g);
+    }`;
   function patchSkin(mat) {
     mat.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, fiberUniforms);
       shader.vertexShader = shader.vertexShader
-        .replace("#include <common>", "#include <common>\nattribute vec4 fib;\nattribute float act;\nattribute float cloth;\nvarying vec4 vFib;\nvarying float vAct;\nvarying float vWorldY;\nvarying float vCloth;\nvarying vec3 vObjP;")
-        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFib = fib; vAct = act; vCloth = cloth; vObjP = position;")
+        .replace("#include <common>", "#include <common>\nattribute vec4 fib;\nattribute float act;\nattribute float cloth;\nattribute vec4 aux;\nvarying vec4 vFib;\nvarying float vAct;\nvarying float vWorldY;\nvarying float vCloth;\nvarying vec4 vAux;\nvarying vec3 vObjP;")
+        .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFib = fib; vAct = act; vCloth = cloth; vAux = aux; vObjP = position;")
         .replace("#include <project_vertex>", "#include <project_vertex>\nvWorldY = (modelMatrix * vec4(transformed, 1.0)).y;");
       shader.fragmentShader = shader.fragmentShader
         .replace("#include <common>", `#include <common>
-          varying vec4 vFib; varying float vAct; varying float vWorldY; varying float vCloth; varying vec3 vObjP;
-          uniform float uTime, uEffort, uActScale, uRim, uScanY, uFiber;
-          uniform vec3 uActColor, uCompColor, uRimColor, uScanColor;`)
-        // Shorts: matte fabric, with soft folds bunched around the hips and crotch.
-        .replace("#include <roughnessmap_fragment>", "#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, 0.97, vCloth);")
+          varying vec4 vFib; varying float vAct; varying float vWorldY; varying float vCloth; varying vec4 vAux; varying vec3 vObjP;
+          uniform float uTime, uEffort, uActScale, uRim, uScanY, uFiber, uMap;
+          uniform vec3 uActColor, uCompColor, uRimColor, uScanColor, uHairTie;
+          ${SKIN_GLSL}`)
         .replace("#include <normal_fragment_maps>", `#include <normal_fragment_maps>
-          if (vCloth > 0.01) {
+          // Crisp clothing and hair edges at the mask's 0.5 crossing.
+          float cfw = max(fwidth(vCloth), 0.002), hfw = max(fwidth(vAux.y), 0.002);
+          float clothM = smoothstep(0.5 - cfw, 0.5 + cfw, vCloth);
+          float hairM = smoothstep(0.5 - hfw, 0.5 + hfw, vAux.y);
+          float sd = (vAux.z - 0.5) * 3.0, sfw = max(fwidth(sd), 0.002);
+          // A seam is a thin stitched line where the signed distance crosses zero (not where two pieces meet).
+          float seamM = (1.0 - smoothstep(0.12 - sfw, 0.12 + sfw, abs(sd))) * (1.0 - smoothstep(1.6, 2.4, sfw / max(length(fwidth(vObjP)), 1e-4))) * clothM;
+          float detail = 1.0 - smoothstep(0.25, 0.6, length(fwidth(vObjP))); // fade fine detail when far away
+          vec3 hq = vObjP - uHairTie;
+          float hairV = atan(hq.z, hq.y) * 40.0;
+          {
+            // Skin: a very fine, irregular surface (no pores); fabric: soft folds plus a knit; hair: strands.
+            float skinH = (vn3(vObjP * 0.9) * 0.6 + vn3(vObjP * 2.3) * 0.4) * 0.05 * detail;
             vec3 q = vObjP;
             float fold = sin(q.y * 0.75 + 2.2 * sin(q.x * 0.21 + q.z * 0.17)) * (0.6 + 0.4 * sin(q.x * 0.09 - q.z * 0.13 + q.y * 0.05));
             fold += 0.45 * sin(q.y * 1.5 + q.z * 0.4 + 1.3 * sin(q.x * 0.33));
-            normal = perturbNormalArb(-vViewPosition, normal, vec2(dFdx(fold), dFdy(fold)) * 0.32 * vCloth, faceDirection);
+            float clothH = fold * 0.1 + vn3(q * 3.1) * 0.05 * detail - seamM * 0.1;
+            float hfv = fwidth(hairV), hAA = 1.0 - smoothstep(0.4, 1.2, hfv);
+            float hairH = (sin(hairV + 2.5 * vn3(vObjP * 0.5)) * 0.6 + sin(hairV * 0.37 + 3.0 * vn3(vObjP * 0.9)) * 0.4) * 0.05 * hAA;
+            float hgt = mix(mix(skinH, clothH, clothM), hairH, hairM);
+            normal = bumpN(-vViewPosition, normal, hgt, faceDirection);
           }`)
         .replace("#include <emissivemap_fragment>", `#include <emissivemap_fragment>
           {
-            // Layers, in order: the body (charcoal skin), muscle form (soft boundary shading),
-            // activation (a muted glow held inside the muscle), fiber direction (only on working
-            // muscles, and fully only when fiber detail is on), then form feedback.
             // vFib: x = distance along the fiber from its attachment, y = fiber index,
             //       z = how much muscle is under this point, w = boundary between muscles.
             float belly = smoothstep(0.15, 0.85, vFib.z);
             float sep = vFib.w;
             float ndv = abs(dot(normal, normalize(vViewPosition)));
-            // Muscle form at rest: bellies a touch lighter, a soft shallow valley between muscles.
-            diffuseColor.rgb *= (1.0 + 0.06 * belly) * (1.0 - 0.15 * sep);
-            // Shorts: near-black matte fabric, a faint stitched line at the waistband and hems.
-            diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.028, 0.029, 0.032), vCloth);
-            diffuseColor.rgb *= 1.0 - 0.45 * vCloth * (1.0 - vCloth) * 4.0;
-            float a = clamp(abs(vAct) * uEffort * uActScale, 0.0, 1.0);
+            float mottle = vn3(vObjP * 0.35);
+            // Body: muscle bellies a touch lighter, a soft valley between muscles, a faint mottling.
+            diffuseColor.rgb *= (1.0 + 0.05 * belly) * (1.0 - 0.06 * sep) * (0.95 + 0.1 * mottle);
+            roughnessFactor = clamp(0.6 + 0.12 * (mottle - 0.5) + 0.06 * sep - 0.04 * belly, 0.45, 0.8);
+            // Fabric: near-black matte knit, a slightly darker stitched seam line.
+            diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.013, 0.0135, 0.015) * (1.0 - 0.3 * seamM), clothM);
+            roughnessFactor = mix(roughnessFactor, 0.93, clothM);
+            // Hair: very dark, combed back toward the tie, with a soft broken sheen along the strands.
+            float strand = mix(0.5, 0.5 + 0.5 * sin(hairV * 0.37 + 3.0 * vn3(vObjP * 0.9)), 1.0 - smoothstep(0.4, 1.2, fwidth(hairV)));
+            diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.0085, 0.009, 0.011) * (0.85 + 0.3 * strand), hairM);
+            roughnessFactor = mix(roughnessFactor, 0.42 + 0.16 * strand, hairM);
+            float bare = (1.0 - clothM) * (1.0 - hairM);
+            float a = clamp(abs(vAct) * uEffort * uActScale, 0.0, 1.0) * uMap;
             vec3 actColor = vAct < 0.0 ? uCompColor : uActColor;
+            float inside = belly * (1.0 - 0.6 * sep) * bare;
             if (a > 0.001) {
               // Activation travels along the fibers toward the attachment as broad, slow swells.
               float travel = 0.5 + 0.5 * sin(vFib.x * 0.11 - uTime * 2.2);
-              float inside = belly * (1.0 - 0.7 * sep) * (1.0 - 0.82 * vCloth);
-              diffuseColor.rgb = mix(diffuseColor.rgb, actColor * 0.34, 0.42 * a * inside);
-              // Internal glow: strongest where the muscle faces the viewer, never a bright outline.
-              float glow = a * inside * (0.55 + 0.45 * ndv) * (0.78 + 0.22 * travel);
-              totalEmissiveRadiance += actColor * glow * 0.27;
-              // Fiber direction: short, broken fascicle strands that fade in and out along the
-              // muscle (not continuous strings), faint at most and clear only with fiber detail on.
-              float fiberAmt = (1.0 - vCloth) * inside * mix(0.25 * smoothstep(0.5, 1.0, a), smoothstep(0.08, 0.6, a), uFiber);
-              float fw = fwidth(vFib.y);
-              if (fiberAmt > 0.01 && fw < 0.5) {
-                float id = floor(vFib.y), rnd = fract(sin(id * 12.9898) * 43758.5453);
-                float fv = fract(vFib.y), edge = min(fv, 1.0 - fv);
-                float lineW = 0.07 + 0.05 * rnd;
-                float strand = 1.0 - smoothstep(lineW - fw, lineW + fw, edge);
-                float dash = smoothstep(0.25, 0.75, 0.5 + 0.5 * sin(vFib.x * (0.16 + 0.1 * rnd) + rnd * 37.0));
-                float f = strand * dash * fiberAmt * (1.0 - smoothstep(0.2, 0.5, fw));
-                diffuseColor.rgb *= 1.0 - 0.3 * f;
-                totalEmissiveRadiance += actColor * f * (0.3 + 0.4 * travel) * (0.4 + 0.6 * a);
-              }
+              diffuseColor.rgb = mix(diffuseColor.rgb, actColor * 0.32, 0.4 * a * inside);
+              float glow = a * inside * (0.55 + 0.45 * ndv) * (0.8 + 0.2 * travel);
+              totalEmissiveRadiance += actColor * glow * 0.22;
             }
-            // A barely-there edge light on a correct body, and a faint cool edge everywhere so the
-            // dark silhouette reads against the dark stage.
+            // Illustrative fiber-direction overlay: short broken strands along each muscle's fibers.
+            // Muscles that are not worked show them only faintly (fiber mode); worked and focused
+            // muscles fade in with a restrained teal.
+            float fw = fwidth(vFib.y);
+            float fiberAmt = inside * max(0.22 * smoothstep(0.5, 1.0, a) * uMap, uFiber * (0.16 + 0.84 * smoothstep(0.05, 0.6, a)));
+            if (fiberAmt > 0.01 && fw < 0.5) {
+              float id = floor(vFib.y), rnd = fract(sin(id * 12.9898) * 43758.5453);
+              float fv = fract(vFib.y), edge = min(fv, 1.0 - fv);
+              float lineW = 0.06 + 0.04 * rnd;
+              float st = 1.0 - smoothstep(lineW - fw, lineW + fw, edge);
+              float dash = smoothstep(0.2, 0.7, 0.5 + 0.5 * sin(vFib.x * (0.16 + 0.1 * rnd) + rnd * 37.0));
+              float f = st * dash * fiberAmt * (1.0 - smoothstep(0.2, 0.5, fw));
+              vec3 fc = mix(vec3(0.55, 0.6, 0.62), actColor, smoothstep(0.05, 0.4, a));
+              diffuseColor.rgb = mix(diffuseColor.rgb, fc * 0.18, 0.5 * f);
+              totalEmissiveRadiance += fc * f * (0.04 + 0.2 * a);
+            }
+            // A soft cool edge everywhere so the dark silhouette reads against a dark stage, and a
+            // barely-there energy rim on a correct body in the activation views.
             float rim = pow(1.0 - ndv, 4.0);
-            totalEmissiveRadiance += vec3(0.5, 0.6, 0.75) * pow(1.0 - ndv, 3.0) * 0.035 * (1.0 - 0.5 * vCloth);
-            totalEmissiveRadiance += uRimColor * rim * uRim;
-            // Scan band sweeping up the body.
+            totalEmissiveRadiance += vec3(0.62, 0.68, 0.76) * pow(1.0 - ndv, 3.0) * 0.03 * (1.0 - 0.6 * clothM) * (1.0 - 0.7 * hairM);
+            totalEmissiveRadiance += uRimColor * rim * uRim * uMap * (1.0 - 0.8 * max(clothM, hairM));
             float band = exp(-pow((vWorldY - uScanY) / 3.5, 2.0));
             totalEmissiveRadiance += uScanColor * band * (0.35 + 0.65 * rim) * 0.6;
+          }`)
+        // Fabric and hair keep only a little of the skin's soft sheen.
+        .replace("#include <lights_physical_fragment>", "#include <lights_physical_fragment>\n#ifdef USE_SHEEN\nmaterial.sheenColor *= 1.0 - 0.7 * max(clothM, hairM);\n#endif")
+        // Cavity occlusion (armpits, crotch, creases) on ambient light and softly on direct light.
+        .replace("#include <aomap_fragment>", `#include <aomap_fragment>
+          {
+            float ao = mix(vAux.x, 1.0, 0.25 * hairM);
+            reflectedLight.indirectDiffuse *= ao;
+            reflectedLight.indirectSpecular *= ao * ao;
+            reflectedLight.directDiffuse *= mix(1.0, ao, 0.45);
+            reflectedLight.directSpecular *= mix(1.0, ao, 0.7);
           }`);
     };
     return mat;
   }
-  function skinNoise() {
-    const c = document.createElement("canvas"); c.width = c.height = 128;
-    const g = c.getContext("2d"), img = g.createImageData(128, 128);
-    for (let i = 0; i < img.data.length; i += 4) { const v = 118 + Math.random() * 20; img.data[i] = img.data[i + 1] = img.data[i + 2] = v; img.data[i + 3] = 255; }
-    g.putImageData(img, 0, 0);
-    const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(6, 6);
-    return t;
-  }
   const mats = {
-    // Matte graphite skin: the shader below draws the muscle fibers, boundaries and activation.
-    skin: patchSkin(new THREE.MeshPhysicalMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.74, metalness: 0,
-      sheen: 0.06, sheenColor: new THREE.Color(0xb8c2d0), sheenRoughness: 0.85, clearcoat: 0,
-      envMapIntensity: 0.75, bumpMap: skinNoise(), bumpScale: 0.25 })),
+    // Matte dark-charcoal skin, not rubber or plastic: soft broad specular, a light sheen at grazing angles.
+    skin: patchSkin(new THREE.MeshPhysicalMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.62, metalness: 0,
+      specularIntensity: 0.42, sheen: 0.1, sheenColor: new THREE.Color(0x8a929d), sheenRoughness: 0.7, clearcoat: 0,
+      envMapIntensity: 0.32 })),
   };
+
 
   // Rubber gym floor, fitted to the feet of each exercise.
   const floor = GYM3D.floor();
@@ -941,6 +1228,14 @@ function createViewer3D(container, mode, opts = {}) {
   Object.values(body.parts).forEach((g) => { if (g !== body.parts.head) scene.add(g); });
   // The skin may arrive a moment later (it is built in the background): show it with the scan-in.
   body.onSkin((skin) => { scene.add(skin); if (ex) { setActivation(); fitScene(); } shownAt = 0; });
+  scene.add(body.makeHair().mesh); window.__hair = body.hair; //DBGH
+  // Per frame, just before drawing: ease the display mode in, and let the hair settle.
+  let hairAt = 0;
+  scene.onBeforeRender = () => {
+    const u = fiberUniforms, now = performance.now(), dt = Math.min(0.05, Math.max(0, (now - (hairAt || now)) / 1000)); hairAt = now;
+    u.uMap.value += (display.map - u.uMap.value) * (reduce ? 1 : 0.08);
+    if (body.updateHair) body.updateHair(dt, reduce, floor.position.y); window.__fy = floor.position.y; //DBGH
+  };
   const equipment = new THREE.Group();
   scene.add(equipment);
 
@@ -952,17 +1247,60 @@ function createViewer3D(container, mode, opts = {}) {
   let raf = 0, disposed = false, fig3 = {}, fibersOn = false;
 
   // ----- Interaction -----
-  let drag = null, downAt = null;
+  // One pointer (left mouse / one finger): rotate. Right mouse, shift-drag or two fingers: pan.
+  // Wheel or pinch: zoom. Double-click: back to the exercise's own view.
+  let drag = null, downAt = null, zoomU = 1;
+  const pan = new THREE.Vector3(), pointers = new Map();
   const el = renderer.domElement;
-  el.addEventListener("pointerdown", (e) => { drag = { x: e.clientX, y: e.clientY, yaw, pitch }; downAt = [e.clientX, e.clientY]; el.setPointerCapture(e.pointerId); });
+  const clampZoom = (z) => Math.min(3.2, Math.max(0.55, z));
+  function panBy(dx, dy) {
+    const s = (dist / zoomU) * 0.0018;
+    const right = new THREE.Vector3(Math.cos(cam.yaw), 0, -Math.sin(cam.yaw));
+    pan.addScaledVector(right, -dx * s); pan.y += dy * s;
+    pan.clampLength(0, 160);
+  }
+  function startDrag(e) {
+    const pts = [...pointers.values()];
+    if (pts.length >= 2) {
+      const [a, b] = pts;
+      drag = { two: true, d: Math.hypot(a.x - b.x, a.y - b.y), mx: (a.x + b.x) / 2, my: (a.y + b.y) / 2, zoom: zoomU };
+    } else {
+      drag = { x: e.clientX, y: e.clientY, yaw, pitch, panning: e.button === 2 || e.shiftKey };
+    }
+  }
+  el.addEventListener("contextmenu", (e) => e.preventDefault());
+  el.addEventListener("pointerdown", (e) => {
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    downAt = pointers.size === 1 ? [e.clientX, e.clientY] : null;
+    try { el.setPointerCapture(e.pointerId); } catch (err) {}
+    startDrag(e);
+  });
   el.addEventListener("pointermove", (e) => {
+    if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (!drag) return;
+    if (drag.two) {
+      const [a, b] = [...pointers.values()];
+      if (!a || !b) return;
+      const d = Math.hypot(a.x - b.x, a.y - b.y), mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+      zoomU = clampZoom(drag.zoom * d / Math.max(20, drag.d));
+      panBy(mx - drag.mx, my - drag.my); drag.mx = mx; drag.my = my;
+      return;
+    }
+    if (drag.panning) { panBy(e.clientX - drag.x, e.clientY - drag.y); drag.x = e.clientX; drag.y = e.clientY; return; }
     yaw = drag.yaw - (e.clientX - drag.x) * 0.01;
     pitch = Math.max(-0.2, Math.min(0.9, drag.pitch + (e.clientY - drag.y) * 0.006));
   });
-  el.addEventListener("pointerup", () => { drag = null; });
-  el.addEventListener("pointercancel", () => { drag = null; });
-  el.addEventListener("dblclick", () => { [yaw, pitch] = fig3.view || [VIEW3D.yaw, VIEW3D.pitch]; });
+  const endPointer = (e) => {
+    pointers.delete(e.pointerId);
+    if (pointers.size === 1) { const [p] = [...pointers.values()]; drag = { x: p.x, y: p.y, yaw, pitch }; downAt = null; } else drag = null;
+  };
+  el.addEventListener("pointerup", endPointer);
+  el.addEventListener("pointercancel", endPointer);
+  el.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    zoomU = clampZoom(zoomU * Math.exp(-Math.max(-60, Math.min(60, e.deltaY)) * 0.0022));
+  }, { passive: false });
+  el.addEventListener("dblclick", () => { resetCamera(); });
 
   function resize() {
     const w = container.clientWidth || 300, h = container.clientHeight || w;
@@ -1201,11 +1539,21 @@ function createViewer3D(container, mode, opts = {}) {
   let cur = null, curEnds = null;
   const handQOf = () => cur.handQ;
   const Z = new THREE.Vector3(0, 0, 1);
-  function orientHand(h, fa, side, torsoQ) {
+  // flatK (pose `flat`, 0..1): blend from the grip orientation to a hand flat on the floor, for
+  // reps that put the hands down part of the way (burpee).
+  function orientHand(h, fa, side, torsoQ, wrist, flatK) {
+    const fk = flatK ?? (fig3.hand === "flat" ? 1 : 0);
+    if (fk > 0 && fk < 1) {
+      const qa = handBasis(fa, side, torsoQ, false), qb = handBasis(fa, side, torsoQ, true);
+      return setHandQ(h, fa, side, qa.slerp(qb, fk), wrist);
+    }
+    setHandQ(h, fa, side, handBasis(fa, side, torsoQ, fk >= 1), wrist);
+  }
+  function handBasis(fa, side, torsoQ, flat) {
     const y = new THREE.Vector3(0, 1, 0).applyQuaternion(fa.quaternion);
-    const grip = fig3.grip || "over", mode = fig3.hand || "grip";
+    const grip = fig3.grip || (fig3.hand === "flat" ? "neutral" : "over");
     let x, z;
-    if (mode === "flat") {
+    if (flat) {
       const up = new THREE.Vector3(0, 1, 0).applyQuaternion(torsoQ);
       y.set(up.x, 0, up.z); if (y.lengthSq() < 1e-4) y.set(1, 0, 0); y.normalize();
       x = new THREE.Vector3(0, 1, 0);
@@ -1223,7 +1571,11 @@ function createViewer3D(container, mode, opts = {}) {
       if (z.lengthSq() < 1e-4) z.set(1, 0, 0);
       z.normalize(); x = new THREE.Vector3().crossVectors(y, z);
     }
-    const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
+    return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
+  }
+  function setHandQ(h, fa, side, q, wrist) {
+    // p.wrist: wrist flexion (+) / extension (-) in degrees, about the knuckle line (wrist curls).
+    if (wrist) q.multiply(new THREE.Quaternion().setFromAxisAngle(Z, (wrist * Math.PI) / 180));
     handQOf()[side > 0 ? "R" : "L"].copy(q);
     h.pivot.quaternion.copy(fa.quaternion).invert().multiply(q);
     // Spread the hand's roll about the forearm over the two twist bones (a third and two thirds).
@@ -1273,10 +1625,48 @@ function createViewer3D(container, mode, opts = {}) {
   // Rep interpolation plus two 3D-only pose angles (degrees): `twist`, the chest and arms turned
   // about the spine (Russian twist, one-arm rows), and `roll`, the whole body turned about its
   // long axis (side plank).
+  // Multi-key reps: when the exercise gives figure3d.keys (poses between a and b, each with
+  // `at` in 0..1), the rep passes through every key in order, easing into each one (burpee,
+  // box jump, walking lunge). The far arm (arm2) is interpolated too.
   function lerp3(a, b, t) {
-    const p = lerpPose(a, b, t);
-    ["twist", "roll"].forEach((k) => { if (a[k] != null || b[k] != null) p[k] = (a[k] || 0) + ((b[k] || 0) - (a[k] || 0)) * t; });
+    const ks = a._keys;
+    if (ks && b._keys === ks) {
+      let i = 1;
+      while (i < ks.length - 1 && t > ks[i].at) i++;
+      const k0 = ks[i - 1], k1 = ks[i], u = Math.min(1, Math.max(0, (t - k0.at) / Math.max(1e-6, k1.at - k0.at)));
+      return pin(lerp2(k0, k1, fig3.keysEase === "linear" ? u : u * u * (3 - 2 * u)), k0, k1, u);
+    }
+    return pin(lerp2(a, b, t), a, b, t);
+  }
+  // `fix` on the end pose of a stretch (a joint name: ankle, toe, hand, knee, ankle2...): that
+  // joint stays planted while the rest of the body moves (a foot on the floor, hands on a bench).
+  function pin(p, a, b, u) {
+    const k = b.fix;
+    if (!k) return p;
+    const ja = solveSide(a)[k], jb = solveSide(b)[k], jp = solveSide(p)[k];
+    if (!ja || !jb || !jp) return p;
+    p.x += ja[0] + (jb[0] - ja[0]) * u - jp[0]; p.y += ja[1] + (jb[1] - ja[1]) * u - jp[1];
     return p;
+  }
+  function lerp2(a, b, t) {
+    const p = lerpPose(a, b, t);
+    ["twist", "roll", "shrug", "wrist", "flat"].forEach((k) => { if (a[k] != null || b[k] != null) p[k] = (a[k] || 0) + ((b[k] || 0) - (a[k] || 0)) * t; });
+    if (a.arm2 || b.arm2) {
+      const m = (k) => { const x = (a.arm2 || a)[k] ?? 0, y = (b.arm2 || b)[k] ?? 0; return x + (y - x) * t; };
+      p.arm2 = { ua: m("ua"), fa: m("fa"), abd: m("abd") };
+    }
+    return p;
+  }
+  // Key poses for a multi-key rep, built like poseA/poseB (`over` = the mistake's overrides).
+  function withKeys(A, B, keys, over) {
+    if (!keys || !keys.length) return;
+    const list = [{ ...A, at: 0 }, ...keys.map((k, i) => ({ ...A, ...k, ...((over && over[i]) || {}), view: undefined })), { ...B, at: 1 }];
+    // A key with `fix` starts where the previous key left that joint (the foot or hand stays put).
+    for (let i = 1; i < list.length; i++) {
+      const k = list[i].fix, was = k && solveSide(list[i - 1])[k], now = k && solveSide(list[i])[k];
+      if (was && now) { list[i].x += was[0] - now[0]; list[i].y += was[1] - now[1]; }
+    }
+    A._keys = B._keys = list;
   }
   function pose(p, t, target = body, ends = reachEnds) {
     cur = target; curEnds = ends;
@@ -1299,7 +1689,7 @@ function createViewer3D(container, mode, opts = {}) {
     [1, -1].forEach((side) => {
       const s = side > 0 ? "R" : "L";
       // Shoulder joint: out to the side and slightly down from the top of the torso.
-      const sh = shoulderC.clone().add(new THREE.Vector3(0, -3, 0).applyQuaternion(torsoQ)).add(lateral.clone().multiplyScalar(side * VIEW3D.shoulderHalf));
+      const sh = shoulderC.clone().add(new THREE.Vector3(0, -3 + (p.shrug || 0), 0).applyQuaternion(torsoQ)).add(lateral.clone().multiplyScalar(side * VIEW3D.shoulderHalf));
       let extra = null;
       if (abd) {
         const axis = p.abdAxis === "spine" ? new THREE.Vector3(0, 1, 0).applyQuaternion(torsoQ) : new THREE.Vector3(1, 0, 0).applyQuaternion(torsoQ);
@@ -1307,19 +1697,25 @@ function createViewer3D(container, mode, opts = {}) {
       }
       const uaLen = ik ? 30 : 30 * (p.armsOut && !abd ? 0.8 : 1);
       cur.parts["upperArm" + s].scale.set(1, uaLen / 30, 1);
-      if (ik) {
+      if (ik && !(ik.only && ik.only !== s)) {
         // Two-bone reach: the hand goes where the 2D pose puts it, at the grip width,
         // and the elbow bends toward the pole (out to the side, like a real press).
         // Hanging and supported moves keep a fixed grip on the bar (the 2D hand, at the grip
         // width); lever machines move the hand on the lever's circle; others reach on an arc
         // around the shoulder.
-        const H = t == null || fig3.hold === "hands" ? to3(j.hand).setZ(side * (p.gz ?? ik.grip ?? 22))
+        // ik.fixed: the hands stay where the start pose puts them (on a bench, the floor or a fixed
+        // bar) while the body moves; ik.direct: the hand follows the 2D pose (multi-key reps).
+        const H = ik.fixed ? to3(curEnds[0].j.hand).setZ(side * (curEnds[0].gz ?? ik.grip ?? 22))
+          : t == null || fig3.hold === "hands" || ik.direct ? to3(j.hand).setZ(side * (p.gz ?? ik.grip ?? 22))
           : ik.arc ? arcTarget(t, side)
           : to3(j.shoulder).add(new THREE.Vector3(0, 0, side * VIEW3D.shoulderHalf)).add(reachTarget(t, side));
         // Both hands on one handle (Pallof press): one fist above the other at the midline.
         if (ik.stack) { H.z = side * 0.6; H.y += side * ik.stack; }
         if (handMode === "flat") H.y = Math.max(H.y, 2.6);
         const pole = new THREE.Vector3(...(ik.pole || [-0.5, -0.6, 1])); pole.z *= side; pole.applyQuaternion(torsoQ);
+        // ik.reach > 1 stretches the reach from the shoulder (the 2D arm is a little shorter than
+        // the 3D one, so a hanging arm would otherwise stay bent).
+        if (ik.reach) H.sub(sh).multiplyScalar(ik.reach).add(sh);
         solveArm(cur.parts["upperArm" + s], cur.parts["forearm" + s], sh, H, pole, handMode === "flat" ? 27 : 33);
       } else {
         // A far (left) arm with its own angles (p.arm2: { ua, fa, abd? }), e.g. a hand braced on a bench.
@@ -1329,7 +1725,7 @@ function createViewer3D(container, mode, opts = {}) {
         const elbow = endOf(cur.parts["upperArm" + s], uaLen);
         placeAngle(cur.parts["forearm" + s], elbow, a2 ? a2.fa : p.fa, ex2);
       }
-      orientHand(cur.hands[s], cur.parts["forearm" + s], side, torsoQ);
+      orientHand(cur.hands[s], cur.parts["forearm" + s], side, torsoQ, p.wrist, p.flat);
       const hip3 = hip.clone().add(lateral.clone().multiplyScalar(side * VIEW3D.hipHalf));
       const far = side < 0 && p.t2 != null;
       const thighDir = far ? p.t2 : p.thigh + 180;
@@ -1528,7 +1924,7 @@ function createViewer3D(container, mode, opts = {}) {
     }
     fb.mine = makeChain(chain.length, BAD, 0.95, 0.5);
     fb.ideal = makeChain(chain.length, GOOD, 0.85, 0.42);
-    if (err.type !== "range") fb.tags.push([tag("Your form", "bad"), () => fb.yourAt], [tag("Optimal", "good"), () => fb.idealAt]);
+    if (err.type !== "range") fb.tags.push([tag("Common mistake", "bad"), () => fb.yourAt], [tag("Recommended", "good"), () => fb.idealAt]);
     // Arrow from where the joint is toward where it should be.
     const arrowMat = guideMat(GOOD, 0);
     fb.arrow = { shaft: new THREE.Mesh(guideCyl, arrowMat), head: new THREE.Mesh(coneGeo, arrowMat), mat: arrowMat };
@@ -1705,6 +2101,7 @@ function createViewer3D(container, mode, opts = {}) {
     const w = hit.object.userData.weights;
     let best = null, bw = 0.35;
     Object.keys(w).forEach((id) => {
+      if (typeof MUSCLES !== "undefined" && !MUSCLES[id]) return; // a finer id this page has no name for
       const v = Math.max(w[id][hit.face.a], w[id][hit.face.b], w[id][hit.face.c]);
       if (v > bw) { bw = v; best = id; }
     });
@@ -1777,8 +2174,8 @@ function createViewer3D(container, mode, opts = {}) {
   // Rep tempo like a real lifter: pause, controlled move to b, brief hold, slower return.
   const TEMPO = [[0.1, 0, 0], [0.42, 0, 1], [0.54, 1, 1], [1, 1, 0]]; // [end of phase, from, to]
   const smoother = (x) => x * x * x * (x * (x * 6 - 15) + 10);
-  function easeT(now, len = 4600) {
-    const raw = (now % len) / len;
+  // raw: position in one rep cycle (0..1) -> blend between pose a (0) and pose b (1).
+  function shapeT(raw) {
     let start = 0;
     for (const [end, from, to] of TEMPO) {
       if (raw <= end) return from + (to - from) * smoother((raw - start) / (end - start));
@@ -1786,7 +2183,72 @@ function createViewer3D(container, mode, opts = {}) {
     }
     return 0;
   }
+  function easeT(now, len = 4600) { return shapeT((now % len) / len); }
   const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const END_AT = (TEMPO[1][0] + TEMPO[2][0]) / 2; // the middle of the hold at pose b
+
+  // ----- Playback clock -----
+  // clockMs advances only while playing (times the speed); the rep position is clockMs / period.
+  // With reduced motion the rep starts paused at its end position.
+  const play = { on: !reduce, speed: 1, clockMs: 0, last: 0, rep: 0, cbs: [], phases: [], phaseIndex: -1 };
+  const cycleOf = () => (period > 0 ? (play.clockMs % period) / period : 0);
+  // Default phase labels from the tempo schedule and which way the rep goes: is a -> b the
+  // working (concentric) half or the lowering (eccentric) half? Wording follows the movement.
+  const WORDS = {
+    push: ["Pressing", "Lowering", "Lockout", "Pause"], pull: ["Pulling", "Releasing", "Squeeze", "Stretch"],
+    squat: ["Driving up", "Descending", "Stand tall", "Bottom"], lunge: ["Driving up", "Descending", "Stand tall", "Bottom"],
+    hinge: ["Hips through", "Hinging down", "Lockout", "Stretch"], rotation: ["Rotating", "Returning", "End range", "Hold"],
+    "anti-rotation": ["Pressing out", "Returning", "Hold", "Hold"], carry: ["Walking", "Walking", "Hold", "Hold"],
+    plyometric: ["Exploding up", "Loading", "Top", "Landing"], conditioning: ["Driving", "Returning", "Top", "Reset"],
+    isolation: ["Lifting", "Lowering", "Squeeze", "Stretch"]
+  };
+  function patternOf(e) {
+    if (e.pattern && WORDS[e.pattern]) return e.pattern;
+    const n = (e.name || "").toLowerCase();
+    if (/squat|leg press|hack|wall sit/.test(n)) return "squat";
+    if (/lunge|split|step-up/.test(n)) return "lunge";
+    if (/deadlift|hinge|good morning|hip thrust|bridge|swing|hyperextension|back extension/.test(n)) return "hinge";
+    if (/row|pull|chin|face|shrug/.test(n)) return "pull";
+    if (/press|push|dip|bench/.test(n)) return "push";
+    if (/twist|woodchop|rotation/.test(n)) return "rotation";
+    return "isolation";
+  }
+  function defaultPhases() {
+    const p = patternOf(ex), w = WORDS[p] || WORDS.isolation;
+    // Concentric first when the working point rises against gravity (or, for pulls, comes in).
+    let concentricFirst = true;
+    try {
+      const A = solveSide(poseA), B = solveSide(poseB), y = (j, k) => (j[k] ? j[k][1] : 0);
+      const pick = (k) => Math.hypot((A[k] || [0])[0] - (B[k] || [0])[0], y(A, k) - y(B, k));
+      const key = ["hand", "hip", "ankle"].reduce((a, k) => (pick(k) > pick(a) ? k : a), "hand");
+      const rises = y(B, key) < y(A, key) - 1; // svg y grows downward
+      if (p === "squat" || p === "lunge" || p === "hinge") concentricFirst = y(B, "hip") < y(A, "hip") - 1;
+      else if (p === "pull") {
+        const d = (J) => Math.hypot(J.hand[0] - J.shoulder[0], J.hand[1] - J.shoulder[1]);
+        concentricFirst = A.hand && A.shoulder ? d(B) < d(A) : true;
+      } else if (p === "push") {
+        const d = (J) => Math.hypot(J.hand[0] - J.shoulder[0], J.hand[1] - J.shoulder[1]);
+        concentricFirst = A.hand && A.shoulder ? d(B) > d(A) : true;
+      } else if (ex.equip !== "cable") concentricFirst = rises || Math.abs(y(B, key) - y(A, key)) < 2;
+    } catch (e) { concentricFirst = true; }
+    const [con, ecc, topHold, lowHold] = w;
+    const lab = concentricFirst ? ["Start", con, topHold, ecc] : ["Start", ecc, lowHold, con];
+    let s = 0;
+    return TEMPO.map(([end], i) => { const ph = { label: lab[i], t0: s, t1: end }; s = end; return ph; });
+  }
+  function phasesFor() {
+    const tl = Array.isArray(ex.phaseTimeline) ? ex.phaseTimeline.filter((p) => p && p.label != null && isFinite(p.t0) && isFinite(p.t1)) : [];
+    return tl.length ? tl.map((p) => ({ label: String(p.label), t0: +p.t0, t1: +p.t1 })) : defaultPhases();
+  }
+  function phaseAt(u) {
+    const ph = play.phases;
+    for (let i = 0; i < ph.length; i++) if (u >= ph[i].t0 && u < ph[i].t1) return i;
+    return ph.length ? (u >= ph[ph.length - 1].t1 ? ph.length - 1 : 0) : -1;
+  }
+  function seekCycle(u) {
+    u = Math.min(0.9999, Math.max(0, +u || 0));
+    play.clockMs = play.rep * period + u * period;
+  }
 
   // Stage colors follow the page style (a dark lab stage or a light studio).
   let frame = 0, stageDark = null, stageAt = -1e9;
@@ -1795,7 +2257,7 @@ function createViewer3D(container, mode, opts = {}) {
     if (dark === stageDark) return;
     stageDark = dark;
     floor.material.color.setScalar(dark ? 1.3 : 1.9);
-    rim.intensity = dark ? 2.2 : 1.3;
+    rim.intensity = dark ? 1.6 : 1.1;
     renderer.toneMappingExposure = dark ? 1.15 : 1.05;
   }
 
@@ -1807,16 +2269,27 @@ function createViewer3D(container, mode, opts = {}) {
     if (now - stageAt > 400) { stageAt = now; readStage(); }
     if (!shownAt) shownAt = now;
     const k = reduce ? 5000 : now - shownAt; // time since this exercise appeared
-    const t = heldAt ?? (reduce ? 1 : easeT(now, period));
+    // Playback: advance the rep clock, count completed reps, report the phase.
+    const step = play.last ? Math.min(250, Math.max(0, now - play.last)) : 0;
+    play.last = now;
+    if (play.on && heldAt == null) play.clockMs += step * play.speed;
+    play.rep = Math.floor(play.clockMs / period);
+    const cyc = cycleOf();
+    const t = heldAt ?? shapeT(cyc);
+    const pi = phaseAt(cyc);
+    if (play.cbs.length) {
+      const info = { t: cyc, phase: pi >= 0 ? play.phases[pi].label : "", phaseIndex: pi, rep: play.rep, playing: play.on, ready: !!body.skin };
+      play.cbs.forEach((cb) => { try { cb(info); } catch (e) {} });
+    }
     if (ghost) {
-      const gt = heldAt ?? (reduce ? 1 : easeT(now));
+      const gt = heldAt ?? shapeT(period === 4600 ? cyc : (play.clockMs % 4600) / 4600);
       pose(lerp3(ghostA, ghostB, gt), fig3.ik ? gt : null, ghost, ghostEnds);
       ghost.mat.uniforms.opacity.value = (ghostOn ? 0.3 : 0) * smooth((k - 450) / 650);
     }
     pose(lerp3(poseA, poseB, t), fig3.ik ? t : null);
     // Activation follows the effort of the rep: strongest while the weight is moving.
     const speed = lastNow ? Math.abs(t - lastT) / Math.max(1, now - lastNow) : 0;
-    effort += ((reduce ? 1 : 0.55 + 0.45 * Math.min(1, speed / 0.0009)) - effort) * 0.08;
+    effort += ((reduce || !play.on ? 1 : 0.55 + 0.45 * Math.min(1, speed / 0.0009)) - effort) * 0.08;
     lastT = t; lastNow = now;
     const u = fiberUniforms;
     u.uTime.value = reduce ? 0 : now / 1000; u.uEffort.value = effort;
@@ -1830,7 +2303,7 @@ function createViewer3D(container, mode, opts = {}) {
     const breath = 1 + 0.018 * Math.sin(now / 650);
     body.parts.upperTorso.scale.x = breath; body.parts.upperTorso.scale.z = 1 + 0.009 * Math.sin(now / 650);
     // The camera glides to each new framing instead of jumping (and follows a drag at once).
-    const aim = closeUp ? closeUp.at : target, d = closeUp ? dist / closeUp.zoom : dist;
+    const aim = (closeUp ? closeUp.at : target).clone().add(pan), d = (closeUp ? dist / closeUp.zoom : dist) / zoomU;
     const dt = Math.min(0.1, Math.max(0, (now - (cam.at || now)) / 1000)); cam.at = now;
     const kk = cam.snap || reduce ? 1 : 1 - Math.exp(-dt / 0.38);
     cam.snap = false;
@@ -1864,6 +2337,12 @@ function createViewer3D(container, mode, opts = {}) {
     poseB = { ...extra, ...fig.b, ...fig.mix, ...(fault && fault.b) };
     ghostA = { ...extra, ...fig.a, ...fig.mix }; ghostB = { ...extra, ...fig.b, ...fig.mix };
     poseA.view = poseB.view = ghostA.view = ghostB.view = undefined;
+    // Multi-key reps (see lerp3): keys start from the extras and 3D-only angles of the start pose.
+    if (fig.keys) {
+      const base = { ...extra, ...fig.mix };
+      withKeys(poseA, poseB, fig.keys.map((k) => ({ ...base, ...k })), fault && fault.keys);
+      withKeys(ghostA, ghostB, fig.keys.map((k) => ({ ...base, ...k })));
+    }
     reachEnds = [poseA, poseB].map((q) => ({ j: solveSide(q), gz: q.gz }));
     ghostEnds = [ghostA, ghostB].map((q) => ({ j: solveSide(q), gz: q.gz }));
     const err = form && form.error;
@@ -1879,7 +2358,11 @@ function createViewer3D(container, mode, opts = {}) {
     }
     resize();
     // Each exercise has its best camera angle; the camera glides there.
-    [yaw, pitch] = fig.view || ex.view || [VIEW3D.yaw, VIEW3D.pitch];
+    [yaw, pitch] = defaultView();
+    zoomU = 1; pan.set(0, 0, 0); closeUp = null;
+    // The rep starts from the top (paused at the end position with reduced motion).
+    play.phases = phasesFor();
+    play.rep = 0; play.clockMs = reduce ? END_AT * period : 0;
     frameCamera();
     measureRep();
     viewer.analysis = null;
@@ -1890,11 +2373,57 @@ function createViewer3D(container, mode, opts = {}) {
     shownAt = 0;
   }
 
+  // Named camera views (the body faces +x; the camera at +z sees its right side).
+  const NAMED_VIEWS = { front: Math.PI / 2, back: -Math.PI / 2, right: 0, side: 0, left: Math.PI, threeQuarter: 0.72, "three-quarter": 0.72, threequarter: 0.72 };
+  function defaultView() {
+    const c = ex && ex.camera;
+    if (c && (isFinite(c.yaw) || NAMED_VIEWS[c.view] != null)) {
+      return [isFinite(c.yaw) ? +c.yaw : NAMED_VIEWS[c.view], isFinite(c.pitch) ? +c.pitch : VIEW3D.pitch];
+    }
+    return (fig3 && fig3.view) || (ex && ex.view) || [VIEW3D.yaw, VIEW3D.pitch];
+  }
+  function resetCamera() { [yaw, pitch] = defaultView(); zoomU = 1; pan.set(0, 0, 0); closeUp = null; }
+
   raf = requestAnimationFrame(tick);
   const viewer = {
     setExercise,
     analysis: null, // after setExercise on a mistake: { label, your, optimal } for the biggest difference
-    resetView() { [yaw, pitch] = (fig3 && fig3.view) || (ex && ex.view) || [VIEW3D.yaw, VIEW3D.pitch]; },
+    resetView() { resetCamera(); },
+    // ----- Playback -----
+    play() { play.on = true; heldAt = null; },
+    pause() { play.on = false; },
+    togglePlay() { play.on = !play.on; if (play.on) heldAt = null; return play.on; },
+    get isPlaying() { return play.on; },
+    setSpeed(x) { x = +x; play.speed = isFinite(x) && x > 0 ? Math.min(3, x) : 1; },
+    get speed() { return play.speed; },
+    // t in [0, 1] over one rep cycle (keeps the rep count).
+    seek(t) { heldAt = null; seekCycle(t); },
+    get time() { return cycleOf(); },
+    get rep() { return play.rep; },
+    get phases() { return play.phases.map((p) => ({ ...p })); },
+    get phaseIndex() { return phaseAt(cycleOf()); },
+    // Pause and move one twenty-fourth of the cycle forward (+1) or back (-1).
+    step(dir) {
+      play.on = false; heldAt = null;
+      const n = 24, u = cycleOf(), i = Math.round(u * n) + (dir < 0 ? -1 : 1);
+      seekCycle((((i % n) + n) % n) / n);
+    },
+    // The start position (pose a) or the end position (pose b, middle of its hold).
+    jumpTo(where) { play.on = false; heldAt = null; seekCycle(where === "end" ? END_AT : 0); },
+    restart() { heldAt = null; play.rep = 0; play.clockMs = 0; },
+    // cb({ t, phase, phaseIndex, rep, playing, ready }) every frame; returns an unsubscribe function.
+    onFrame(cb) { if (typeof cb !== "function") return () => {}; play.cbs.push(cb); return () => { play.cbs = play.cbs.filter((f) => f !== cb); }; },
+    get ready() { return !!body.skin; },
+    // ----- Camera -----
+    zoomBy(f) { zoomU = clampZoom(zoomU * (+f || 1)); },
+    getCamera() { return { yaw, pitch, zoom: zoomU, pan: [pan.x, pan.y, pan.z] }; },
+    setCamera(c) {
+      if (!c) return;
+      if (isFinite(c.yaw)) yaw = +c.yaw; if (isFinite(c.pitch)) pitch = +c.pitch;
+      if (isFinite(c.zoom)) zoomU = clampZoom(+c.zoom);
+      if (Array.isArray(c.pan)) pan.set(+c.pan[0] || 0, +c.pan[1] || 0, +c.pan[2] || 0);
+      cam.yaw = yaw; cam.pitch = pitch; cam.snap = true;
+    },
     // Male or female athlete: the body's surface changes under a scan sweep; the exercise, pose,
     // camera, activation and form analysis all stay as they are.
     get athlete() { return athlete; },
@@ -1902,7 +2431,12 @@ function createViewer3D(container, mode, opts = {}) {
       sex = sex === "female" ? "female" : "male";
       if (sex === athlete) return;
       athlete = sex;
-      body.setAthlete(sex, () => { domBone = null; if (ex) { setActivation(); fitScene(); } shownAt = 0; });
+      // Keep the framing the person is looking at (the new body is refitted, the camera is not).
+      body.setAthlete(sex, () => {
+        domBone = null;
+        if (ex) { const keepT = target.clone(), keepD = dist; setActivation(); fitScene(); target.copy(keepT); dist = keepD; }
+        shownAt = 0;
+      });
       if (ghost) ghost.setAthlete(sex);
     },
     // Live biomechanics at the current moment of the rep: joint angles in degrees (null for joints
@@ -1918,11 +2452,24 @@ function createViewer3D(container, mode, opts = {}) {
     },
     // Turn the camera to a given angle (radians around the body, and up/down).
     // zoom > 1 moves in on a point atY above the framed center (for close-ups of the body).
-    setView(y, p, zoom, atY) { yaw = y; if (p != null) pitch = p; closeUp = zoom > 1 ? { zoom, at: new THREE.Vector3(target.x, target.y + (atY || 0), target.z) } : null; },
+    // Or a named view: "front" | "back" | "left" | "right" | "threeQuarter" | "reset".
+    setView(y, p, zoom, atY) {
+      if (typeof y === "string") {
+        if (y === "reset") { resetCamera(); return; }
+        if (NAMED_VIEWS[y] == null) return;
+        const to = NAMED_VIEWS[y]; yaw = to + 2 * Math.PI * Math.round((cam.yaw - to) / (2 * Math.PI)); pitch = p != null ? p : y === "threeQuarter" ? 0.16 : 0.08; pan.set(0, 0, 0);
+        return;
+      }
+      yaw = y; if (p != null) pitch = p; closeUp = zoom > 1 ? { zoom, at: new THREE.Vector3(target.x, target.y + (atY || 0), target.z) } : null;
+    },
     // Show one muscle on its own (null for all the exercise's muscles).
     focusMuscle(id) { focusId = id || null; if (ex) setActivation(); },
     // Fiber detail: show each working muscle's fiber direction clearly (off: only a faint hint).
     setFibers(on) { fibersOn = !!on; },
+    // Display mode (BODY): "surface" = bare body and clothing only, "map" = activation (default),
+    // "fiber" = activation plus the illustrative fiber-direction overlay.
+    setDisplayMode(m) { display.mode = m === "surface" || m === "fiber" ? m : "map"; display.map = display.mode === "surface" ? 0 : 1; fibersOn = display.mode === "fiber"; },
+    get displayMode() { return display.mode; },
     // Hold the rep still at a moment t (0 = start, 1 = end of the movement); null plays it.
     holdAt(t) { heldAt = t == null ? null : Math.min(1, Math.max(0, t)); },
     // Show or hide the optimal-form ghost over a mistake.

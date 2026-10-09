@@ -295,7 +295,7 @@ EXERCISES.push(
     good: { cue: "Hips and shoulders lower together; the back stays flat all the way out and back.", highlight: ["spine", "hip"] },
     bad: { cue: "At full extension the hips drop and the lower back arches, loading the spine instead of the abs.", highlight: ["spine", "back"],
       b: { thigh: 80, torso: 72, bend: -10, neck: 74 } },
-    figure3d: { kit: "pcAbWheel", grip: "over", view: [0.6, 0.12] },
+    figure3d: { kit: "pcAbWheel", grip: "over", view: [0.6, 0.12], ik: { grip: 15, direct: true, pole: [0.2, -1, 0.5] } },
     figure: { load: { type: "none" },
       a: { x: 60, y: 181, anchor: "knee", foot: -110, shin: 90, thigh: 8, torso: 58, neck: 72, ua: 168, fa: 168 },
       b: { x: 60, y: 181, anchor: "knee", foot: -110, shin: 90, thigh: 62, torso: 75, neck: 82, ua: 112, fa: 114 } }

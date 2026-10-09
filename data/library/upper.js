@@ -291,7 +291,7 @@
       bad: { cue: "Yanking the bar up to the chin forces the elbows high above the shoulders and pinches the shoulder joint.", highlight: ["shoulder", "upperArm"],
         b: { ua: 80, fa: 245 } },
       bad3d: { b: { ...STAND, ua: 160, fa: 4 } },
-      figure3d: { kit: "barbell", bar: { r: 16 }, ik: { grip: 15, arc: 1500, pole: [-1, 0.75, 0.65] },
+      figure3d: { kit: "barbell", bar: { r: 16 }, ik: { grip: 15, arc: 1500, reach: 1.1, pole: [-1, 0.75, 0.65] },
         a: { ...STAND, ua: 172, fa: 172 }, b: { ...STAND, ua: 177.5, fa: 27 } },
       figure: { armsOut: true, load: { type: "barbell", r: 14 },
         a: { ...STAND, ua: 172, fa: 172 }, b: { ...STAND, ua: 95, fa: 222 } }
@@ -342,7 +342,9 @@
       good: { cue: "Arms hang straight down behind the body. Only the forearms move.", highlight: ["upperArm", "elbow"] },
       bad: { cue: "The elbows swing forward as you curl, so the front delts lift the weight and the long head loses its stretch.", highlight: ["upperArm", "shoulder"],
         b: { ua: 128, fa: 0 } },
-      figure3d: { kit: "upInclineCurl", grip: "under", abd: -12 },
+      // A steeper back (about 55°) keeps the hanging dumbbells clear of the floor.
+      figure3d: { kit: "upInclineCurl", grip: "under", abd: -12,
+        a: { ...INCLINE45, torso: -35, neck: -30, ua: 182, fa: 178 }, b: { ...INCLINE45, torso: -35, neck: -30, ua: 180, fa: 36 } },
       figure: { props: INCLINE_PROPS, load: { type: "dumbbell" },
         a: { ...INCLINE45, ua: 182, fa: 180 }, b: { ...INCLINE45, ua: 180, fa: 36 } }
     },
