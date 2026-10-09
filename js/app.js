@@ -37,19 +37,20 @@ function parseHash() {
   return { page: parts[0] || "", params: parts.slice(1), query: new URLSearchParams(query || "") };
 }
 function renderExercise(r) {
-  const ex = exByAny(r.params[0] || "");
+  // #/studio with no exercise opens the last one viewed (or a default).
+  const ex = exByAny(r.params[0] || "") || (!r.params[0] && r.page === "studio" ? (Store.recent().map(exByAny).find(isListed) || BY_NAME["Barbell bench press"] || ALL_EXERCISES()[0]) : null);
   if (!ex) return notFound();
   Store.pushRecent(ex.name);
   document.title = ex.name + " · Rep Sheet";
   return renderDetail(ex, ctx);
 }
 const PAGES = {
-  "": renderHome, library: renderLibrary, exercise: renderExercise, muscles: (r) => renderMuscles(r.params, ctx),
-  analysis: renderAnalysis, favorites: renderFavorites, recent: renderRecent, compare: renderCompare, plans: renderPlans,
-  my: renderFavorites
+  "": renderHome, library: renderLibrary, exercise: renderExercise, studio: renderExercise, anatomy: renderAnatomy,
+  muscles: (r) => renderMuscles(r.params, ctx), form: renderForm, analysis: renderForm,
+  favorites: renderFavorites, recent: renderRecent, compare: renderCompare, plans: renderPlans, my: renderFavorites
 };
-const TITLES = { library: "Exercise Library", muscles: "Muscle Explorer", analysis: "Exercise Analysis", favorites: "Favorites", recent: "Recently Viewed", compare: "Compare exercises", plans: "Sample plans" };
-const NAV_OF = { "": "", library: "library", exercise: "library", muscles: "muscles", analysis: "analysis", favorites: "favorites", my: "favorites", recent: "recent" };
+const TITLES = { library: "Exercise Library", anatomy: "3D Anatomy", muscles: "Muscle Explorer", form: "Form & Technique", analysis: "Form & Technique", favorites: "Favorites", recent: "Recently Viewed", compare: "Exercise Comparison", plans: "Sample plans" };
+const NAV_OF = { "": "", library: "library", exercise: "studio", studio: "studio", anatomy: "anatomy", muscles: "muscles", form: "form", analysis: "form", compare: "compare", favorites: "favorites", my: "favorites", recent: "favorites" };
 function highlightNav() {
   const { page } = parseHash();
   $$(".nav a").forEach((a) => {

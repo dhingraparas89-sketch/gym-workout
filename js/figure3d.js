@@ -1316,8 +1316,11 @@ function createViewer3D(container, mode, opts = {}) {
   function resize() {
     const w = container.clientWidth || 300, h = container.clientHeight || w;
     renderer.setSize(w, h, false);
+    const was = camera.aspect;
     camera.aspect = w / h;
     camera.updateProjectionMatrix();
+    // The framing depends on the stage's shape: refit when it changes (phone rotation, layout).
+    if (lastFrame && fitted && container.clientWidth && Math.abs(camera.aspect - was) / was > 0.04) frameScene(lastFrame);
   }
   const ro = window.ResizeObserver ? new ResizeObserver(resize) : null;
   if (ro) ro.observe(container);
@@ -1483,20 +1486,28 @@ function createViewer3D(container, mode, opts = {}) {
   }
 
   // Fit the floor, then build the exercise's kit around the body.
-  function fitScene() {
+  function fitScene(again) {
     clearEquipment();
     fitted = false;
+    if (!again) body.clear = null;
     if (!body.skin || !ex) return;
     const kitName = fig3.kit || "none";
-    const S = sampleRep(8);
-    const ctx = makeCtx(S);
+    fitOnBody();
+    let S = sampleRep(8);
+    let ctx = makeCtx(S);
     const feet = (n) => n.startsWith("foot") || n.startsWith("shin");
     // The floor goes where the body stands: under the soles, under the whole body for floor
     // exercises, or below the hanging feet.
     const ground = GYM3D.kits.groundOf(kitName, fig3);
+    const onMat = fig3.mat || kitName === "mat" ? 1.5 : 0;
     if (typeof ground === "function") floorY = ground(ctx);
     else if (ground === "feet") floorY = ctx.lowest({}, feet);
-    else if (ground === "body") floorY = ctx.lowest({}) - (fig3.mat ? 1.5 : 0);
+    else if (ground === "body" && fig3.hand === "flat") {
+      // Palms on the floor: the floor is set by the rest of the body, then the hands are placed
+      // on it (see supportY in pose) and the rep is sampled again.
+      floorY = ctx.lowest({}, (n) => !/^(hand|forearm|twist)/.test(n)) - onMat;
+      S = sampleRep(8); ctx = makeCtx(S);
+    } else if (ground === "body") floorY = ctx.lowest({}) - onMat;
     else if (ground === "hang") floorY = Math.min(ctx.lowest({}) - 18, (holdAt ? holdAt.y : 200) - GYM3D.kits.hangOf(kitName));
     else floorY = 0;
     ctx.floorY = floorY;
@@ -1504,12 +1515,68 @@ function createViewer3D(container, mode, opts = {}) {
     const P = GYM3D.Parts(equipment, floorY);
     ctx.P = P;
     rig = GYM3D.kits.build(kitName, ctx) || null;
+    // Held weights (dumbbells, kettlebells) must clear the thighs and trunk: if one sinks into the
+    // body anywhere in the rep, swing that arm out just enough and fit the scene again.
+    if (!again && rig && measureClearance(S)) { fitScene(true); return; }
     // Soft contact shadows under every foot of the equipment.
     contactShadows(P.shadows);
     buildPaths();
     fitted = true;
     pose(lerp3(poseA, poseB, 0), fig3.ik ? 0 : null);
     frameScene(ctx);
+  }
+
+  // How deep each hand's implement goes into the body (not the arms) over the sampled rep; sets
+  // body.clear = { R: degrees, L: degrees } of extra arm swing. Returns true when that is needed.
+  function measureClearance(S) {
+    const c = ex.animation && ex.animation.contact;
+    if (!c || (c.hands !== "both" && c.hands !== "R") || fig3.clear === false) return false;
+    const meshes = [];
+    equipment.updateMatrixWorld(true);
+    equipment.traverse((o) => { if (o.isMesh && !o.isInstancedMesh) meshes.push({ o, m0: o.matrixWorld.clone() }); });
+    const fr = (s) => ({ t: s.t, grip: s.grip, axis: s.axis, handQ: s.handQ, J: s.J });
+    rig.update(fr(S[Math.floor(S.length / 2)]));
+    equipment.updateMatrixWorld(true);
+    // Parts that move with the rep and sit within reach of a hand: the held implement.
+    const held = meshes.filter((m) => !m.o.matrixWorld.equals(m.m0)).map((m) => {
+      if (!m.o.geometry.boundingBox) m.o.geometry.computeBoundingBox();
+      return m;
+    });
+    if (!held.length || held.length > 60) return false;
+    const names = body.boneNames, dom = dominantBones(), arm = names.map((n) => /^(upperArm|forearm|hand|twist)/.test(n));
+    const need = { R: 0, L: 0 }, inv = new THREE.Matrix4(), q = new THREE.Vector3(), c3 = new THREE.Vector3(), sc = new THREE.Vector3();
+    S.forEach((smp) => {
+      rig.update(fr(smp)); equipment.updateMatrixWorld(true);
+      const pts = smp.pts;
+      held.forEach((h) => {
+        const bb = h.o.geometry.boundingBox, mw = h.o.matrixWorld;
+        // A hand's own implement (a dumbbell): its group sits at that grip. Bars held in both
+        // hands sit between them and are never pushed away by swinging the arms.
+        let top = h.o; while (top.parent && top.parent !== equipment) top = top.parent;
+        const tp = top.getWorldPosition(c3);
+        const side = tp.distanceTo(smp.grip.R) <= tp.distanceTo(smp.grip.L) ? "R" : "L";
+        if (tp.distanceTo(smp.grip[side]) > 12) return;
+        bb.getCenter(c3).applyMatrix4(mw);
+        sc.setFromMatrixScale(mw);
+        const rad = bb.getSize(q).multiply(sc).length() / 2;
+        inv.copy(mw).invert();
+        for (let i = 0, v = 0; i < pts.length; i += 3, v++) {
+          if (arm[dom[v]]) continue;
+          if (Math.abs(pts[i] - c3.x) > rad || Math.abs(pts[i + 1] - c3.y) > rad || Math.abs(pts[i + 2] - c3.z) > rad) continue;
+          q.set(pts[i], pts[i + 1], pts[i + 2]).applyMatrix4(inv);
+          const dx = Math.min(q.x - bb.min.x, bb.max.x - q.x) * sc.x, dy = Math.min(q.y - bb.min.y, bb.max.y - q.y) * sc.y, dz = Math.min(q.z - bb.min.z, bb.max.z - q.z) * sc.z;
+          const d = Math.min(dx, dy, dz);
+          if (d > 0.6) {
+            // Only what an arm swing can fix: depth measured sideways (across the body).
+            const reach = Math.max(25, smp.grip[side].distanceTo(smp.J.shoulder));
+            need[side] = Math.max(need[side], Math.min(18, ((d + 1.2) / reach) * 57.3));
+          }
+        }
+      });
+    });
+    if (need.R < 0.5 && need.L < 0.5) return false;
+    body.clear = need;
+    return true;
   }
 
   // ----- Posing -----
@@ -1679,6 +1746,105 @@ function createViewer3D(container, mode, opts = {}) {
     }
     A._keys = B._keys = list;
   }
+  // ----- Planted feet -----
+  // A foot whose 2D ankle stays put over the whole rep (every key) is planted: its 3D ankle is
+  // held where the start pose put it, and the thigh and shin reach it by two-bone IK (keeping the
+  // knee on the side the pose bends it to). The foot keeps its start toe-out and only pitches.
+  const ank2 = (j, s, p) => (s === "L" && p.t2 != null ? j.ankle2 : j.ankle);
+  function plantLeg(s, side, hip3, j, p, pl, footDir) {
+    const P = cur.parts, th = P["thigh" + s], sh = P["shin" + s], ft = P["foot" + s];
+    const A = to3(ank2(j, s, p)).add(pl.delta);
+    const kneeFK = endOf(th, 42), toA = A.clone().sub(hip3);
+    const d = Math.min(Math.max(toA.length(), 8), 83.9), u = toA.normalize();
+    let w = kneeFK.clone().sub(hip3); w.sub(u.clone().multiplyScalar(w.dot(u)));
+    if (w.lengthSq() < 1e-4) w = new THREE.Vector3(1, 0, 0).sub(u.clone().multiplyScalar(u.x));
+    w.normalize();
+    const h = Math.sqrt(Math.max(0, 42 * 42 - (d / 2) * (d / 2)));
+    const K = hip3.clone().addScaledVector(u, d / 2).addScaledVector(w, h);
+    const rot = (g, from, to) => g.quaternion.premultiply(new THREE.Quaternion().setFromUnitVectors(from.normalize(), to.normalize()));
+    rot(th, endOf(th, 42).sub(hip3), K.clone().sub(hip3));
+    const ankleNow = hip3.clone().addScaledVector(u, d);
+    rot(sh, endOf(sh, 42).sub(sh.position), ankleNow.clone().sub(K));
+    sh.position.copy(K);
+    ft.position.copy(ankleNow);
+    ft.quaternion.setFromAxisAngle(Z, (-footDir * Math.PI) / 180).premultiply(new THREE.Quaternion().setFromAxisAngle(Y, pl.yaw));
+  }
+  // Which feet stay planted for this rep, measured on its start pose (call with the pose list).
+  function calibratePlant(target, list, ends) {
+    target.plant = null;
+    const fs = ex && ex.animation && ex.animation.contact && ex.animation.contact.feet;
+    if (fs === "hang" || fs === "machine" || list.some((q) => q.roll)) return;
+    const plant = {};
+    ["R", "L"].forEach((s) => {
+      const a0 = ank2(solveSide(list[0]), s, list[0]);
+      if (list.every((q) => { const a = ank2(solveSide(q), s, q); return Math.hypot(a[0] - a0[0], a[1] - a0[1]) < 0.5; })) plant[s] = {};
+    });
+    if (!plant.R && !plant.L) return;
+    pose(list[0], fig3.ik ? 0 : null, target, ends);
+    Object.keys(plant).forEach((s) => {
+      const P = target.parts, ank = endOf(P["shin" + s], 42), toe = endOf(P["foot" + s], 10).sub(ank);
+      plant[s].delta = ank.sub(to3(ank2(solveSide(list[0]), s, list[0])));
+      const q = list[0], fd = s === "L" && q.t2 != null ? (q.f2 ?? 90) : (q.foot ?? 90);
+      const bx = Math.sin((fd * Math.PI) / 180), flat = Math.abs(toe.x) + Math.abs(toe.z);
+      plant[s].yaw = flat > 0.5 && Math.abs(bx) > 0.1 ? Math.atan2(-toe.z, toe.x) - (bx < 0 ? Math.PI : 0) : 0;
+    });
+    target.plant = plant;
+  }
+  function alignGrips(p, torsoQ, handMode) {
+    const grip = fig3.grip || "over", c = ex && ex.animation && ex.animation.contact;
+    if (handMode !== "grip" || (grip !== "over" && grip !== "under") || (c && c.hands !== "both") || fig3.alignGrips === false) return;
+    const P = cur.parts, bar = endOf(P.forearmR, 27).sub(endOf(P.forearmL, 27));
+    if (bar.lengthSq() < 1) return;
+    bar.normalize();
+    // Only when the hands are side by side (not one up, one down as in alternating curls).
+    if (Math.abs(bar.dot(new THREE.Vector3(0, 0, 1).applyQuaternion(torsoQ))) < 0.86) return;
+    const z = bar.multiplyScalar(grip === "under" ? 1 : -1);
+    [1, -1].forEach((side) => {
+      const s = side > 0 ? "R" : "L", fa = P["forearm" + s];
+      const y = new THREE.Vector3(0, 1, 0).applyQuaternion(fa.quaternion);
+      // A forearm that points along the bar (upright row top) can't wrap it: blend back to the
+      // plain grip there instead of flipping the hand.
+      const k = 1 - smoothStep(0.55, 0.8, Math.abs(y.dot(z)));
+      if (k <= 0) return;
+      y.sub(z.clone().multiplyScalar(y.dot(z))).normalize();
+      const x = new THREE.Vector3().crossVectors(y, z);
+      const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
+      const q0 = handBasis(fa, side, torsoQ, false);
+      setHandQ(cur.hands[s], fa, side, q0.slerp(q, k), p.wrist);
+    });
+  }
+  // A bar resting on the body (back squat, front squat, good morning, hip thrust): ik.on =
+  // { bone, y, side: "back"|"front", gap? }. The bar's centre sits on the skin of that bone at
+  // height y (cm, along the bone), measured on the athlete's own surface in the start pose, so it
+  // moves with the trunk; the hands grip it at ±ik.grip.
+  let onBody = null;
+  function onBodyTarget(ik, side) {
+    const o = ik.on, bone = cur.parts[o.bone || "upperTorso"];
+    const at = onBody && onBody.key === o ? onBody.at : [o.side === "front" ? 12 : -14, o.y ?? 24];
+    const c = new THREE.Vector3(at[0], at[1], 0).applyQuaternion(bone.quaternion).add(bone.position);
+    return c.add(new THREE.Vector3(0, 0, side * (ik.grip ?? 30)).applyQuaternion(bone.quaternion));
+  }
+  function fitOnBody() {
+    const o = fig3.ik && fig3.ik.on;
+    if (!o || !body.skin) { onBody = null; return; }
+    pose(lerp3(poseA, poseB, 0), 0);
+    const bone = body.parts[o.bone || "upperTorso"], sk = skinWorld(null, null);
+    const inv = new THREE.Matrix4().compose(bone.position, bone.quaternion, new THREE.Vector3(1, 1, 1)).invert();
+    const y0 = o.y ?? 24, dir = o.side === "front" ? 1 : -1, w = o.width ?? 7, q = new THREE.Vector3();
+    let ext = -Infinity;
+    for (let i = 0; i < sk.length; i += 3) {
+      q.set(sk[i], sk[i + 1], sk[i + 2]).applyMatrix4(inv);
+      if (Math.abs(q.z) < w && Math.abs(q.y - y0) < 1.5 && q.x * dir > ext) ext = q.x * dir;
+    }
+    onBody = { key: o, at: [dir * (ext + (o.gap ?? 1.7)), y0] };
+  }
+  const FLAT_IK = { direct: true, grip: 21, pole: [-0.5, -1, 0.7] };
+  const smoothStep = (a, b, x) => { const v = Math.min(1, Math.max(0, (x - a) / (b - a))); return v * v * (3 - 2 * v); };
+  // Height of the surface flat hands rest on: the floor (plus a mat), for floor exercises.
+  function supportY() {
+    const g = GYM3D.kits.groundOf(fig3.kit || "none", fig3);
+    return g === "body" ? floorY + (fig3.mat || fig3.kit === "mat" ? 1.5 : 0) : null;
+  }
   function pose(p, t, target = body, ends = reachEnds) {
     cur = target; curEnds = ends;
     const j = solveSide(p);
@@ -1694,9 +1860,11 @@ function createViewer3D(container, mode, opts = {}) {
     placeAngle(cur.parts.neck, neckBase, p.neck ?? p.torso);
 
     const torsoQ = cur.parts.upperTorso.quaternion;
-    const ik = fig3.ik, handMode = fig3.hand || "grip";
+    // Flat hands always reach their surface by IK (the 2D arm angles alone leave them hovering).
+    const ik = fig3.ik || (fig3.hand === "flat" ? FLAT_IK : null), handMode = fig3.hand || "grip";
     const lateral = new THREE.Vector3(0, 0, 1);
     const abd = ((p.abd || 0) * Math.PI) / 180;
+    const reach = []; // IK arms holding something: re-aimed below so the grip lands on the target
     [1, -1].forEach((side) => {
       const s = side > 0 ? "R" : "L";
       // Shoulder joint: out to the side and slightly down from the top of the torso.
@@ -1716,22 +1884,46 @@ function createViewer3D(container, mode, opts = {}) {
         // around the shoulder.
         // ik.fixed: the hands stay where the start pose puts them (on a bench, the floor or a fixed
         // bar) while the body moves; ik.direct: the hand follows the 2D pose (multi-key reps).
-        const H = ik.fixed ? to3(curEnds[0].j.hand).setZ(side * (curEnds[0].gz ?? ik.grip ?? 22))
+        const H = ik.on ? onBodyTarget(ik, side)
+          : ik.fixed ? to3(curEnds[0].j.hand).setZ(side * (curEnds[0].gz ?? ik.grip ?? 22))
           : t == null || fig3.hold === "hands" || ik.direct ? to3(j.hand).setZ(side * (p.gz ?? ik.grip ?? 22))
           : ik.arc ? arcTarget(t, side)
           : to3(j.shoulder).add(new THREE.Vector3(0, 0, side * VIEW3D.shoulderHalf)).add(reachTarget(t, side));
+        // Two hands on one bar keep their grip width all the way (the arc around the shoulder
+        // would otherwise draw them in or out along the bar).
+        if (!ik.fixed && !ik.direct && !ik.arc && !ik.stack && fig3.hold !== "hands" && (fig3.grip || "over") !== "neutral") H.z = side * (p.gz ?? ik.grip ?? 22);
         // Both hands on one handle (Pallof press): one fist above the other at the midline.
         if (ik.stack) { H.z = side * 0.6; H.y += side * ik.stack; }
-        if (handMode === "flat") H.y = Math.max(H.y, 2.6);
+        // Flat hands rest on the floor (or mat): the wrist sits 2.6 above the palm's skin. As the
+        // hand turns flat (burpee) it is drawn down onto the floor.
+        if (handMode === "flat") {
+          const sy = supportY();
+          if (sy == null) H.y = Math.max(H.y, 2.6);
+          else {
+            // A hand within a few cm of the floor is pressed onto it; one reaching away (bird dog)
+            // leaves it smoothly.
+            const sup = sy + 2.6, fk = (p.flat ?? 1) * (1 - smoothStep(3, 9, H.y - sup));
+            H.y = Math.max(H.y + (sup - H.y) * fk, sup);
+          }
+        }
         const pole = new THREE.Vector3(...(ik.pole || [-0.5, -0.6, 1])); pole.z *= side; pole.applyQuaternion(torsoQ);
+        const clrI = cur.clear && cur.clear[s];
+        if (clrI && !ik.on && !ik.stack) H.add(new THREE.Vector3(0, 0, side * H.distanceTo(sh) * clrI / 57.3).applyQuaternion(torsoQ));
         // ik.reach > 1 stretches the reach from the shoulder (the 2D arm is a little shorter than
         // the 3D one, so a hanging arm would otherwise stay bent).
         if (ik.reach) H.sub(sh).multiplyScalar(ik.reach).add(sh);
         solveArm(cur.parts["upperArm" + s], cur.parts["forearm" + s], sh, H, pole, handMode === "flat" ? 27 : 33);
+        if (handMode === "grip") reach.push({ s, side, sh, H, pole });
       } else {
         // A far (left) arm with its own angles (p.arm2: { ua, fa, abd? }), e.g. a hand braced on a bench.
         const a2 = side < 0 && p.arm2;
-        const ex2 = !a2 ? extra : a2.abd ? new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0).applyQuaternion(torsoQ).normalize(), (side * a2.abd * Math.PI) / 180) : null;
+        let ex2 = !a2 ? extra : a2.abd ? new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0).applyQuaternion(torsoQ).normalize(), (side * a2.abd * Math.PI) / 180) : null;
+        // Extra swing so a held weight clears the body (see measureClearance).
+        const clr = cur.clear && cur.clear[s];
+        if (clr) {
+          const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0).applyQuaternion(torsoQ).normalize(), (side * clr * Math.PI) / 180);
+          ex2 = ex2 ? ex2.clone().premultiply(q) : q;
+        }
         placeAngle(cur.parts["upperArm" + s], sh, a2 ? a2.ua : p.ua, ex2);
         const elbow = endOf(cur.parts["upperArm" + s], uaLen);
         placeAngle(cur.parts["forearm" + s], elbow, a2 ? a2.fa : p.fa, ex2);
@@ -1760,8 +1952,29 @@ function createViewer3D(container, mode, opts = {}) {
       }
       placeAngle(cur.parts["foot" + s], ankle, footDir, legOut);
       if (ko) cur.parts["foot" + s].quaternion.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), (-side * ko * 0.6 * Math.PI) / 180));
+      // Planted foot: the ankle stays where the start pose put it (stance width and toe-out
+      // included) and the leg reaches it by two-bone IK, so abduction, knees-out and trunk lean
+      // never slide or twist the foot on the floor.
+      const pl = cur.plant && cur.plant[s];
+      if (pl) plantLeg(s, side, hip3, j, p, pl, footDir);
     });
 
+    // Both hands on one bar (or a pair held in line): each fist closes around the line from one
+    // wrist to the other, the wrist deviating a little as a real grip does, so the knuckles run
+    // along the bar instead of across it.
+    alignGrips(p, torsoQ, handMode);
+    // The IK reaches the fist; the bar runs through the grip point a little toward the palm. Aim
+    // again so the grip point itself lands on the target (hands never slide along the bar).
+    if (reach.length) {
+      reach.forEach((r) => {
+        const e = gripPoint(r.s).sub(r.H);
+        if (e.lengthSq() < 0.01) return;
+        const fa = cur.parts["forearm" + r.s];
+        solveArm(cur.parts["upperArm" + r.s], fa, r.sh, r.H.clone().sub(e), r.pole, 33);
+        orientHand(cur.hands[r.s], fa, r.side, torsoQ, p.wrist, p.flat);
+      });
+      alignGrips(p, torsoQ, handMode);
+    }
     const turn = (list, pivot, q) => {
       list.forEach((g) => { g.position.sub(pivot).applyQuaternion(q).add(pivot); g.quaternion.premultiply(q); });
       cur.handQ.R.premultiply(q); cur.handQ.L.premultiply(q);
@@ -2158,12 +2371,16 @@ function createViewer3D(container, mode, opts = {}) {
   }
   // Frame body, equipment and the whole movement for the exercise's camera angle: project the
   // scene's bounds onto the view and back the camera off until everything fits, with a margin.
+  let lastFrame = null, framedAspect = 0;
   function frameScene(ctx) {
+    lastFrame = ctx;
     const box = ctx.bounds();
     const eq = new THREE.Box3().setFromObject(equipment);
     if (!eq.isEmpty()) {
       // Take in the equipment, but not so much that the body gets small (tall towers are cropped).
-      const near = box.clone().expandByVector(new THREE.Vector3(60, 45, 75));
+      // On a tall, narrow stage (phones) the sideways allowance shrinks so the athlete stays large.
+      const k = Math.min(1, Math.max(0.35, (camera.aspect || 1) * 0.85));
+      const near = box.clone().expandByVector(new THREE.Vector3(60 * k, 45, 75 * k));
       box.union(eq.intersect(near));
     }
     box.min.y = Math.max(box.min.y, floorY - 4);
@@ -2171,12 +2388,14 @@ function createViewer3D(container, mode, opts = {}) {
     const f = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)); // toward the camera
     const right = new THREE.Vector3(0, 1, 0).cross(f).normalize(), up = new THREE.Vector3().crossVectors(f, right);
     const tv = Math.tan((camera.fov * Math.PI) / 360), th = tv * Math.max(0.5, camera.aspect || 1);
-    let need = 0;
+    let need = 0, wx = 1, wy = 1;
     for (let i = 0; i < 8; i++) {
       const q = new THREE.Vector3(i & 1 ? box.max.x : box.min.x, i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z).sub(c);
       const z = q.dot(f);
       need = Math.max(need, z + Math.abs(q.dot(right)) / th, z + Math.abs(q.dot(up)) / tv);
+      wx = Math.max(wx, Math.abs(q.dot(right))); wy = Math.max(wy, Math.abs(q.dot(up)));
     }
+    framedAspect = wx / wy; // width / height of what the camera frames (pages size phone stages by it)
     target.copy(c);
     dist = Math.max(need * 1.06, 150);
     bodyTop = ctx.bounds().max.y;
@@ -2356,6 +2575,8 @@ function createViewer3D(container, mode, opts = {}) {
     }
     reachEnds = [poseA, poseB].map((q) => ({ j: solveSide(q), gz: q.gz }));
     ghostEnds = [ghostA, ghostB].map((q) => ({ j: solveSide(q), gz: q.gz }));
+    calibratePlant(body, poseA._keys || [poseA, poseB], reachEnds);
+    if (ghost) calibratePlant(ghost, ghostA._keys || [ghostA, ghostB], ghostEnds);
     const err = form && form.error;
     period = mode === "bad" && err && err.type === "tempo" ? (err.tempo === "slow" ? 8000 : 2300) : 4600;
     const handMode = !fig.hand || fig.hand === "grip" ? true : fig.hand === "relaxed" ? "relaxed" : false;
@@ -2408,7 +2629,8 @@ function createViewer3D(container, mode, opts = {}) {
     setSpeed(x) { x = +x; play.speed = isFinite(x) && x > 0 ? Math.min(3, x) : 1; },
     get speed() { return play.speed; },
     // t in [0, 1] over one rep cycle (keeps the rep count).
-    seek(t) { heldAt = null; seekCycle(t); },
+    // rep (optional): carry a rep count over to this viewer (a replacement viewer keeps counting).
+    seek(t, rep) { heldAt = null; if (isFinite(rep) && rep >= 0) play.rep = Math.floor(rep); seekCycle(t); },
     get time() { return cycleOf(); },
     get rep() { return play.rep; },
     get phases() { return play.phases.map((p) => ({ ...p })); },
@@ -2469,10 +2691,15 @@ function createViewer3D(container, mode, opts = {}) {
         if (y === "reset") { resetCamera(); return; }
         if (NAMED_VIEWS[y] == null) return;
         const to = NAMED_VIEWS[y]; yaw = to + 2 * Math.PI * Math.round((cam.yaw - to) / (2 * Math.PI)); pitch = p != null ? p : y === "threeQuarter" ? 0.16 : 0.08; pan.set(0, 0, 0);
+        if (lastFrame && fitted) frameScene(lastFrame); // fit body and equipment for this angle
         return;
       }
       yaw = y; if (p != null) pitch = p; closeUp = zoom > 1 ? { zoom, at: new THREE.Vector3(target.x, target.y + (atY || 0), target.z) } : null;
     },
+    // Width / height of the body and equipment as framed (0 before the first framing).
+    get framedAspect() { return framedAspect; },
+    // Muscle ids the body draws (empty until the skin is built).
+    get muscleIds() { const ids = new Set(); (body.skinList || []).forEach((m) => Object.keys((m.userData && m.userData.weights) || {}).forEach((k) => ids.add(k))); return [...ids]; },
     // Show one muscle on its own (null for all the exercise's muscles).
     focusMuscle(id) { focusId = id || null; if (ex) setActivation(); },
     // Fiber detail: show each working muscle's fiber direction clearly (off: only a faint hint).
@@ -2485,6 +2712,12 @@ function createViewer3D(container, mode, opts = {}) {
     holdAt(t) { heldAt = t == null ? null : Math.min(1, Math.max(0, t)); },
     // Show or hide the optimal-form ghost over a mistake.
     setGhost(on) { ghostOn = !!on; },
+    // Internals for automated contact audits (tools / tests only): pose the body at rep blend t.
+    _audit() {
+      return { THREE, body, equipment, scene, get floorY() { return floorY; }, get fig() { return fig3; }, get ex() { return ex; },
+        shapeT, gripPoint, gripAxis, jointsOf: () => jointsOf(body), skinWorld, dominantBones, materials: GYM3D.materials(),
+        poseAt(t) { pose(lerp3(poseA, poseB, t), fig3.ik ? t : null); } };
+    },
     // Contact report (for automated checks): how the body meets the floor and the equipment.
     inspect() {
       if (!body.skin || !ex) return null;

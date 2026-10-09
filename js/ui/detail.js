@@ -1,4 +1,4 @@
-// Exercise page: the 3D model is the centerpiece (with its own toolbar above and the playback
+// Exercise Studio (the exercise page): the 3D model is the centerpiece (with its own toolbar above and the playback
 // bar below, so nothing sits on top of the body), the info panel beside it, and the form
 // guidance (correct technique and an example of a common mistake) underneath.
 
@@ -44,9 +44,21 @@ function mountStageViewer(ctx, slot, mode, ex, athlete) {
   const load = mk("v3-loading", `<span class="spin" aria-hidden="true"></span><span>Loading 3D model…</span>`);
   load.setAttribute("role", "status");
   slot.appendChild(load);
-  const off = v.onFrame((f) => { if (f.ready) { load.classList.add("is-done"); setTimeout(() => load.remove(), 400); off(); } });
+  const off = v.onFrame((f) => { if (f.ready) { load.classList.add("is-done"); setTimeout(() => load.remove(), 400); off(); fitStage(slot, v); } });
   ctx.onCleanup(off);
   return v;
+}
+
+// On a phone, a wide scene (a bench, a rower) in a tall stage leaves empty space above and below
+// the athlete: size exercise stages to what the camera frames.
+function fitStage(slot, v) {
+  if (!slot.closest(".dx-stage, .an-stage") || !window.matchMedia("(max-width: 600px)").matches) return;
+  setTimeout(() => {
+    const a = v.framedAspect, w = slot.clientWidth;
+    if (!a || !w || !slot.isConnected) return;
+    const h = Math.round(Math.min(Math.max(w / a * 1.12, 300), window.innerHeight * 0.62, 520));
+    slot.style.height = h + "px"; slot.style.minHeight = "0";
+  }, 60);
 }
 
 function applyDisplayMode(v, mode) {
@@ -61,14 +73,14 @@ function renderDetail(ex, ctx) {
   const f = formOf(ex);
   const st = { athlete: Store.athlete() || ex.athlete || "male", mode: "good", display: level === "advanced" ? "fiber" : "map", focus: null };
   const wrap = mk("detail");
-  const cat = catsOf(ex)[0];
+  const cat = libCatsOf(ex)[0];
   const pat = patternOf(ex);
   const steps = instructionsOf(ex);
   const alts = alternativesOf(ex);
   const stab = stabilizersOf(ex);
   const secondary = namesOf(ex, "secondary");
   wrap.innerHTML = `
-    <nav class="crumbs" aria-label="Breadcrumb"><a href="#/library">${ICON.back}Exercise Library</a>${cat ? `<span>/</span><a href="#/library?cat=${cat}">${esc(CAT_NAME[cat])}</a>` : ""}</nav>
+    <nav class="crumbs" aria-label="Breadcrumb"><a href="#/library">${ICON.back}Exercise Library</a>${cat ? `<span>/</span><a href="#/library?cat=${cat}">${esc(LIB_CAT_NAME[cat])}</a>` : ""}<span>/</span><span class="crumb-here">Exercise Studio</span></nav>
     <div class="dx">
       <section class="dx-stage" aria-label="3D model">
         <div class="stage-top">
@@ -96,7 +108,7 @@ function renderDetail(ex, ctx) {
 
       <section class="dx-info">
         <header class="dx-head">
-          <p class="eyebrow">${esc(catsOf(ex).map((c) => CAT_NAME[c]).join(" · "))}</p>
+          <p class="eyebrow">Exercise Studio · ${esc(libCatsOf(ex).map((c) => LIB_CAT_NAME[c]).join(" · "))}</p>
           <div class="dx-title"><h1>${esc(ex.name)}</h1>${favButton(ex.name, "fav-lg")}</div>
           <p class="dx-dose">
             ${ex.sets ? `<span>${ex.sets} × ${esc(ex.reps)}</span>` : ""}${ex.rest ? `<span>Rest ${formatRest(ex.rest)}</span>` : ""}
@@ -129,14 +141,14 @@ function renderDetail(ex, ctx) {
         ${alts.length ? `<section class="panel"><header class="panel-head"><h2>${ICON.compare}Alternatives</h2><span class="panel-sub">${ex.alternatives && ex.alternatives.length ? "" : "Same main muscles"}</span></header><div class="alt-list"></div></section>` : ""}
 
         <div class="dx-links">
-          <a class="btn btn-ghost" href="#/analysis/${ex.slug}">${ICON.target}Exercise Analysis</a>
+          <a class="btn btn-ghost" href="#/form/${ex.slug}">${ICON.target}Form &amp; Technique</a>
           <a class="btn btn-ghost" href="#/compare?a=${ex.slug}${alts[0] ? "&b=" + alts[0].slug : ""}">${ICON.compare}Compare</a>
         </div>
       </section>
     </div>
     <section class="block dx-form">
-      <header class="block-head"><h2>Form guidance</h2><a class="more" href="#/analysis/${ex.slug}">Compare correct and mistake side by side ${ICON.arrow}</a></header>
-      ${formFeedback(ex, { compact: false, paths: false })}
+      <header class="block-head"><h2>Form feedback</h2><a class="more" href="#/form/${ex.slug}">Correct and mistake side by side ${ICON.arrow}</a></header>
+      ${formFeedback(ex, { compact: false, paths: false, demo: "Show this mistake on the model" })}
     </section>`;
 
   const altBox = wrap.querySelector(".alt-list");
@@ -182,7 +194,8 @@ function renderDetail(ex, ctx) {
     viewer = mountStageViewer(ctx, slot, mode, ex, st.athlete);
     prepare(viewer);
     restoreViewer(viewer, keep);
-    player.setViewers([viewer]);
+    player.setViewers([viewer], keep && keep.rep);
+    if (mode === "bad") fillFeedbackMetric(wrap, viewer, ctx.onCleanup);
     setCaption();
   };
 
@@ -195,6 +208,11 @@ function renderDetail(ex, ctx) {
   wrap.addEventListener("click", (e) => {
     const tb = e.target.closest("button[data-tab]");
     if (tb) { setTab(tb.dataset.tab); return; }
+    if (e.target.closest("[data-demo]")) {
+      setTab("bad");
+      wrap.querySelector(".dx-stage").scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
     const ab = e.target.closest("[data-athlete]");
     if (ab) {
       st.athlete = ab.dataset.athlete;

@@ -21,7 +21,7 @@
       good: { cue: "Elbows up, torso upright, sit between the heels until the hips pass the knees.", highlight: ["spine", "knee"] },
       bad: { cue: "The elbows drop and the chest folds forward, so the bar rolls and the lower back takes the load.", highlight: ["spine", "back"],
         b: { torso: 46, neck: 42, bend: 6 } },
-      figure3d: { kit: "barbell", bar: { rack: true }, ik: { grip: 22, pole: [1, 0.75, 0.3] }, mix: { ua: 0, fa: 142 } },
+      figure3d: { kit: "barbell", bar: { rack: true }, ik: { on: { bone: "upperTorso", y: 25.5, side: "front", gap: 1.2 }, grip: 23, pole: [1, 0.55, 0.45] }, mix: { ua: 0, fa: 142 } },
       figure: { armsOut: true, abd: 20, load: { type: "barbell", at: "shoulder", offset: [9, -2], r: 18 },
         a: { ...ST, x: 96, ua: 70, fa: -110 },
         b: { ...ST, x: 96, shin: 34, thigh: -85, torso: 22, neck: 12, ua: 92, fa: -88 } }
@@ -169,7 +169,7 @@
       good: { cue: "Ribs down, push through the heels until the hips are level with the knees and shoulders.", highlight: ["hip", "spine"] },
       bad: { cue: "Arching the lower back at the top. The hips look higher but the lower back takes over from the glutes.", highlight: ["spine", "back"],
         b: { torso: -76, bend: -10, neck: -56 } },
-      figure3d: { kit: "loHipThrust", ik: { grip: 28, pole: [0.2, -1, 0.7] }, legAbd: 6 },
+      figure3d: { kit: "loHipThrust", ik: { on: { bone: "lowerTorso", y: 4, side: "front", gap: 5.6, width: 9 }, grip: 30, pole: [0.2, -1, 0.7] }, legAbd: 6 },
       figure: { load: { type: "barbell", r: 18 },
         a: { x: 130, y: 186, foot: 90, shin: -26.4, thigh: -124.2, torso: -51.3, neck: -40, ua: 150, fa: 79 },
         b: { x: 130, y: 186, foot: 90, shin: 0, thigh: -90, torso: -85, neck: -60, ua: 102, fa: 61 } }

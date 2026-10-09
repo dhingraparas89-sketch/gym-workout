@@ -23,10 +23,12 @@
     <nav class="nav" id="main-nav" aria-label="Main">
       <a href="#/" data-nav="">Home</a>
       <a href="#/library" data-nav="library">Exercise Library</a>
+      <a href="#/anatomy" data-nav="anatomy">3D Anatomy</a>
+      <a href="#/studio" data-nav="studio">Exercise Studio</a>
       <a href="#/muscles" data-nav="muscles">Muscle Explorer</a>
-      <a href="#/analysis" data-nav="analysis">Exercise Analysis</a>
+      <a href="#/form" data-nav="form">Form &amp; Technique</a>
+      <a href="#/compare" data-nav="compare">Compare</a>
       <a href="#/favorites" data-nav="favorites">Favorites</a>
-      <a href="#/recent" data-nav="recent">Recently Viewed</a>
     </nav>
     <label class="level-wrap"><span class="level-label">Guide</span>
       <select id="level-switch" aria-label="Guide level">
@@ -39,7 +41,7 @@
   </div>
 </header>
 <main id="app" class="page" tabindex="-1"></main>
-<footer class="foot"><div class="foot-in"><span class="brand-mini"><span class="brand-mark" aria-hidden="true"></span>Rep Sheet</span><span>Instructional guidance only. Muscle percentages are estimated involvement, not measurements. <a href="#/plans">Sample plans</a> · <a href="#/compare">Compare exercises</a></span></div></footer>
+<footer class="foot"><div class="foot-in"><span class="brand-mini"><span class="brand-mark" aria-hidden="true"></span>Rep Sheet</span><span>Instructional guidance only. Muscle percentages are estimated involvement, not measurements. <a href="#/plans">Sample plans</a> · <a href="#/recent">Recently viewed</a></span></div></footer>
 <!-- APP END -->
 <script src="data/exercises.js"></script>
 <script src="data/form.js"></script>
@@ -50,9 +52,11 @@
 <script src="data/library/v3-lower.js"></script>
 <script src="data/library/v3-core-full.js"></script>
 <script src="data/library/v3-fields.js"></script>
+<script src="data/library/v4-motion.js"></script>
 <script src="data/library/meta.js"></script>
 <script src="data/anatomy.js"></script>
 <script src="data/plans.js"></script>
+<script src="assets/thumbs/manifest.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
 <script src="js/figure.js"></script>
 <script src="js/gym3d.js"></script>
@@ -68,6 +72,7 @@
 <script src="js/ui/feedback.js"></script>
 <script src="js/ui/detail.js"></script>
 <script src="js/ui/muscles.js"></script>
+<script src="js/ui/anatomy.js"></script>
 <script src="js/ui/pages.js"></script>
 <script src="js/app.js"></script>
 </body>

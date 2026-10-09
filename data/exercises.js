@@ -169,7 +169,7 @@ const EXERCISES = [
     good: { cue: "Brace, sit down until your hips reach knee height, chest up, knees track over the toes.", highlight: ["knee", "thigh"] },
     bad: { cue: "The chest drops and the back rounds at the bottom, so the lower back takes the load.", highlight: ["spine", "back"],
       b: { torso: 66, bend: 12, neck: 90 } },
-    figure3d: { kit: "barbell", bar: { rack: true } },
+    figure3d: { kit: "barbell", bar: { rack: true }, ik: { on: { bone: "upperTorso", y: 24.5, side: "back" }, grip: 30, pole: [-0.5, -1, 0.25] } },
     figure: { armsOut: true, abd: 45, load: { type: "barbell", at: "shoulder", offset: [-7, -1], r: 18 },
       a: { ...STAND, x: 94, ua: 195, fa: -12 },
       b: { ...STAND, x: 94, shin: 32, thigh: -80, torso: 40, neck: 30, ua: 235, fa: 28 } }

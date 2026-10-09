@@ -32,8 +32,11 @@ function playerMarkup(opts) {
           </div>
           <div class="pb-read"><span class="pb-phase" aria-live="off">—</span><span class="pb-rep">Rep <b>1</b></span></div>
         </div>
-        <div class="seg pb-speed" role="radiogroup" aria-label="Playback speed">
-          ${SPEEDS.map((s) => `<button type="button" role="radio" data-speed="${s}" aria-checked="false">${s}×</button>`).join("")}
+        <div class="pb-rate">
+          <button type="button" class="pb-slow" data-pb="slow" aria-pressed="false" title="Slow motion (quarter speed)">${ICON.tempo}<span>Slow motion</span></button>
+          <div class="seg pb-speed" role="radiogroup" aria-label="Playback speed">
+            ${SPEEDS.map((s) => `<button type="button" role="radio" data-speed="${s}" aria-checked="false">${s}×</button>`).join("")}
+          </div>
         </div>
       </div>
     </div>`;
@@ -41,7 +44,7 @@ function playerMarkup(opts) {
     <div class="cam" role="group" aria-label="Camera">
       <span class="cam-label">View</span>
       ${cams.map((c) => `<button type="button" class="cam-btn" data-cam="${c}">${CAMERA_PRESETS[c] || c}</button>`).join("")}
-      <button type="button" class="cam-btn" data-cam="reset" title="The exercise's default view">Reset</button>
+      <button type="button" class="cam-btn" data-cam="reset" title="Back to the default view">${ICON.rotate}Reset camera</button>
       <span class="cam-zoom">
         <button type="button" class="cam-btn cam-ico" data-zoom="0.85" aria-label="Zoom out">${ICON.minus}</button>
         <button type="button" class="cam-btn cam-ico" data-zoom="1.18" aria-label="Zoom in">${ICON.plus}</button>
@@ -73,7 +76,15 @@ function mountPlayer(host, viewers, opts = {}) {
     playBtn.setAttribute("aria-label", on ? "Pause" : "Play");
     playBtn.classList.toggle("is-paused", !on);
   }
-  function setSpeedUI(s) { host.querySelectorAll("[data-speed]").forEach((b) => b.setAttribute("aria-checked", String(+b.dataset.speed === s))); }
+  const SLOW = 0.25;
+  let beforeSlow = 1;
+  function setSpeedUI(s) {
+    host.querySelectorAll("[data-speed]").forEach((b) => b.setAttribute("aria-checked", String(+b.dataset.speed === s)));
+    const sb = host.querySelector(".pb-slow");
+    if (sb) sb.setAttribute("aria-pressed", String(s === SLOW));
+  }
+  // Rep count shown = the viewer's count plus what earlier viewers counted (a replaced viewer).
+  let repBase = 0;
 
   function bind() {
     if (off) off();
@@ -92,7 +103,7 @@ function mountPlayer(host, viewers, opts = {}) {
         phaseEl.textContent = f.phase || "—";
         phasesEl.querySelectorAll("[data-ph]").forEach((s) => s.classList.toggle("is-on", +s.dataset.ph === f.phaseIndex));
       }
-      if (f.rep !== lastRep && repEl) { lastRep = f.rep; repEl.textContent = f.rep + 1; }
+      if (f.rep !== lastRep && repEl) { lastRep = f.rep; repEl.textContent = f.rep + 1 + repBase; }
       if (playBtn && playBtn.classList.contains("is-paused") === f.playing) setPlayIcon(f.playing);
     });
   }
@@ -103,7 +114,13 @@ function mountPlayer(host, viewers, opts = {}) {
     end: () => all((v) => v.jumpTo("end")),
     back: () => all((v) => v.step(-1)),
     fwd: () => all((v) => v.step(1)),
-    restart: () => { all((v) => { v.restart(); v.play(); }); setPlayIcon(true); }
+    restart: () => { repBase = 0; lastRep = -1; all((v) => { v.restart(); v.play(); }); setPlayIcon(true); },
+    slow: () => {
+      const cur = lead().speed;
+      const x = cur === SLOW ? beforeSlow || 1 : SLOW;
+      if (cur !== SLOW) beforeSlow = cur;
+      all((v) => v.setSpeed(x)); setSpeedUI(x);
+    }
   };
   host.addEventListener("click", (e) => {
     if (!lead()) return;
@@ -142,12 +159,18 @@ function mountPlayer(host, viewers, opts = {}) {
 
   bind();
   return {
-    setViewers(next) { list = (next || []).filter(Boolean); lastPhases = ""; lastRep = -1; lastPhase = -2; bind(); },
+    // keepRep: the rep count to carry over (the new viewer counts on from there).
+    setViewers(next, keepRep) {
+      list = (next || []).filter(Boolean); lastPhases = ""; lastRep = -1; lastPhase = -2;
+      const v = list[0];
+      repBase = isFinite(keepRep) && v ? Math.max(0, keepRep - (v.rep || 0)) : 0;
+      bind();
+    },
     // Playback + camera snapshot of the lead viewer, to carry over to a replacement viewer.
     state() {
       const v = lead();
       if (!v) return null;
-      return { t: v.time, playing: v.isPlaying, speed: v.speed, camera: v.getCamera ? v.getCamera() : null };
+      return { t: v.time, rep: (v.rep || 0) + repBase, playing: v.isPlaying, speed: v.speed, camera: v.getCamera ? v.getCamera() : null };
     },
     destroy() { if (off) off(); keyRoot.removeEventListener("keydown", onKey); }
   };
@@ -158,7 +181,7 @@ function restoreViewer(v, st) {
   if (!v || !st) return;
   try {
     v.setSpeed(st.speed);
-    v.seek(st.t);
+    v.seek(st.t, st.rep);
     if (st.playing) v.play(); else v.pause();
     if (st.camera && v.setCamera) v.setCamera(st.camera);
   } catch (e) {}

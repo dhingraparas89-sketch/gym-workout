@@ -172,7 +172,7 @@
       bad: { cue: "The knees bend and the hips drop, turning the hinge into a squat and taking the stretch off the hamstrings.", highlight: ["knee"],
         b: { shin: 30, thigh: -58, torso: 62, neck: 52, ua: 257, fa: 50 } },
       // No rack drawn: the bar travels forward with the shoulders and would pass the front uprights.
-      figure3d: { kit: "barbell", bar: {} },
+      figure3d: { kit: "barbell", bar: {}, ik: { on: { bone: "upperTorso", y: 24.5, side: "back" }, grip: 30, pole: [-0.5, -1, 0.25] } },
       figure: { armsOut: true, abd: 45, load: { type: "barbell", at: "shoulder", offset: [-7, -1], r: 18 },
         a: { ...ST, x: 94, ua: 195, fa: -12 },
         b: { ...ST, x: 94, shin: 6, thigh: -14, torso: 76, neck: 66, ua: 271, fa: 64 } }

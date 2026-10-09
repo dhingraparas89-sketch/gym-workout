@@ -406,3 +406,200 @@ body[data-level="beginner"] .cam-hint span { display: none; }
   .ex-mini { grid-template-columns: 48px minmax(0, 1fr) auto; }
   .ex-mini-tag { display: none; }
 }
+
+/* ======================================================================
+   Round 4: 3D Anatomy, Exercise Studio, Form & Technique, library
+   categories, thumbnails, feedback items.
+   ====================================================================== */
+
+/* ---------- Shell ---------- */
+.crumb-here { color: var(--faint); }
+.notice { display: flex; gap: 10px; align-items: flex-start; font-size: 13.5px; color: var(--muted); padding: 11px 14px; border-radius: 10px; background: var(--surface); border: 1px solid var(--hairline); margin-bottom: 16px; }
+.notice .icon { color: var(--fg-2); margin-top: 2px; }
+.notice b { color: var(--fg); font-weight: 600; }
+
+/* ---------- Thumbnails ---------- */
+.thumb-box { position: relative; display: block; width: 100%; height: 100%; }
+.thumb-box > .figure, .thumb-box > .fig-fallback { width: 100%; height: 100%; }
+.thumb-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .25s; }
+.thumb-box.has-img .thumb-img { opacity: 1; }
+.thumb-box.has-img > .figure { visibility: hidden; }
+
+/* ---------- Home ---------- */
+.seg-feat { flex-wrap: wrap; }
+.seg-feat button { padding: 5px 10px; font-size: 12.5px; }
+.hero-caption { align-items: center; }
+.cat-tiles { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.cat-tile { padding: 14px; }
+.cat-tile b { margin-top: 10px; font-size: 14.5px; }
+.quick { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.quick-card { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 18px; border-radius: 14px; border: 1px solid var(--hairline); transition: border-color .2s, background .2s; }
+.quick-card:hover { border-color: var(--hairline-2); background: var(--surface-2); }
+.quick-card > span:nth-child(2) { display: grid; gap: 4px; }
+.quick-card b { font: 600 15.5px/1.2 var(--font-display); }
+.quick-card > span:nth-child(2) span { font-size: 13px; color: var(--muted); }
+.quick-card > .icon { color: var(--faint); width: 16px; height: 16px; }
+
+/* ---------- Library ---------- */
+.cat-tabs { scrollbar-width: none; }
+.cat-tabs::-webkit-scrollbar { display: none; }
+.fsels .fsel select { min-width: 160px; }
+.lib-hidden { display: flex; align-items: center; gap: 8px; margin-top: 20px; font-size: 13px; color: var(--muted); }
+.lib-hidden .icon { width: 15px; height: 15px; color: var(--faint); }
+.chip.is-part { font-size: 12.5px; color: var(--fg-2); border-style: dashed; }
+
+/* ---------- Player additions ---------- */
+.pb-rate { display: flex; align-items: center; gap: 6px; }
+.pb-slow { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px; border-radius: 9px; border: 1px solid var(--hairline); background: transparent; color: var(--fg-2); font-size: 12.5px; white-space: nowrap; }
+.pb-slow .icon { width: 15px; height: 15px; }
+.pb-slow:hover { background: var(--surface-2); color: var(--fg); }
+.pb-slow[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-2); border-color: var(--accent-line); }
+.cam-btn { display: inline-flex; align-items: center; gap: 5px; }
+.cam-btn .icon { width: 13px; height: 13px; }
+
+/* ---------- Exercise Studio ---------- */
+.dx-stage, .an-view { scroll-margin-top: 72px; }
+.ff-demo { justify-self: start; }
+
+/* ---------- Feedback items ---------- */
+.ff-where { display: flex; flex-wrap: wrap; gap: 6px; margin-top: -4px; }
+.ff-region { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 500; padding: 4px 10px; border-radius: 999px; color: var(--amber-text); background: var(--amber-soft); }
+.ff-region .icon { width: 13px; height: 13px; }
+.ff-type { font-size: 12.5px; padding: 4px 10px; border-radius: 999px; color: var(--fg-2); background: var(--surface-2); }
+.ff-item { display: grid; gap: 4px; }
+.ff-item p:last-child { font-size: 14px; color: var(--fg-2); }
+.ff-badge.is-muted { color: var(--fg-2); background: var(--surface-2); }
+.ff-more-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.ff-more-list li { position: relative; padding-left: 16px; font-size: 14px; color: var(--fg-2); }
+.ff-more-list li::before { content: ""; position: absolute; left: 2px; top: .6em; width: 6px; height: 6px; border-radius: 50%; background: var(--amber); opacity: .7; }
+.ff-metric .ff-label { color: var(--faint); }
+
+/* ---------- Form & Technique ---------- */
+.form-page .an-bar .seg-layout { margin-left: 0; }
+.an-view { display: grid; gap: 10px; margin-bottom: 24px; }
+.an-view .seg-show { display: none; justify-self: start; }
+.an-view[data-layout="seq"] .seg-show { display: flex; }
+.an-stages[data-layout="seq"] { grid-template-columns: minmax(0, 1fr); }
+.an-stages[data-layout="seq"][data-show="good"] .an-stage.is-bad,
+.an-stages[data-layout="seq"][data-show="bad"] .an-stage.is-good { display: none; }
+.an-stages[data-layout="seq"] .an-stage .fig-slot { height: clamp(380px, calc(100vh - 400px), 620px); }
+.analysis .player { margin-bottom: 0; }
+.an-legend { margin: 0; }
+.bm-table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.bm-table th, .bm-table td { text-align: left; padding: 9px 10px; border-top: 1px solid var(--hairline); font-variant-numeric: tabular-nums; }
+.bm-table thead th { border-top: 0; font: 600 10.5px var(--font-body); letter-spacing: .1em; text-transform: uppercase; color: var(--faint); }
+.bm-table thead th.is-good { color: var(--accent-2); } .bm-table thead th.is-bad { color: var(--amber-text); }
+.bm-table tbody th { font-weight: 500; color: var(--fg-2); }
+.bm-table tr.is-off td:last-child { color: var(--amber-text); font-weight: 600; }
+.bm-body { display: grid; gap: 10px; }
+
+/* ---------- 3D Anatomy ---------- */
+.ax { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(320px, .75fr); gap: clamp(16px, 2.4vw, 32px); align-items: start; }
+.ax-stage { display: grid; gap: 10px; position: sticky; top: 76px; min-width: 0; }
+.ax-stage .stage .fig-slot { height: clamp(440px, calc(100vh - 280px), 760px); }
+.ax-side { display: grid; gap: 12px; min-width: 0; }
+.ax-info { padding: 18px; display: grid; gap: 12px; }
+.ax-title { font: 650 26px/1.1 var(--font-display); letter-spacing: -.025em; }
+.ax-info .anat { color: var(--muted); font-size: 14px; margin-top: -6px; font-style: italic; }
+.ax-text { font-size: 14px; color: var(--fg-2); }
+.ax-legend { display: grid; gap: 6px; font-size: 13px; color: var(--fg-2); }
+.ax-legend span { display: flex; gap: 8px; align-items: baseline; }
+.sw { width: 10px; height: 10px; border-radius: 3px; flex: none; display: inline-block; transform: translateY(1px); }
+.sw-p { background: var(--m-primary); } .sw-s { background: var(--m-secondary); }
+.ax-list { padding: 14px 16px; display: grid; gap: 10px; }
+.ax-list .panel-head { display: flex; align-items: center; justify-content: space-between; }
+.ax-clear { border: 0; background: none; color: var(--accent-2); font-size: 12.5px; padding: 2px 0; cursor: pointer; }
+.ax-clear:hover { color: var(--fg); }
+.ax-groups { display: grid; gap: 4px; max-height: 420px; overflow: auto; padding-right: 4px; scrollbar-width: thin; }
+.ax-group { display: grid; gap: 6px; padding: 8px 0; border-top: 1px solid var(--hairline); }
+.ax-group:first-child { border-top: 0; padding-top: 0; }
+.ax-gname { display: flex; justify-content: space-between; align-items: baseline; border: 0; background: none; padding: 2px 0; color: var(--fg); font: 600 13.5px var(--font-body); text-align: left; cursor: pointer; }
+.ax-gname span { font: 500 11px var(--font-body); color: var(--faint); letter-spacing: .06em; text-transform: uppercase; }
+.ax-gname:hover, .ax-gname[aria-pressed="true"] { color: var(--accent-2); }
+.ax-ms { display: flex; flex-wrap: wrap; gap: 5px; }
+.ax-ms .chip { font-size: 12.5px; padding: 5px 10px; }
+.chip[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-2); border-color: var(--accent-line); }
+/* The side panel explains the selection, so the on-body tooltip only names the muscle. */
+.anatomy-page .v3-tip span, .anatomy-page .v3-tip p, .muscles-page .v3-tip span, .home .v3-tip span { display: none; }
+
+/* ---------- Explorer ---------- */
+.mx-3d .stage-top .more { margin-left: auto; }
+.rp-syn { display: flex; flex-wrap: wrap; gap: 5px; }
+.rp-syn a:hover { color: var(--fg); }
+
+/* ---------- Compare ---------- */
+.cmp-cues { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.cmp-cues li { position: relative; padding-left: 14px; font-size: 13.5px; color: var(--fg-2); }
+.cmp-cues li::before { content: ""; position: absolute; left: 0; top: .55em; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.cmp-mistake { color: var(--amber-text); }
+
+/* ---------- Responsive (round 4) ---------- */
+@media (max-width: 1360px) {
+  .nav a { padding: 7px 8px; font-size: 13px; }
+  .nav a[aria-current="page"]::after { left: 8px; right: 8px; }
+  .level-label { display: none; }
+  .topbar-in { gap: 14px; }
+}
+@media (max-width: 1180px) {
+  .cat-tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .pb-main { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .ax { grid-template-columns: minmax(0, 1fr) minmax(300px, .8fr); }
+}
+@media (max-width: 1100px) {
+  .nav { display: none; margin: 0; }
+  .menu-btn { display: grid; order: 4; }
+  .level-wrap { margin-left: auto; }
+  body.menu-open .nav { display: grid; position: absolute; left: 0; right: 0; top: 60px; padding: 8px var(--gutter) 16px; gap: 2px; background: var(--bg); border-bottom: 1px solid var(--hairline); box-shadow: 0 30px 60px rgba(0, 0, 0, .5); animation: page-in .2s var(--ease); }
+  body.menu-open .nav a { padding: 12px 12px; font-size: 15px; border-radius: 10px; }
+  body.menu-open .nav a[aria-current="page"]::after { left: 0; right: auto; top: 10px; bottom: 10px; width: 3px; height: auto; }
+}
+@media (max-width: 980px) {
+  .ax { grid-template-columns: minmax(0, 1fr); }
+  .ax-stage { position: static; }
+  .ax-stage .stage .fig-slot { height: min(64vh, 640px); min-height: 380px; }
+  .ax-side { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+  .ax-groups { max-height: none; }
+  .quick { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .cat-tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .cat-tile:last-child { grid-column: auto; }
+  .cat-tile { padding: 12px; }
+  .cat-tile b { font-size: 13.5px; }
+  .ax-side { grid-template-columns: minmax(0, 1fr); }
+  .ax-stage .stage .fig-slot { height: min(60vh, 520px); min-height: 360px; }
+  .an-bar .seg-layout { display: none; }
+  .an-view .seg-show { justify-self: stretch; }
+  .an-view .seg-show button { flex: 1; justify-content: center; }
+  .an-stages[data-layout="seq"] .an-stage .fig-slot { height: min(56vh, 460px); min-height: 340px; }
+  .pb-rate { grid-column: 1 / -1; order: 4; }
+  .pb-rate .pb-speed { flex: 1; display: flex; }
+  .pb-rate .pb-speed button { flex: 1; justify-content: center; }
+  .seg-feat { width: 100%; }
+  .seg-feat button { flex: 1; }
+  .hero-caption { display: grid; }
+  .bm-table th, .bm-table td { padding: 8px 6px; }
+}
+/* Compare: figure and title across, then the body map beside the facts. */
+.cmp-col { grid-template-columns: 130px minmax(0, 1fr); column-gap: 18px; align-items: start; }
+.cmp-col > .cmp-fig, .cmp-col > h2, .cmp-col > .cmp-actions { grid-column: 1 / -1; }
+.cmp-col .cmp-fig { aspect-ratio: 5 / 2; max-height: 200px; }
+.cmp-col .cmp-map { max-width: 130px; }
+.cmp-col .cmp-rows div:first-child { border-top: 0; }
+@media (max-width: 1100px) {
+  .cmp-col { grid-template-columns: minmax(0, 1fr); }
+  .cmp-col .cmp-map { max-width: 180px; }
+}
+@media (max-width: 980px) {
+  .home .hero-visual { order: 0; }
+}
+@media (max-width: 760px) {
+  .home .hero-stage .hero-3d { height: min(56vh, 440px); }
+  .lib-row { grid-template-columns: minmax(0, 1fr) auto; align-items: end; }
+  .fsel-sort > span { display: none; }
+  .fsel-sort select { min-height: 46px; }
+  .fsels .fsel:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .form-page .notice { font-size: 12.5px; padding: 9px 12px; margin-bottom: 12px; }
+  .form-page .an-head .lede { display: none; }
+  .form-page .an-bar .more { display: none; }
+}

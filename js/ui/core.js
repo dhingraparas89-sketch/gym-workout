@@ -61,7 +61,11 @@ const slugOf = (name) => String(name).toLowerCase().replace(/[^a-z0-9]+/g, "-").
     if (ex.id && !BY_SLUG[ex.id]) BY_SLUG[ex.id] = ex;
   });
 })();
-const ALL_EXERCISES = () => Object.values(BY_NAME);
+// Exercises marked demo:"hidden" keep their own page (a direct link still works) but stay out of
+// the library, search, lists and pickers until their demonstration is ready.
+const isListed = (ex) => ex && ex.demo !== "hidden";
+const ALL_EXERCISES = () => Object.values(BY_NAME).filter(isListed);
+const HIDDEN_COUNT = () => Object.values(BY_NAME).filter((e) => !isListed(e)).length;
 const exByAny = (k) => BY_SLUG[k] || BY_NAME[k] || null;
 
 // Browse categories: the data's list, plus calves / full body when exercises use them.
@@ -78,6 +82,46 @@ const DIFF_LIST = typeof DIFFICULTIES !== "undefined" ? DIFFICULTIES : [{ id: "b
 const DIFF_NAME = Object.fromEntries(DIFF_LIST.map((c) => [c.id, c.name]));
 const DIFF_RANK = { beginner: 1, intermediate: 2, advanced: 3 };
 const catsOf = (ex) => [...new Set([ex.group, ...(ex.categories || [])])].filter((c) => CAT_NAME[c]);
+
+// Library categories. The data groups arms and legs as a whole; the library splits them by the
+// exercise's primary muscles. Old links (?cat=arms, ?cat=legs) still work as the whole group.
+const LIB_CATS = [
+  { id: "chest", name: "Chest" }, { id: "back", name: "Back" }, { id: "shoulders", name: "Shoulders" },
+  { id: "biceps", name: "Biceps" }, { id: "triceps", name: "Triceps" }, { id: "forearms", name: "Forearms" },
+  { id: "quads", name: "Quadriceps" }, { id: "hamstrings", name: "Hamstrings" }, { id: "glutes", name: "Glutes" },
+  { id: "calves", name: "Calves" }, { id: "core", name: "Core" }, { id: "fullbody", name: "Full Body" }
+];
+const LEGACY_CATS = { arms: "Arms (all)", legs: "Legs (all)" };
+const LIB_CAT_NAME = Object.fromEntries(LIB_CATS.map((c) => [c.id, c.name]));
+const SPLIT_BY_MUSCLE = { biceps: "arms", triceps: "arms", forearms: "arms", quads: "legs", hamstrings: "legs", glutes: "legs", calves: "legs" };
+function libCatsOf(ex) {
+  if (ex._libCats) return ex._libCats;
+  const own = catsOf(ex), prim = ex.primary.map((m) => parentMuscle(m)), out = [];
+  const add = (c) => { if (!out.includes(c)) out.push(c); };
+  own.forEach((c) => { if (LIB_CAT_NAME[c]) add(c); });
+  // Arms and legs exercises go to the categories of their primary muscles.
+  if (own.includes("arms") || own.includes("legs")) {
+    prim.forEach((m) => { if (SPLIT_BY_MUSCLE[m] && own.includes(SPLIT_BY_MUSCLE[m])) add(m); });
+    if (!out.some((c) => SPLIT_BY_MUSCLE[c])) add(own.includes("arms") ? "biceps" : "quads");
+  }
+  // Glutes and calves exercises also show up there when those are a primary mover.
+  ["glutes", "calves"].forEach((m) => { if (prim.includes(m)) add(m); });
+  ex._libCats = out.sort((a, b) => LIB_CATS.findIndex((c) => c.id === a) - LIB_CATS.findIndex((c) => c.id === b));
+  return ex._libCats;
+}
+function inLibCat(ex, cat) {
+  if (!cat) return true;
+  if (LEGACY_CATS[cat]) return catsOf(ex).includes(cat);
+  return libCatsOf(ex).includes(cat);
+}
+
+// Equipment filter: the data's types plus resistance bands (matched on the equipment text).
+const LIB_EQUIP = [
+  { id: "barbell", name: "Barbell" }, { id: "dumbbell", name: "Dumbbell" }, { id: "cable", name: "Cable" },
+  { id: "machine", name: "Machine" }, { id: "band", name: "Resistance band" }, { id: "kettlebell", name: "Kettlebell" },
+  { id: "bodyweight", name: "Bodyweight" }, { id: "other", name: "Other (sled, ropes, box)" }
+];
+const usesEquip = (ex, id) => (id === "band" ? ex.equip === "band" || /\bband/i.test((ex.equipment || "") + " " + (ex.setup || "")) : ex.equip === id);
 
 // Movement pattern: the data's own, else inferred from the name.
 const PATTERN_LIST = [
@@ -113,6 +157,51 @@ const parentMuscle = (m) => {
   if (typeof ANATOMY !== "undefined" && ANATOMY && ANATOMY[m] && ANATOMY[m].parent) return ANATOMY[m].parent;
   return m;
 };
+// ---------- Muscle catalog (base ids + finer ids from data/anatomy.js) ----------
+const ALL_MUSCLE_IDS = () => [...new Set([...Object.keys(MUSCLES), ...(typeof MUSCLE_INFO !== "undefined" ? Object.keys(MUSCLE_INFO) : [])])];
+const childrenOf = (m) => ALL_MUSCLE_IDS().filter((x) => x !== m && parentMuscle(x) === m);
+let USED_MUSCLES = null;
+const usedMuscles = () => USED_MUSCLES || (USED_MUSCLES = new Set(Object.values(BY_NAME).flatMap((e) => [...(e.primary || []), ...(e.secondary || []), ...(e.stabilizers || [])])));
+// The ids that count as training muscle m: m and its finer parts; a finer muscle no exercise names
+// directly falls back to its group (data that says "shoulders" trains the front delts).
+function muscleKeys(m) {
+  const own = [m, ...childrenOf(m)];
+  if (own.some((x) => usedMuscles().has(x))) return own;
+  const p = parentMuscle(m);
+  return p !== m ? [...own, p] : own;
+}
+// Groups for the explorer, the 3D anatomy list and the muscle filter: each map region with its
+// base muscles followed by their finer parts. Finer muscles without a parent join a nearby region.
+const ORPHAN_REGION = { adductors: "quads", tibialis: "calves", serratus: "chest", "serratus-anterior": "chest", "hip-flexors": "abs", "glute-med": "glutes", brachialis: "biceps", neck: "back" };
+const MUSCLE_GROUPS = (() => {
+  const regions = typeof MUSCLE_REGIONS !== "undefined" ? MUSCLE_REGIONS : [];
+  const groups = regions.map((r) => ({ id: r.id, name: r.name, side: r.side, muscles: r.muscles.flatMap((m) => [m, ...childrenOf(m)]) }));
+  const placed = new Set(groups.flatMap((g) => g.muscles));
+  const rest = ALL_MUSCLE_IDS().filter((m) => !placed.has(m));
+  rest.forEach((m) => {
+    const g = groups.find((x) => x.id === ORPHAN_REGION[m]) || groups.find((x) => x.muscles.includes(parentMuscle(m)));
+    if (g) g.muscles.push(m); else {
+      let other = groups.find((x) => x.id === "other");
+      if (!other) { other = { id: "other", name: "Other", side: "front", muscles: [] }; groups.push(other); }
+      other.muscles.push(m);
+    }
+  });
+  return groups;
+})();
+const GROUP_OF_MUSCLE = {};
+MUSCLE_GROUPS.forEach((g) => g.muscles.forEach((m) => { if (!GROUP_OF_MUSCLE[m]) GROUP_OF_MUSCLE[m] = g.id; }));
+const groupOfMuscle = (m) => GROUP_OF_MUSCLE[m] || GROUP_OF_MUSCLE[parentMuscle(m)] || null;
+const isFinerMuscle = (m) => parentMuscle(m) !== m || !MUSCLES[m] || !(typeof REGION_OF !== "undefined" && REGION_OF[m]);
+// Muscles that most often assist m: the secondary movers of the exercises where m is a main mover.
+function synergistsOf(m, n = 3) {
+  const keys = muscleKeys(m), tally = {};
+  ALL_EXERCISES().forEach((ex) => {
+    if (!ex.primary.some((x) => keys.includes(x))) return;
+    ex.secondary.forEach((s) => { if (!keys.includes(s)) tally[s] = (tally[s] || 0) + 1; });
+  });
+  return Object.keys(tally).sort((a, b) => tally[b] - tally[a]).slice(0, n);
+}
+
 const stabilizersOf = (ex) => (Array.isArray(ex.stabilizers) ? ex.stabilizers : []).filter((m) => !ex.primary.includes(m) && !ex.secondary.includes(m));
 // Muscle names in the words the chosen guide level uses (plain for beginners, anatomical otherwise).
 function namesOf(ex, role) {
@@ -163,10 +252,10 @@ function matchesQuery(ex, q) {
     return words.some((h) => h.startsWith(w) || h.startsWith(stem));
   });
 }
-const trains = (ex, m) => [...ex.primary, ...ex.secondary].some((x) => x === m || parentMuscle(x) === m);
+const trains = (ex, m, role) => (role ? ex[role] || [] : [...ex.primary, ...ex.secondary]).some((x) => muscleKeys(m).includes(x));
 function matches(ex, f) {
-  if (f.cat && !catsOf(ex).includes(f.cat)) return false;
-  if (f.eq && ex.equip !== f.eq) return false;
+  if (f.cat && !inLibCat(ex, f.cat)) return false;
+  if (f.eq && !usesEquip(ex, f.eq)) return false;
   if (f.lvl && ex.difficulty !== f.lvl) return false;
   if (f.pat && patternOf(ex) !== f.pat) return false;
   if (f.type && ex.movementType !== f.type) return false;
@@ -176,7 +265,7 @@ function matches(ex, f) {
 const SORTS = [{ id: "az", name: "A–Z" }, { id: "difficulty", name: "Difficulty" }, { id: "category", name: "Category" }];
 function sortList(list, by) {
   const name = (a, b) => a.name.localeCompare(b.name);
-  const catIx = (e) => { const i = CATS.findIndex((c) => c.id === catsOf(e)[0]); return i < 0 ? 99 : i; };
+  const catIx = (e) => { const i = LIB_CATS.findIndex((c) => c.id === libCatsOf(e)[0]); return i < 0 ? 99 : i; };
   if (by === "difficulty") return list.slice().sort((a, b) => (DIFF_RANK[a.difficulty] || 2) - (DIFF_RANK[b.difficulty] || 2) || name(a, b));
   if (by === "category") return list.slice().sort((a, b) => catIx(a) - catIx(b) || name(a, b));
   return list.slice().sort(name);
@@ -189,6 +278,25 @@ function figureNode(ex, mode, opts) {
   span.className = "fig-fallback";
   span.innerHTML = ICON.body;
   return span;
+}
+
+// Rendered thumbnail (assets/thumbs/<id>.webp) when assets/thumbs/manifest.js lists the exercise,
+// shown over the 2D figure only once it has loaded; on any error the figure stays.
+function thumbNode(ex) {
+  const fig = figureNode(ex, "good");
+  const list = typeof THUMBS !== "undefined" && Array.isArray(THUMBS) ? THUMBS : [];
+  const id = ex.id || ex.slug;
+  if (!ex.thumb && !list.includes(id)) return fig;
+  const box = document.createElement("span");
+  box.className = "thumb-box";
+  box.appendChild(fig);
+  const img = new Image();
+  img.alt = ""; img.decoding = "async"; img.loading = "lazy"; img.className = "thumb-img";
+  img.onload = () => { box.classList.add("has-img"); };
+  img.onerror = () => { img.remove(); };
+  img.src = ex.thumb || "assets/thumbs/" + encodeURIComponent(id) + ".webp";
+  box.appendChild(img);
+  return box;
 }
 
 // ---------- Exercise card ----------
@@ -208,7 +316,7 @@ function exerciseCard(ex) {
     <a class="xcard-link" href="#/exercise/${ex.slug}">
       <span class="xcard-fig"></span>
       <span class="xcard-body">
-        <span class="xcard-cat">${esc(catsOf(ex).map((c) => CAT_NAME[c]).join(" · "))}</span>
+        <span class="xcard-cat">${esc(libCatsOf(ex).slice(0, 2).map((c) => LIB_CAT_NAME[c]).join(" · "))}</span>
         <span class="xcard-name">${esc(ex.name)}</span>
         <span class="xcard-muscles">${prim.map((m) => `<b class="mchip">${esc(m)}</b>`).join("")}</span>
         <span class="xcard-meta">
@@ -218,7 +326,7 @@ function exerciseCard(ex) {
       </span>
     </a>
     ${favButton(ex.name)}`;
-  card.querySelector(".xcard-fig").appendChild(figureNode(ex, "good"));
+  card.querySelector(".xcard-fig").appendChild(thumbNode(ex));
   return card;
 }
 function cardGrid(list, emptyHtml) {
@@ -234,7 +342,7 @@ function exRow(ex, extra) {
   a.className = "ex-mini";
   a.href = "#/exercise/" + ex.slug;
   a.innerHTML = `<span class="ex-mini-fig"></span><span class="ex-mini-text"><b>${esc(ex.name)}</b><span>${esc(EQUIP_NAME[ex.equip] || ex.equipment || "")} · ${esc(DIFF_NAME[ex.difficulty] || "")}</span></span>${extra || ""}${ICON.chevron}`;
-  a.querySelector(".ex-mini-fig").appendChild(figureNode(ex, "good"));
+  a.querySelector(".ex-mini-fig").appendChild(thumbNode(ex));
   return a;
 }
 
