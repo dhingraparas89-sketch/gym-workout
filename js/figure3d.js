@@ -13,6 +13,7 @@
 const VIEW3D = {
   near: 1,        // the near side of the body faces the camera (+z)
   shoulderHalf: 17,
+  shoulderHalfF: 15.6, // the female athlete's shoulder joints (same bones, a narrower shoulder girdle)
   hipHalf: 8.5,
   yaw: 0.62,      // default camera angle around the figure (radians from a pure side view)
   pitch: 0.12,
@@ -96,7 +97,7 @@ function skinFiberUV(sp, x, y, z) {
 }
 // Build the skin from the prepared segments (see prepSegment in makeBody3D). Pure math, no
 // three.js and no outside state, so it can also run in a background worker.
-function buildSkinData(segs) {
+function buildSkinData(segs, mesh) {
   const S = segs.length, BIG = 1e3;
   const local = (g, x, y, z, out) => {
     const e = g.inv;
@@ -116,19 +117,22 @@ function buildSkinData(segs) {
   const CFG = (TORSO >= 0 && segs[TORSO].cloth) || { waist: 7.3, off: 0.55, hem: 21 };
   const clothOut = [0, 0, 0, 0];
   const band = (v, c, w) => Math.exp(-(((v - c) / w) ** 2));
+  // On the base mesh the edges ramp over a wider band (its vertices are a little further apart), so
+  // the shader's crisp 0.5 line runs straight instead of stepping from vertex to vertex.
+  const RW = mesh ? 2.6 : 1, RT = mesh ? 4 : 0;
   function cloth(x, y, z, out) {
     out[0] = 0; out[1] = 0; out[2] = 0; out[3] = 0;
     if (TORSO < 0) return 0;
     local(segs[TORSO], x, y, z, Q);
     const W = CFG.waist, hem = CFG.hem;
-    let r = Math.hypot(Q[0], Q[2]), m = (1 - skinSmooth(W - 0.7, W + 0.7, Q[1])) * skinSmooth(-16, -14, Q[1]) * (1 - skinSmooth(21, 23, r));
+    let r = Math.hypot(Q[0], Q[2]), m = (1 - skinSmooth(W - 0.7 * RW, W + 0.7 * RW, Q[1])) * skinSmooth(-16, -14, Q[1]) * (1 - skinSmooth(21 + RT, 23 + RT, r));
     let lip = m * band(Q[1], W - 0.9, 0.9), seam = Q[1] - (W - 2.2), off = CFG.off;
     for (let i = 0; i < 2; i++) {
       const g = segs[THIGHS[i]];
       if (!g) continue;
       local(g, x, y, z, Q);
       r = Math.hypot(Q[0], Q[2]);
-      const mt = (1 - skinSmooth(hem - 0.7, hem + 0.7, Q[1])) * skinSmooth(-4, -2, Q[1]) * (1 - skinSmooth(11, 13, r));
+      const mt = (1 - skinSmooth(hem - 0.7 * RW, hem + 0.7 * RW, Q[1])) * skinSmooth(-4, -2, Q[1]) * (1 - skinSmooth(11 + RT, 13 + RT, r));
       if (mt > m) { m = mt; lip = mt * band(Q[1], hem - 0.9, 0.9); seam = Q[1] - (hem - 2.0); }
     }
     const T = CFG.top;
@@ -137,11 +141,11 @@ function buildSkinData(segs) {
       const front = Q[0] > 0, az0 = Math.abs(Q[2]);
       // Scoop neckline in front, a racerback dipping between the shoulder blades behind.
       const top = (front ? T.y1 : T.back) - (az0 < 9 ? (front ? 3.2 : 2) * Math.cos((az0 / 9) * Math.PI / 2) : 0);
-      let mt = skinSmooth(T.y0 - 0.6, T.y0 + 0.6, Q[1]) * (1 - skinSmooth(top - 0.6, top + 0.6, Q[1])) * (1 - skinSmooth(19, 21, Math.hypot(Q[0], Q[2])));
+      let mt = skinSmooth(T.y0 - 0.6 * RW, T.y0 + 0.6 * RW, Q[1]) * (1 - skinSmooth(top - 0.6 * RW, top + 0.6 * RW, Q[1])) * (1 - skinSmooth(19 + RT, 21 + RT, Math.hypot(Q[0], Q[2])));
       // Straps over the shoulders, from the top's edge to the back: wide where they leave the
       // neckline, narrowing as they climb outward over the shoulder.
       const az = Math.abs(Q[2]), sy = Q[1] - T.y1, sc = T.strap[0] + 0.3 * sy, sw = Math.max(1.3, T.strap[1] - 0.1 * sy);
-      const strap = (1 - skinSmooth(sw - 0.6, sw + 0.6, Math.abs(az - sc))) * skinSmooth(top - 1.5, top, Q[1]) * (1 - skinSmooth(T.strapTop - 0.6, T.strapTop + 0.6, Q[1]));
+      const strap = (1 - skinSmooth(sw - 0.6 * RW, sw + 0.6 * RW, Math.abs(az - sc))) * skinSmooth(top - 1.5, top, Q[1]) * (1 - skinSmooth(T.strapTop - 0.6 * RW, T.strapTop + 0.6 * RW, Q[1]));
       mt = Math.max(mt, strap);
       // Not on the arms: wherever the upper arm is nearer than the chest, the top stops.
       if (mt > 0 && az > 11) {
@@ -202,6 +206,9 @@ function buildSkinData(segs) {
     return F + (F0 - F) * cm - off;
   }
 
+  // The surface: the athlete's base mesh when there is one (see skinMeshSurface), otherwise the
+  // field itself, meshed with surface nets.
+  function nets() {
   // Sample the field on a grid: a coarse pass first, then fine samples only near the surface.
   const all = { min: { x: Infinity, y: Infinity, z: Infinity }, max: { x: -Infinity, y: -Infinity, z: -Infinity } };
   segs.forEach(({ box: b }) => {
@@ -311,11 +318,16 @@ function buildSkinData(segs) {
     const d2 = (pos[b * 3] - pos[d * 3]) ** 2 + (pos[b * 3 + 1] - pos[d * 3 + 1]) ** 2 + (pos[b * 3 + 2] - pos[d * 3 + 2]) ** 2;
     if (d1 < d2) index.push(a, b, c, a, c, d); else index.push(a, b, d, b, c, d);
   });
+    return { pos, nor, nb, index };
+  }
+  const surf = mesh ? skinMeshSurface(mesh) : nets();
+  const { pos, nor, nb } = surf, nv = pos.length / 3, index = surf.index;
 
   // Per vertex: which muscles shape it (for activation), its fiber coordinates, and how much
   // each segment moves it (skin weights: one segment away from the joints, a blend near them).
-  const weights = {}, fib = new Float32Array(nv * 4), bw = new Float32Array(nv * S), clothV = new Float32Array(nv);
+  const weights = {}, fib = new Float32Array(nv * 4), bw = mesh ? null : new Float32Array(nv * S), clothV = new Float32Array(nv);
   const aux = new Float32Array(nv * 4), AO_D = [1, 2.2, 4, 6.5], AO_W = [0.35, 0.3, 0.22, 0.15];
+  const relief = new Float32Array(nv), lift = new Float32Array(nv);
   segs.forEach((g) => g.feats.forEach((f) => { if (f.id && !weights[f.id]) weights[f.id] = new Float32Array(nv); }));
   const fds = segs.map((g) => new Float32Array(g.feats.length)), ds = new Float32Array(S), L = [0, 0, 0];
   for (let v = 0; v < nv; v++) {
@@ -327,17 +339,25 @@ function buildSkinData(segs) {
       local(g, x, y, z, L);
       ds[s] = skinSegDist(g, L[0], L[1], L[2], fds[s]);
       dmin = Math.min(dmin, ds[s]);
-      g.feats.forEach((f, i) => {
+    }
+    // On the base mesh the skin is not the field's own surface: each muscle is measured from where
+    // the field's surface is here, so the muscle map lies on the mesh the way it lay on the field.
+    const corr = mesh ? Math.max(-4, Math.min(4, dmin)) : 0;
+    for (let s = 0; s < S; s++) {
+      if (ds[s] >= BIG) continue;
+      segs[s].feats.forEach((f, i) => {
         if (!f.id) return;
-        const e = fds[s][i];
+        const e = fds[s][i] - corr;
         weights[f.id][v] = Math.max(weights[f.id][v], 1 - skinSmooth(0.3, 2.6, e));
         if (!top || e < t1) { if (top && f.group !== top.group) t2 = Math.min(t2, t1); top = f; t1 = e; topSeg = s; }
         else if (f.group !== top.group) t2 = Math.min(t2, e);
       });
     }
-    let sum = 0;
-    for (let s = 0; s < S; s++) { const w = ds[s] >= BIG ? 0 : 1 - skinSmooth(0, segs[s].tau, ds[s] - dmin); bw[v * S + s] = w; sum += w; }
-    for (let s = 0; s < S; s++) bw[v * S + s] /= sum || 1;
+    if (bw) {
+      let sum = 0;
+      for (let s = 0; s < S; s++) { const w = ds[s] >= BIG ? 0 : 1 - skinSmooth(0, segs[s].tau, ds[s] - dmin); bw[v * S + s] = w; sum += w; }
+      for (let s = 0; s < S; s++) bw[v * S + s] /= sum || 1;
+    }
     // Two different muscles meeting near the surface: a faint groove between them.
     clothV[v] = cloth(x, y, z, clothOut);
     aux[v * 4 + 1] = clothOut[2]; aux[v * 4 + 2] = clothOut[3];
@@ -347,7 +367,7 @@ function buildSkinData(segs) {
     // is still close (armpits, the crotch, between the glutes, under the chest stay darker).
     let occ = 0;
     for (let i = 0; i < AO_D.length; i++) {
-      const d = AO_D[i], f = field(x + nor[v * 3] * d, y + nor[v * 3 + 1] * d, z + nor[v * 3 + 2] * d);
+      const d = AO_D[i], f = field(x + nor[v * 3] * d, y + nor[v * 3 + 1] * d, z + nor[v * 3 + 2] * d) - corr;
       occ += AO_W[i] * Math.max(0, d - f) / d;
     }
     aux[v * 4] = Math.max(0.3, 1 - 1.15 * occ);
@@ -356,25 +376,37 @@ function buildSkinData(segs) {
       const [u, w] = skinFiberUV(top.spec, L[0], L[1], L[2]);
       fib[v * 4] = u; fib[v * 4 + 1] = w; fib[v * 4 + 2] = 1 - skinSmooth(0.3, 2.8, t1);
     }
+    if (mesh) { relief[v] = sep; lift[v] = clothOut[1]; continue; }
     pos[v * 3] -= nor[v * 3] * 0.12 * sep; pos[v * 3 + 1] -= nor[v * 3 + 1] * 0.12 * sep; pos[v * 3 + 2] -= nor[v * 3 + 2] * 0.12 * sep;
   }
-  // Smooth the skin weights over the surface so joints bend in a soft band, then keep the top four.
-  const bw2 = new Float32Array(bw.length);
-  for (let it = 0; it < 4; it++) {
-    for (let v = 0; v < nv; v++) {
-      const n = nb[v], c = n.length;
-      for (let s = 0; s < S; s++) {
-        let acc = 0; for (let q = 0; q < c; q++) acc += bw[n[q] * S + s];
-        bw2[v * S + s] = c ? bw[v * S + s] * 0.4 + (acc / c) * 0.6 : bw[v * S + s];
+  if (mesh) skinMeshFinish(pos, nor, nb, index, relief, lift, clothV, aux, mesh.relief);
+  const names = segs.map((g) => g.name);
+  let B, wb;
+  if (mesh) {
+    // Skin weights come with the mesh (bones by name; the finger bones go after the four twist bones).
+    const NBm = mesh.bones.length, W = surf.W;
+    const map = mesh.bones.map((n, k) => (names.indexOf(n) >= 0 ? names.indexOf(n) : S + 4 + (k - S)));
+    B = S + 4 + (NBm - S); wb = new Float32Array(nv * B);
+    for (let v = 0; v < nv; v++) for (let k = 0; k < NBm; k++) { const w = W[v * NBm + k]; if (w > 1e-4) wb[v * B + map[k]] += w; }
+  } else {
+    // Smooth the skin weights over the surface so joints bend in a soft band.
+    const bw2 = new Float32Array(bw.length);
+    for (let it = 0; it < 4; it++) {
+      for (let v = 0; v < nv; v++) {
+        const n = nb[v], c = n.length;
+        for (let s = 0; s < S; s++) {
+          let acc = 0; for (let q = 0; q < c; q++) acc += bw[n[q] * S + s];
+          bw2[v * S + s] = c ? bw[v * S + s] * 0.4 + (acc / c) * 0.6 : bw[v * S + s];
+        }
       }
+      bw.set(bw2);
     }
-    bw.set(bw2);
+    B = S + 4; wb = new Float32Array(nv * B);
+    for (let v = 0; v < nv; v++) for (let s = 0; s < S; s++) wb[v * B + s] = bw[v * S + s];
   }
   // Forearm and palm: the hand's turn (palm up, palm down) is spread along the forearm by two
   // twist bones (after the segments: S + 0/1 for the right arm, S + 2/3 for the left), the way the
   // forearm bones roll over each other, so the wrist never twists like a candy wrapper.
-  const B = S + 4, wb = new Float32Array(nv * B), names = segs.map((g) => g.name);
-  for (let v = 0; v < nv; v++) for (let s = 0; s < S; s++) wb[v * B + s] = bw[v * S + s];
   ["R", "L"].forEach((side, n) => {
     const fa = names.indexOf("forearm" + side), hd = names.indexOf("hand" + side), chain = [fa, S + n * 2, S + n * 2 + 1, hd], at = [3, 12, 20, 28.5];
     for (let v = 0; v < nv; v++) {
@@ -402,7 +434,100 @@ function buildSkinData(segs) {
     const pw = weights[p] || (weights[p] = new Float32Array(nv));
     for (let v = 0; v < nv; v++) if (w[v] > pw[v]) pw[v] = w[v];
   });
-  return { pos, nor, index: new Uint32Array(index), fib, cloth: clothV, aux, weights, skinIndex, skinWeight };
+  return { pos, nor, index: new Uint32Array(index), fib, cloth: clothV, aux, weights, skinIndex, skinWeight, mesh: !!mesh };
+}
+
+// ---------- Base mesh ----------
+// The athletes' surface is a sculpted human base mesh (MakeHuman 1.1, CC0; see assets/body-mesh.js
+// and tools/build-body-mesh.js), made faceless and moved onto this skeleton's rest pose. Here it is
+// smoothed once (Catmull-Clark: every quad becomes four), its skin weights carried along.
+function skinMeshSurface(mesh) {
+  let nv = mesh.nv, P = mesh.pos;
+  const NB = mesh.bones.length, W0 = new Float32Array(nv * NB);
+  for (let v = 0; v < nv; v++) for (let j = 0; j < 4; j++) W0[v * NB + mesh.si[v * 4 + j]] += mesh.sw[v * 4 + j] / 255;
+  let faces = [];
+  for (let i = 0; i < mesh.quads.length; i += 4) { const q = mesh.quads; faces.push(q[i + 3] === q[i + 2] ? [q[i], q[i + 1], q[i + 2]] : [q[i], q[i + 1], q[i + 2], q[i + 3]]); }
+  let attrs = [[P, 3], [W0, NB]];
+  for (let level = 0; level < (mesh.levels ?? 1); level++) {
+    const F = faces.length, edge = new Map(), E = [];
+    const ek = (a, b) => (a < b ? a * nv + b : b * nv + a);
+    const fe = faces.map((f, fi) => f.map((a, i) => {
+      const b = f[(i + 1) % f.length], k = ek(a, b);
+      let e = edge.get(k);
+      if (e == null) { e = E.length; edge.set(k, e); E.push([a, b, fi, -1]); } else E[e][3] = fi;
+      return e;
+    }));
+    const val = new Uint16Array(nv), vf = Array.from({ length: nv }, () => []), ve = Array.from({ length: nv }, () => []);
+    E.forEach(([a, b], e) => { val[a]++; val[b]++; ve[a].push(e); ve[b].push(e); });
+    faces.forEach((f, fi) => f.forEach((a) => vf[a].push(fi)));
+    const N2 = nv + F + E.length;
+    attrs = attrs.map(([A, n]) => {
+      const O = new Float32Array(N2 * n), fo = nv, eo = nv + F;
+      faces.forEach((f, fi) => { for (let c = 0; c < n; c++) { let t = 0; f.forEach((a) => { t += A[a * n + c]; }); O[(fo + fi) * n + c] = t / f.length; } });
+      E.forEach(([a, b, f0, f1], e) => {
+        for (let c = 0; c < n; c++) O[(eo + e) * n + c] = f1 < 0 ? (A[a * n + c] + A[b * n + c]) / 2 : (A[a * n + c] + A[b * n + c] + O[(fo + f0) * n + c] + O[(fo + f1) * n + c]) / 4;
+      });
+      for (let v = 0; v < nv; v++) {
+        const k = val[v]; if (!k) continue;
+        for (let c = 0; c < n; c++) {
+          let fa = 0, ra = 0;
+          vf[v].forEach((fi) => { fa += O[(fo + fi) * n + c]; });
+          ve[v].forEach((e) => { ra += (A[E[e][0] * n + c] + A[E[e][1] * n + c]) / 2; });
+          O[v * n + c] = (fa / vf[v].length + 2 * (ra / ve[v].length) + (k - 3) * A[v * n + c]) / k;
+        }
+      }
+      return [O, n];
+    });
+    const nf = [];
+    faces.forEach((f, fi) => f.forEach((a, i) => nf.push([a, nv + F + fe[fi][i], nv + fi, nv + F + fe[fi][(i + f.length - 1) % f.length]])));
+    faces = nf; nv = N2;
+  }
+  const pos = attrs[0][0], W = attrs[1][0];
+  const nbs = Array.from({ length: nv }, () => new Set());
+  faces.forEach((q) => q.forEach((a, i) => { nbs[a].add(q[(i + 1) % q.length]); nbs[a].add(q[(i + q.length - 1) % q.length]); }));
+  const nb = nbs.map((x) => [...x]);
+  const index = [];
+  faces.forEach(([a, b, c, d]) => {
+    const d1 = (pos[a * 3] - pos[c * 3]) ** 2 + (pos[a * 3 + 1] - pos[c * 3 + 1]) ** 2 + (pos[a * 3 + 2] - pos[c * 3 + 2]) ** 2;
+    const d2 = (pos[b * 3] - pos[d * 3]) ** 2 + (pos[b * 3 + 1] - pos[d * 3 + 1]) ** 2 + (pos[b * 3 + 2] - pos[d * 3 + 2]) ** 2;
+    if (d1 < d2) index.push(a, b, c, a, c, d); else index.push(a, b, d, b, c, d);
+  });
+  return { pos, nor: skinNormals(pos, index), nb, index, W };
+}
+function skinNormals(pos, index, out) {
+  const nor = out || new Float32Array(pos.length); nor.fill(0);
+  for (let i = 0; i < index.length; i += 3) {
+    const a = index[i] * 3, b = index[i + 1] * 3, c = index[i + 2] * 3;
+    const ux = pos[b] - pos[a], uy = pos[b + 1] - pos[a + 1], uz = pos[b + 2] - pos[a + 2], wx = pos[c] - pos[a], wy = pos[c + 1] - pos[a + 1], wz = pos[c + 2] - pos[a + 2];
+    const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx;
+    for (const k of [a, b, c]) { nor[k] += nx; nor[k + 1] += ny; nor[k + 2] += nz; }
+  }
+  for (let v = 0; v < nor.length; v += 3) { const l = Math.hypot(nor[v], nor[v + 1], nor[v + 2]) || 1; nor[v] /= l; nor[v + 1] /= l; nor[v + 2] /= l; }
+  return nor;
+}
+// After the muscle map is known: soft valleys between neighbouring muscles (relief), clothing and
+// hair standing off the skin (lift), and fabric bridging the body's creases (it does not follow the
+// cleft between the glutes or the lines of the abdomen).
+function skinMeshFinish(pos, nor, nb, index, relief, lift, cloth, aux, depth) {
+  const nv = pos.length / 3, D = depth ?? 0.3;
+  // The valley mask, softened over the surface so it is a gentle trough, not a cut.
+  let r = Float32Array.from(relief), t = new Float32Array(nv);
+  for (let it = 0; it < 2; it++) { for (let v = 0; v < nv; v++) { let a = 0; nb[v].forEach((u) => { a += r[u]; }); t[v] = r[v] * 0.5 + (a / nb[v].length) * 0.5; } r.set(t); }
+  for (let v = 0; v < nv; v++) {
+    const d = lift[v] - D * r[v];
+    pos[v * 3] += nor[v * 3] * d; pos[v * 3 + 1] += nor[v * 3 + 1] * d; pos[v * 3 + 2] += nor[v * 3 + 2] * d;
+  }
+  const tmp = new Float32Array(pos.length);
+  for (let it = 0; it < 8; it++) {
+    tmp.set(pos);
+    for (let v = 0; v < nv; v++) {
+      const m = Math.max(cloth[v], aux[v * 4 + 1]) * 0.6; if (m < 0.01) continue;
+      let x = 0, y = 0, z = 0; nb[v].forEach((u) => { x += tmp[u * 3]; y += tmp[u * 3 + 1]; z += tmp[u * 3 + 2]; });
+      const c = nb[v].length;
+      pos[v * 3] += (x / c - pos[v * 3]) * m; pos[v * 3 + 1] += (y / c - pos[v * 3 + 1]) * m; pos[v * 3 + 2] += (z / c - pos[v * 3 + 2]) * m;
+    }
+  }
+  skinNormals(pos, index, nor);
 }
 
 // Built once per page and shared by every viewer: in a background worker when the browser allows
@@ -410,25 +535,61 @@ function buildSkinData(segs) {
 const SKIN = { data: null, waiting: [], started: false };
 // One skin per athlete, each built once and shared (SKIN is the male one).
 const SKINS = { male: SKIN, female: { data: null, waiting: [], started: false } };
-const SKIN_HELPERS = [skinLatheR, skinLatheShape, skinEllDist, skinLatheDist, skinSmin, skinSmooth, skinSegDist, skinFiberUV, buildSkinData];
+const SKIN_HELPERS = [skinLatheR, skinLatheShape, skinEllDist, skinLatheDist, skinSmin, skinSmooth, skinSegDist, skinFiberUV, buildSkinData, skinMeshSurface, skinNormals, skinMeshFinish];
+// The base meshes (assets/body-mesh.js, about 0.55 MB) load once, next to this script; without
+// them (missing file, offline) the body falls back to the procedural surface.
+const BODY_MESH_SRC = (() => {
+  try { const s = document.currentScript && document.currentScript.src; return s ? new URL("../assets/body-mesh.js", s).href : "assets/body-mesh.js"; }
+  catch (e) { return "assets/body-mesh.js"; }
+})();
+let bodyMeshWait = null;
+function loadBodyMesh(cb) {
+  if (typeof window === "undefined" || window.BODY_MESH || window.BODY_MESH === false) { cb((typeof window !== "undefined" && window.BODY_MESH) || null); return; }
+  if (!bodyMeshWait) {
+    bodyMeshWait = [];
+    const flush = () => { if (!window.BODY_MESH) window.BODY_MESH = false; bodyMeshWait.splice(0).forEach((f) => f(window.BODY_MESH || null)); };
+    try {
+      const el = document.createElement("script");
+      el.src = BODY_MESH_SRC; el.async = true; el.onload = flush; el.onerror = flush;
+      document.head.appendChild(el);
+      setTimeout(() => { if (bodyMeshWait.length) flush(); }, 20000);
+    } catch (e) { setTimeout(flush, 0); }
+  }
+  bodyMeshWait.push(cb);
+}
+// One athlete's mesh, decoded: positions (rest pose, cm), quads, skin weights (4 bones a vertex).
+const BODY_MESH_CACHE = {};
+function bodyMeshFor(sex) {
+  const D = typeof window !== "undefined" && window.BODY_MESH;
+  if (!D || !D.bodies || !D.bodies[sex]) return null;
+  if (BODY_MESH_CACHE[sex]) return BODY_MESH_CACHE[sex];
+  const u8 = (b) => { const t = atob(b), a = new Uint8Array(t.length); for (let i = 0; i < t.length; i++) a[i] = t.charCodeAt(i); return a; };
+  const B = D.bodies[sex], q = new Uint16Array(u8(B.pos).buffer), pos = new Float32Array(D.nv * 3);
+  for (let v = 0; v < D.nv; v++) for (let k = 0; k < 3; k++) pos[v * 3 + k] = B.lo[k] + ((B.hi[k] - B.lo[k]) * q[v * 3 + k]) / 65535;
+  return (BODY_MESH_CACHE[sex] = { nv: D.nv, pos, quads: new Uint16Array(u8(D.quads).buffer), si: u8(B.si), sw: u8(B.sw), bones: D.bones,
+    fingers: B.fingers, SH: D.skel[sex].SH, relief: sex === "female" ? 0.16 : 0.3, levels: 1 });
+}
 function requestSkin(segs, done, athlete) {
   const SKIN = SKINS[athlete] || SKINS.male;
   if (SKIN.data) { Promise.resolve().then(() => done(SKIN.data)); return; }
   SKIN.waiting.push(done);
   if (SKIN.started) return;
   SKIN.started = true;
+  loadBodyMesh(() => buildSkin(segs, SKIN, bodyMeshFor(athlete)));
+}
+function buildSkin(segs, SKIN, mesh) {
   const finish = (data) => { if (SKIN.data) return; SKIN.data = data; SKIN.waiting.splice(0).forEach((cb) => cb(data)); };
-  const here = () => setTimeout(() => finish(buildSkinData(segs)), 0);
+  const here = () => setTimeout(() => finish(buildSkinData(segs, mesh)), 0);
   let worker = null;
   try {
-    const src = SKIN_HELPERS.map(String).join("\n") + "\nonmessage = (e) => { const d = buildSkinData(e.data); postMessage(d, [d.pos.buffer, d.nor.buffer, d.index.buffer, d.fib.buffer, d.cloth.buffer, d.aux.buffer, d.skinIndex.buffer, d.skinWeight.buffer, ...Object.values(d.weights).map((w) => w.buffer)]); };";
+    const src = SKIN_HELPERS.map(String).join("\n") + "\nonmessage = (e) => { const d = buildSkinData(e.data.segs, e.data.mesh); postMessage(d, [d.pos.buffer, d.nor.buffer, d.index.buffer, d.fib.buffer, d.cloth.buffer, d.aux.buffer, d.skinIndex.buffer, d.skinWeight.buffer, ...Object.values(d.weights).map((w) => w.buffer)]); };";
     worker = new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
   } catch (err) { worker = null; }
   if (!worker) { here(); return; }
-  const fallback = setTimeout(() => { worker.terminate(); here(); }, 20000);
+  const fallback = setTimeout(() => { worker.terminate(); here(); }, 30000);
   worker.onmessage = (e) => { clearTimeout(fallback); worker.terminate(); finish(e.data); };
   worker.onerror = (e) => { if (e.preventDefault) e.preventDefault(); clearTimeout(fallback); worker.terminate(); here(); };
-  worker.postMessage(segs);
+  worker.postMessage({ segs, mesh });
 }
 
 function makeBody3D(THREE, mats, athlete) {
@@ -540,7 +701,7 @@ function makeBody3D(THREE, mats, athlete) {
   // breasts under a sports bra, softer muscle separation, and hair.
   function skinDefs(sex) {
     const F = sex === "female", v = (m, f) => (F ? f : m);
-    const SH = VIEW3D.shoulderHalf, HH = VIEW3D.hipHalf;
+    const SH = F ? VIEW3D.shoulderHalfF : VIEW3D.shoulderHalf, HH = VIEW3D.hipHalf;
     const M = (pos, q) => new THREE.Matrix4().compose(new THREE.Vector3(...pos), q || new THREE.Quaternion(), new THREE.Vector3(1, 1, 1));
     const Q = (x, z) => new THREE.Quaternion().setFromEuler(new THREE.Euler(x, 0, z, "XYZ"));
     const Qy = (y) => new THREE.Quaternion().setFromEuler(new THREE.Euler(0, y, 0));
@@ -847,19 +1008,58 @@ function makeBody3D(THREE, mats, athlete) {
     skinAttrs(geo);
     return geo;
   };
-  // Both athletes share the skeleton (same bones, same rest pose), so switching athlete only
-  // swaps the skin's surface; the pose, equipment fit and camera carry over.
+  // Both athletes share the bones (so every exercise, pose and equipment fit works unchanged);
+  // her shoulder joints sit a little closer together (VIEW3D.shoulderHalfF), so each athlete is
+  // bound in her or his own rest pose.
+  // With the base mesh the fingers and thumbs are bones of the skin too, bound in the mesh's own
+  // relaxed hand (each phalanx's rest angle and knuckle position come with the mesh), and the palm
+  // is bound at its real size (the hand pivot's 1.1 scale cancels out).
+  const FINGER_BONES = [];
+  ["R", "L"].forEach((s) => {
+    [0, 1, 2, 3].forEach((f) => [0, 1, 2].forEach((i) => FINGER_BONES.push({ s, key: `f${s}${f}${i}`, parent: i ? `f${s}${f}${i - 1}` : "hand" + s, g: hands[s].fingers[f][i] })));
+    FINGER_BONES.push({ s, key: `t${s}0`, parent: "hand" + s, g: hands[s].thumb[0] }, { s, key: `t${s}1`, parent: `t${s}0`, g: hands[s].thumb[1] });
+  });
+  const FINGER_HOME = FINGER_BONES.map((b) => b.g.position.clone());
+  function bindPose(sex, data) {
+    const defs = defsFor(sex), inv = defs.map((d) => d.rest.clone().invert()), tw = [];
+    ["R", "L"].forEach((s) => { const fr = defs.find((d) => d.name === "forearm" + s).rest; tw.push(fr.clone().invert(), fr.clone().invert()); });
+    const M = data.mesh && bodyMeshFor(sex);
+    FINGER_BONES.forEach((b, i) => { b.g.position.copy(FINGER_HOME[i]); });
+    if (!M) return { bones: [...defs.map((d) => boneOf(d.name)), ...hands.R.twist, ...hands.L.twist], inv: [...inv, ...tw] };
+    const world = {}, S11 = new THREE.Matrix4().makeScale(1.1, 1.1, 1.1);
+    ["R", "L"].forEach((s) => {
+      const hw = defs.find((d) => d.name === "forearm" + s).rest.clone().multiply(new THREE.Matrix4().makeTranslation(0, 27, 0)).multiply(S11);
+      inv[defs.findIndex((d) => d.name === "hand" + s)] = hw.clone().invert();
+      world["hand" + s] = hw;
+    });
+    const finv = FINGER_BONES.map((b) => {
+      const f = M.fingers[b.key], p = new THREE.Vector3(...f.p).multiplyScalar(1 / 1.1);
+      b.g.position.copy(p);
+      world[b.key] = world[b.parent].clone().multiply(new THREE.Matrix4().compose(p, new THREE.Quaternion(...f.q), new THREE.Vector3(1, 1, 1)));
+      return world[b.key].clone().invert();
+    });
+    return { bones: [...defs.map((d) => boneOf(d.name)), ...hands.R.twist, ...hands.L.twist, ...FINGER_BONES.map((b) => b.g)], inv: [...inv, ...tw, ...finv] };
+  }
+  // The jointed capsule fingers are only for the procedural body; the mesh has its own hands.
+  const capsules = skinList.slice();
+  function useMeshHands(on) {
+    capsules.forEach((m) => { m.visible = !on; const i = skinList.indexOf(m); if (on && i >= 0) skinList.splice(i, 1); if (!on && i < 0) skinList.push(m); });
+  }
+  body.boneNames.push(...FINGER_BONES.map((b) => "hand" + b.s + "." + b.key));
+  const shoulderOf = (sex) => (sex === "female" ? VIEW3D.shoulderHalfF : VIEW3D.shoulderHalf);
   const prepared = {};
   const skinOf = (sex, cb) => requestSkin(prepared[sex] = prepared[sex] || defsFor(sex).map(prepSegment), cb, sex);
   body.athlete = athlete;
+  body.shoulderHalf = shoulderOf(athlete);
+  if (typeof window !== "undefined" && window.BODY_DEBUG) (window.BODY_DEBUG.bodies = window.BODY_DEBUG.bodies || []).push(body); // test pages only
   skinOf(athlete, (data) => {
-    const skin = new THREE.SkinnedMesh(geoOf(data), mats.skin);
-    skin.bind(new THREE.Skeleton([...SKIN_DEFS.map((d) => boneOf(d.name)), ...hands.R.twist, ...hands.L.twist],
-      [...SKIN_DEFS.map((d) => d.rest.clone().invert()), ...twistRest]), new THREE.Matrix4());
+    const skin = new THREE.SkinnedMesh(geoOf(data), mats.skin), bp = bindPose(athlete, data);
+    skin.bind(new THREE.Skeleton(bp.bones, bp.inv), new THREE.Matrix4());
     skin.castShadow = true; skin.receiveShadow = true; skin.frustumCulled = false;
     skin.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e4); // posed anywhere: never cull, raycast against triangles
     skin.userData.weights = data.weights; skin.userData.tone = 1;
     skinList.forEach((m) => { m.visible = true; });
+    useMeshHands(!!data.mesh);
     skinList.unshift(skin); skinMeshes.body = [skin];
     body.skin = skin;
     body.hairOn = athlete === "female";
@@ -874,9 +1074,13 @@ function makeBody3D(THREE, mats, athlete) {
     body.athlete = sex;
     skinOf(sex, (data) => body.onSkin((skin) => {
       if (body.athlete !== sex) return;
-      const old = skin.geometry;
+      const old = skin.geometry, bp = bindPose(sex, data);
       skin.geometry = geoOf(data); skin.userData.weights = data.weights;
+      skin.skeleton.dispose();
+      skin.bind(new THREE.Skeleton(bp.bones, bp.inv), new THREE.Matrix4());
+      useMeshHands(!!data.mesh);
       old.dispose();
+      body.shoulderHalf = shoulderOf(sex);
       body.hairOn = sex === "female";
       if (cb) cb();
     }));
@@ -1517,7 +1721,7 @@ function createViewer3D(container, mode, opts = {}) {
     rig = GYM3D.kits.build(kitName, ctx) || null;
     // Held weights (dumbbells, kettlebells) must clear the thighs and trunk: if one sinks into the
     // body anywhere in the rep, swing that arm out just enough and fit the scene again.
-    if (!again && rig && measureClearance(S)) { fitScene(true); return; }
+    if ((again || 0) < 5 && rig && measureClearance(S)) { fitScene((again || 0) + 1); return; }
     // Soft contact shadows under every foot of the equipment.
     contactShadows(P.shadows);
     buildPaths();
@@ -1543,6 +1747,9 @@ function createViewer3D(container, mode, opts = {}) {
       return m;
     });
     if (!held.length || held.length > 60) return false;
+    // Both hands on one implement (goblet, overhead extension, kettlebell): swinging an arm out
+    // would pull the hands off it.
+    if (S.some((x) => x.grip.R.distanceTo(x.grip.L) < 24)) return false;
     const names = body.boneNames, dom = dominantBones(), arm = names.map((n) => /^(upperArm|forearm|hand|twist)/.test(n));
     const need = { R: 0, L: 0 }, inv = new THREE.Matrix4(), q = new THREE.Vector3(), c3 = new THREE.Vector3(), sc = new THREE.Vector3();
     S.forEach((smp) => {
@@ -1569,13 +1776,14 @@ function createViewer3D(container, mode, opts = {}) {
           if (d > 0.6) {
             // Only what an arm swing can fix: depth measured sideways (across the body).
             const reach = Math.max(25, smp.grip[side].distanceTo(smp.J.shoulder));
-            need[side] = Math.max(need[side], Math.min(18, ((d + 1.2) / reach) * 57.3));
+            need[side] = Math.max(need[side], Math.min(18, ((d + 2) / reach) * 57.3));
           }
         }
       });
     });
     if (need.R < 0.5 && need.L < 0.5) return false;
-    body.clear = need;
+    const was = body.clear || { R: 0, L: 0 };
+    body.clear = { R: Math.min(30, was.R + need.R), L: Math.min(30, was.L + need.L) };
     return true;
   }
 
@@ -1627,6 +1835,7 @@ function createViewer3D(container, mode, opts = {}) {
     }
     setHandQ(h, fa, side, handBasis(fa, side, torsoQ, fk >= 1), wrist);
   }
+  let handRef = null; // sides whose arm is posed by angles (see pose)
   function handBasis(fa, side, torsoQ, flat) {
     const y = new THREE.Vector3(0, 1, 0).applyQuaternion(fa.quaternion);
     const grip = fig3.grip || (fig3.hand === "flat" ? "neutral" : "over");
@@ -1644,7 +1853,10 @@ function createViewer3D(container, mode, opts = {}) {
     } else {
       // Overhand: thumbs point in toward each other; underhand: out. The left hand's thumb is on
       // its -z side, so the same z gives a mirror-image grip on both hands.
-      z = Z.clone().multiplyScalar(grip === "under" ? 1 : -1);
+      // Relative to the elbow's hinge (the upper arm's z) when the arm is posed by angles, so an
+      // arm swung out or back keeps the forearm's twist within its natural range.
+      const ref = handRef && handRef[side > 0 ? "R" : "L"] ? Z.clone().applyQuaternion(cur.parts["upperArm" + (side > 0 ? "R" : "L")].quaternion) : Z.clone();
+      z = ref.multiplyScalar(grip === "under" ? 1 : -1);
       z.sub(y.clone().multiplyScalar(z.dot(y)));
       if (z.lengthSq() < 1e-4) z.set(1, 0, 0);
       z.normalize(); x = new THREE.Vector3().crossVectors(y, z);
@@ -1678,7 +1890,7 @@ function createViewer3D(container, mode, opts = {}) {
   let reachEnds = null;
   function reachTarget(pz, side) {
     const ends = curEnds.map(({ j, gz }) => ({
-      S: to3(j.shoulder).add(new THREE.Vector3(0, 0, side * VIEW3D.shoulderHalf)),
+      S: to3(j.shoulder).add(new THREE.Vector3(0, 0, side * (cur.shoulderHalf || VIEW3D.shoulderHalf))),
       H: to3(j.hand).setZ(side * (gz ?? fig3.ik.grip ?? 22))
     }));
     const ra = ends[0].H.clone().sub(ends[0].S), rb = ends[1].H.clone().sub(ends[1].S);
@@ -1792,7 +2004,7 @@ function createViewer3D(container, mode, opts = {}) {
   }
   function alignGrips(p, torsoQ, handMode) {
     const grip = fig3.grip || "over", c = ex && ex.animation && ex.animation.contact;
-    if (handMode !== "grip" || (grip !== "over" && grip !== "under") || (c && c.hands !== "both") || fig3.alignGrips === false) return;
+    if (handMode !== "grip" || (grip !== "over" && grip !== "under") || (c && (c.hands !== "both" || c.implement === "pair")) || fig3.alignGrips === false) return;
     const P = cur.parts, bar = endOf(P.forearmR, 27).sub(endOf(P.forearmL, 27));
     if (bar.lengthSq() < 1) return;
     bar.normalize();
@@ -1864,11 +2076,12 @@ function createViewer3D(container, mode, opts = {}) {
     const ik = fig3.ik || (fig3.hand === "flat" ? FLAT_IK : null), handMode = fig3.hand || "grip";
     const lateral = new THREE.Vector3(0, 0, 1);
     const abd = ((p.abd || 0) * Math.PI) / 180;
+    handRef = {};
     const reach = []; // IK arms holding something: re-aimed below so the grip lands on the target
     [1, -1].forEach((side) => {
       const s = side > 0 ? "R" : "L";
       // Shoulder joint: out to the side and slightly down from the top of the torso.
-      const sh = shoulderC.clone().add(new THREE.Vector3(0, -3 + (p.shrug || 0), 0).applyQuaternion(torsoQ)).add(lateral.clone().multiplyScalar(side * VIEW3D.shoulderHalf));
+      const sh = shoulderC.clone().add(new THREE.Vector3(0, -3 + (p.shrug || 0), 0).applyQuaternion(torsoQ)).add(lateral.clone().multiplyScalar(side * (cur.shoulderHalf || VIEW3D.shoulderHalf)));
       let extra = null;
       if (abd) {
         const axis = p.abdAxis === "spine" ? new THREE.Vector3(0, 1, 0).applyQuaternion(torsoQ) : new THREE.Vector3(1, 0, 0).applyQuaternion(torsoQ);
@@ -1888,7 +2101,7 @@ function createViewer3D(container, mode, opts = {}) {
           : ik.fixed ? to3(curEnds[0].j.hand).setZ(side * (curEnds[0].gz ?? ik.grip ?? 22))
           : t == null || fig3.hold === "hands" || ik.direct ? to3(j.hand).setZ(side * (p.gz ?? ik.grip ?? 22))
           : ik.arc ? arcTarget(t, side)
-          : to3(j.shoulder).add(new THREE.Vector3(0, 0, side * VIEW3D.shoulderHalf)).add(reachTarget(t, side));
+          : to3(j.shoulder).add(new THREE.Vector3(0, 0, side * (cur.shoulderHalf || VIEW3D.shoulderHalf))).add(reachTarget(t, side));
         // Two hands on one bar keep their grip width all the way (the arc around the shoulder
         // would otherwise draw them in or out along the bar).
         if (!ik.fixed && !ik.direct && !ik.arc && !ik.stack && fig3.hold !== "hands" && (fig3.grip || "over") !== "neutral") H.z = side * (p.gz ?? ik.grip ?? 22);
@@ -1921,9 +2134,10 @@ function createViewer3D(container, mode, opts = {}) {
         // Extra swing so a held weight clears the body (see measureClearance).
         const clr = cur.clear && cur.clear[s];
         if (clr) {
-          const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0).applyQuaternion(torsoQ).normalize(), (side * clr * Math.PI) / 180);
+          const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0).applyQuaternion(torsoQ).normalize(), (-side * clr * Math.PI) / 180);
           ex2 = ex2 ? ex2.clone().premultiply(q) : q;
         }
+        handRef[s] = true;
         placeAngle(cur.parts["upperArm" + s], sh, a2 ? a2.ua : p.ua, ex2);
         const elbow = endOf(cur.parts["upperArm" + s], uaLen);
         placeAngle(cur.parts["forearm" + s], elbow, a2 ? a2.fa : p.fa, ex2);
@@ -2716,7 +2930,8 @@ function createViewer3D(container, mode, opts = {}) {
     _audit() {
       return { THREE, body, equipment, scene, get floorY() { return floorY; }, get fig() { return fig3; }, get ex() { return ex; },
         shapeT, gripPoint, gripAxis, jointsOf: () => jointsOf(body), skinWorld, dominantBones, materials: GYM3D.materials(),
-        poseAt(t) { pose(lerp3(poseA, poseB, t), fig3.ik ? t : null); } };
+        poseAt(t) { pose(lerp3(poseA, poseB, t), fig3.ik ? t : null); },
+        focus(at, zoom) { closeUp = { zoom, at: at.clone() }; } };
     },
     // Contact report (for automated checks): how the body meets the floor and the equipment.
     inspect() {

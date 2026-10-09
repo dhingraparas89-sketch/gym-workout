@@ -94,7 +94,7 @@ function formFeedback(ex, opts = {}) {
   const moreHtml = more.length ? `<article class="ff-card ff-more"><header class="ff-head"><span class="ff-badge is-muted">${ICON.info}Also watch for</span></header>
       <ul class="ff-more-list">${more.map((m) => `<li>${esc(m)}</li>`).join("")}</ul></article>` : "";
   if (!e) {
-    return `<section class="ff" aria-label="Form guidance">${ffIntro(false)}<div class="ff-grid ff-single">${good}${moreHtml}</div></section>`;
+    return `<section class="ff" aria-label="Form guidance">${opts.intro === false ? "" : ffIntro(false)}<div class="ff-grid ff-single">${good}${moreHtml}</div></section>`;
   }
   const comp = (e.compensate || []).map(muscleName);
   const whyText = whyOf(ex, e);
@@ -111,7 +111,7 @@ function formFeedback(ex, opts = {}) {
       <div class="ff-metric" hidden><span class="ff-label">Measured on the demonstration model</span><p></p></div>
       ${opts.demo ? `<button type="button" class="btn btn-ghost btn-sm ff-demo" data-demo="mistake">${ICON.cube}${esc(opts.demo)}</button>` : ""}
     </article>`;
-  return `<section class="ff" aria-label="Form guidance">${ffIntro(true)}<div class="ff-grid">${good}${fix}${moreHtml}</div></section>`;
+  return `<section class="ff" aria-label="Form guidance">${opts.intro === false ? "" : ffIntro(true)}<div class="ff-grid">${good}${fix}${moreHtml}</div></section>`;
 }
 function ffIntro(hasMistake) {
   return `<p class="ff-intro">${ICON.info}<span><b>Instructional examples, not live analysis.</b> ${hasMistake ? "The correction is a common mistake demonstrated on a 3D model. Nothing here measures or analyzes your own lifting." : "How a well-executed rep looks, demonstrated on a 3D model."}</span></p>`;

@@ -71,8 +71,8 @@ function applyTarget(V, name, w) {
 }
 // muscle and weight are MakeHuman's macro sliders (0..1, 0.5 = average); height likewise.
 const BODIES = {
-  male: { sex: "male", muscle: 0.86, weight: 0.3, height: 0.5, prop: 0.5 },
-  female: { sex: "female", muscle: 0.66, weight: 0.4, height: 0.5, prop: 0.5 }
+  male: { sex: "male", muscle: 1.3, weight: 0.1, height: 0.5, prop: 0.5 },
+  female: { sex: "female", muscle: 0.95, weight: 0.3, height: 0.5, prop: 0.5 }
 };
 function makeBody(b) {
   const V = V0.map((v) => v.slice()), s = b.sex;
@@ -280,12 +280,16 @@ Object.entries(bodies).forEach(([sex, b]) => {
   const sh = J["r-shoulder"][1];
   [1, -1].forEach((sd) => {
     let best = -1;
-    P.forEach((p, v) => { if (p[1] > sh - 2.1 && p[1] < sh - 0.6 && p[0] * sd > 0.4 && p[0] * sd < 1.6 && (best < 0 || p[2] > P[best][2])) best = v; });
-    const c = P[best], r = sex === "female" ? 0.42 : 0.3;
+    // The breast's apex: the centre of the most forward points on that side of the chest.
+    const cand = P.filter((p) => p[1] > sh - 2.1 && p[1] < sh - 0.6 && p[0] * sd > 0.3 && p[0] * sd < 1.3);
+    const zmax = Math.max(...cand.map((p) => p[2])), top = cand.filter((p) => p[2] > zmax - 0.04);
+    const apex = mul(top.reduce((q, p) => add(q, p), [0, 0, 0]), 1 / top.length);
+    P.forEach((p, v) => { if (best < 0 || len(sub(p, apex)) < len(sub(P[best], apex))) best = v; });
+    const c = P[best], r = sex === "female" ? 0.55 : 0.3;
     if (process.env.DEBUG) console.log(sex, "nipple", c.map((x) => x.toFixed(2)), P.filter((p) => len(sub(p, c)) < r).length);
     const bef = P.map((p) => p.slice());
     fair(P, P.map((p) => (len(sub(p, c)) < r ? 1 : 0)));
-    if (process.env.DEBUG) console.log("moved", Math.max(...P.map((p, v) => len(sub(p, bef[v])))).toFixed(3));
+    if (process.env.DEBUG) { let mi = 0; P.forEach((p, v) => { if (len(sub(p, bef[v])) > len(sub(P[mi], bef[mi]))) mi = v; }); console.log("moved", len(sub(P[mi], bef[mi])).toFixed(3), bef[mi].map((x) => x.toFixed(2))); }
   });
   // Groin: a smooth mannequin form (it is always under the shorts).
   const pv = J.pelvis, gr = P.map((p) => (1 - smooth(pv[1] - 0.75, pv[1] - 0.45, p[1])) * smooth(pv[1] - 1.9, pv[1] - 1.6, p[1]) * (1 - smooth(0.42, 0.6, Math.abs(p[0]))) * smooth(pv[2] + 0.05, pv[2] + 0.35, p[2]));

@@ -295,7 +295,7 @@ function renderForm(r, ctx) {
       ${f ? `<p class="an-legend"><span><i class="ln ln-bad"></i>Common mistake path</span><span><i class="ln ln-good"></i>Recommended path</span><span><i class="ln ln-ghost"></i>Recommended form outline (on the mistake)</span>${ex.demo === "beta" ? `<span class="beta-note">${ICON.info}Preview animation</span>` : ""}</p>` : ""}
     </div>
     <div class="an-info">
-      ${formFeedback(ex, { paths: false, demo: f ? "Show the mistake example" : "", more: true })}
+      ${formFeedback(ex, { paths: false, demo: f ? "Show the mistake example" : "", more: true, intro: false })}
       ${f ? biomechPanel() : ""}
     </div>`;
   const stages = page.querySelector(".an-stages");

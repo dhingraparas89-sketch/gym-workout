@@ -603,3 +603,6 @@ body[data-level="beginner"] .cam-hint span { display: none; }
   .form-page .an-head .lede { display: none; }
   .form-page .an-bar .more { display: none; }
 }
+/* Side-by-side captions stay one line so both stages line up. */
+.an-stages[data-layout="side"] .an-cap { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; }
+.an-stages[data-layout="side"] .an-cap span { overflow: hidden; text-overflow: ellipsis; min-width: 0; }

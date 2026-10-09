@@ -52,7 +52,7 @@ const EXERCISES = [
       b: { ua: 45, fa: -10 } },
     figure3d: { kit: "benchPress", ik: { grip: 27, pole: [-0.7, -0.55, 1] }, legAbd: 22 },
     figure: { props: FLAT_BENCH, load: { type: "barbell" },
-      a: { ...LIE_ON_BENCH, ua: 0, fa: 0 }, b: { ...LIE_ON_BENCH, ua: 104, fa: -16 } }
+      a: { ...LIE_ON_BENCH, ua: 0, fa: 0 }, b: { ...LIE_ON_BENCH, ua: 113, fa: -12 } }
   },
   {
     name: "Incline dumbbell press", group: "chest", equipment: "Dumbbells", sets: 3, reps: "8–10", rest: 90,
@@ -98,7 +98,11 @@ const EXERCISES = [
     good: { cue: "Body in one straight line from head to heels. Lower until your chest nearly touches the floor.", highlight: ["spine", "leg"] },
     bad: { cue: "Hips sag toward the floor, which loads the lower back instead of the chest.", highlight: ["hip", "spine"],
       a: { shin: 74, thigh: 74, torso: 54 }, b: { shin: 84, thigh: 84, torso: 66 } },
-    figure3d: { kit: "floor", ik: { grip: 23, pole: [-0.5, -1, 0.7] } },
+    // 3D: on the toes (the ankle lifted so the toe tips meet the floor the palms rest on), hands
+    // planted under the shoulders for the whole rep.
+    figure3d: { kit: "floor", ik: { grip: 23, fixed: true, pole: [-0.5, -1, 0.7] },
+      a: { x: 30, y: 166, foot: 160, shin: 73, thigh: 73, torso: 73, neck: 77, ua: 180, fa: 180 },
+      b: { x: 30, y: 166, foot: 160, shin: 86, thigh: 86, torso: 86, neck: 90, ua: 235, fa: 126 } },
     figure: { hand: "flat", load: { type: "none" },
       a: { x: 30, y: 180, foot: 165, shin: 68, thigh: 68, torso: 68, neck: 72, ua: 180, fa: 180 },
       b: { x: 30, y: 180, foot: 165, shin: 80, thigh: 80, torso: 80, neck: 84, ua: 235, fa: 126 } }
@@ -147,7 +151,7 @@ const EXERCISES = [
     figure3d: { kit: "pulldown", ik: { grip: 46, pole: [0.2, -0.6, 1] } },
     figure: { armsOut: true, abd: 30, props: [...SEAT(84, 142), { rect: [96, 112, 20, 7] }], load: { type: "cable", from: [104, 0] },
       a: { x: 84, y: 136, anchor: "hip", shin: 0, thigh: -90, torso: -8, neck: -4, ua: 8, fa: 4 },
-      b: { x: 84, y: 136, anchor: "hip", shin: 0, thigh: -90, torso: -14, neck: -6, ua: 200, fa: 18 } }
+      b: { x: 84, y: 136, anchor: "hip", shin: 0, thigh: -90, torso: -20, neck: -10, ua: 189, fa: 45 } }
   },
   {
     name: "Seated cable row", group: "back", equipment: "Cable", sets: 3, reps: "10–12", rest: 90,
@@ -203,7 +207,9 @@ const EXERCISES = [
     good: { cue: "Long step. Front knee over the ankle, back knee just above the floor, torso upright.", highlight: ["knee", "shin"] },
     bad: { cue: "Short step so the front knee shoots past the toes and the heel lifts.", highlight: ["knee", "shin"],
       b: { shin: 36, thigh: -62, t2: 205, s2: 245, f2: 150, foot: 115 } },
-    figure3d: { kit: "dumbbells", db: [8, 7], grip: "neutral", abd: 11 },
+    figure3d: { kit: "dumbbells", db: [8, 7], grip: "neutral", abd: 11,
+      // The stepping foot lifts clear of the floor on its way to the split stance (and back).
+      keys: [{ at: 0.4, shin: 2, thigh: -26, t2: 196, s2: 232, f2: 160 }] },
     figure: { load: { type: "dumbbell" },
       a: { ...STAND, x: 120, t2: 180, s2: 180 },
       b: { ...STAND, x: 120, shin: 4, thigh: -78, t2: 200, s2: 262, f2: 150 } }

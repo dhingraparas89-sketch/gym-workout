@@ -106,7 +106,9 @@
       good: { cue: "Long step back, front shin vertical, back knee just above the floor, torso tall.", highlight: ["knee", "hip"] },
       bad: { cue: "Leaning over the front leg. The lower back works to hold the torso and balance gets shaky.", highlight: ["spine", "hip"],
         b: { torso: 42, neck: 44, bend: 4 } },
-      figure3d: { kit: "dumbbells", db: [7.6, 6.4], grip: "neutral", abd: 11 },
+      figure3d: { kit: "dumbbells", db: [7.6, 6.4], grip: "neutral", abd: 11,
+        // The stepping foot lifts clear of the floor as it travels back (and forward again).
+        keys: [{ at: 0.4, shin: 2, thigh: -26, t2: 196, s2: 232, f2: 160 }] },
       figure: { load: { type: "dumbbell" },
         a: { ...ST, x: 120, t2: 180, s2: 180, f2: 90 },
         b: { ...ST, x: 120, shin: 8, thigh: -80, torso: 8, neck: 6, t2: 197.7, s2: 270.8, f2: 224 } }
