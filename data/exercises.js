@@ -294,7 +294,7 @@ const EXERCISES = [
       b: { ua: 205, fa: 70 } },
     figure3d: { kit: "tower", tower: { handle: "rope", y: 160, dx: 72 }, grip: "neutral",
       // 3D: the rope ends beside the ears with the elbows bent about 60-70 degrees, not folded shut.
-      b: { ...STAND, x: 86, torso: -6, neck: -2, ua: 258, fa: 2 } },
+      b: { ...STAND, x: 86, torso: -6, neck: -2, ua: 258, fa: 10 } },
     figure: { armsOut: true, abd: 40, props: [{ line: [184, 20, 184, 188], w: 6 }], load: { type: "cable", from: [184, 44] },
       a: { ...STAND, x: 86, torso: -6, neck: -2, ua: 82, fa: 84 },
       b: { ...STAND, x: 86, torso: -6, neck: -2, ua: 258, fa: 22 } }
