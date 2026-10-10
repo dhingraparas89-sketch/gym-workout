@@ -36,7 +36,9 @@
       good: { cue: "Upper back and hips stay on the bench. Lower the bar to just below the collarbones.", highlight: ["arm"] },
       bad: { cue: "The lower back arches high off the bench, turning it into a flat press that skips the upper chest.", highlight: ["spine", "back"],
         a: { bend: -24, torso: -40, neck: -30 }, b: { bend: -26, torso: -38, neck: -28 } },
-      figure3d: { kit: "upInclineBB", ik: { grip: 27, pole: [-0.7, -0.55, 1] }, legAbd: 14 },
+      figure3d: { kit: "upInclineBB", ik: { grip: 27, pole: [-0.7, -0.55, 1] }, legAbd: 14,
+        // 3D: the bar comes all the way down to the upper chest.
+        b: { ...INCLINE45, ua: 131, fa: -14 } },
       figure: { props: [...INCLINE_PROPS, { line: [36, 40, 36, 188], w: 5 }], load: { type: "barbell", r: 16 },
         a: { ...INCLINE45, ua: 0, fa: 0 }, b: { ...INCLINE45, ua: 121, fa: -12 } }
     },
@@ -60,7 +62,9 @@
       good: { cue: "Bar comes down to the bottom of the chest with the forearms vertical.", highlight: ["arm", "elbow"] },
       bad: { cue: "The bar drifts toward the neck, which flares the elbows and strains the front of the shoulders.", highlight: ["shoulder", "elbow"],
         b: { ua: 22, fa: -118 } },
-      figure3d: { kit: "upDecline", ik: { grip: 27, pole: [-0.7, -0.55, 1] } },
+      figure3d: { kit: "upDecline", ik: { grip: 27, pole: [-0.7, -0.55, 1] },
+        // 3D: the bar comes all the way down to the lower chest.
+        b: { ...DECLINE, ua: 83, fa: -56 } },
       figure: { noFloor: false, props: [{ line: [140, 136, 40, 172], w: 8 }, { line: [52, 168, 52, 188], w: 5 }, { line: [128, 140, 128, 188], w: 5 }, { line: [174, 118, 174, 188], w: 5 }, { line: [26, 30, 26, 188], w: 5 }],
         load: { type: "barbell", r: 16 },
         a: { ...DECLINE, ua: 4, fa: 4 }, b: { ...DECLINE, ua: 73, fa: -52 } }
@@ -139,7 +143,9 @@
       good: { cue: "Hands about shoulder width, elbows tucked, bar to the lower chest.", highlight: ["elbow", "forearm"] },
       bad: { cue: "Hands almost touching. The wrists bend back and the elbows flare, so the wrists and shoulders take the strain.", highlight: ["hand", "elbow"] },
       bad3d: { a: { ...LIE_ON_BENCH, ua: 0, fa: 0, gz: 5 }, b: { ...LIE_ON_BENCH, ua: 107, fa: -5, gz: 5 } },
-      figure3d: { kit: "benchPress", ik: { grip: 16, pole: [-0.8, -1, 0.45] }, legAbd: 22 },
+      figure3d: { kit: "benchPress", ik: { grip: 16, pole: [-0.8, -1, 0.45] }, legAbd: 22,
+        // 3D: the bar touches the lower chest.
+        b: { ...LIE_ON_BENCH, ua: 112, fa: -6 } },
       figure: { props: FLAT_BENCH, load: { type: "barbell" },
         a: { ...LIE_ON_BENCH, ua: 0, fa: 0 }, b: { ...LIE_ON_BENCH, ua: 107, fa: -5 } }
     },
@@ -216,7 +222,7 @@
         a: { ua: 40, fa: -60 } },
       bad3d: { a: { ...SEATED, ua: 40, fa: -50, gz: 30 } },
       figure3d: { kit: "seatedDB", ik: { grip: 30, pole: [0.15, -0.55, 1] },
-        a: { ...SEATED, ua: 75.5, fa: -63.5, gz: 42 }, b: { ...SEATED, ua: 3, fa: 3, gz: 16 } },
+        a: { ...SEATED, shin: -12, ua: 75.5, fa: -63.5, gz: 42 }, b: { ...SEATED, shin: -12, ua: 3, fa: 3, gz: 16 } }, // feet a little forward of the bench legs
       figure: { props: [...SEAT(84, 142), { line: [70, 140, 70, 80], w: 7 }], load: { type: "dumbbell" },
         a: { ...SEATED, ua: 168, fa: 18 }, b: { ...SEATED, ua: 4, fa: 0 } }
     },

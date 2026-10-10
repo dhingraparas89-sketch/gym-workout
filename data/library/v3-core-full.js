@@ -269,7 +269,7 @@
         a: { shin: 32, thigh: -76, torso: 40, neck: 34 } },
       bad3d: { a: { shin: 32, thigh: -76, torso: 40, neck: 34, ua: 182, fa: 182 } },
       figure3d: { kit: "v3Kettlebell", kb: "both", grip: "over", legAbd: 11, ik: { grip: 4.2, pole: [-0.4, -0.2, 1] }, view: [0.3, 0.1],
-        a: { ...ST, shin: 12, thigh: -38, torso: 66, neck: 74, ua: 196, fa: 196 }, b: { ...ST, ua: 92, fa: 92 } },
+        a: { ...ST, shin: 12, thigh: -38, torso: 66, neck: 74, ua: 184, fa: 184 }, b: { ...ST, ua: 92, fa: 92 } },
       figure: { load: { type: "dumbbell" },
         a: { ...ST, shin: 12, thigh: -38, torso: 66, neck: 74, ua: 196, fa: 196 }, b: { ...ST, ua: 92, fa: 92 } }
     },

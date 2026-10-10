@@ -249,6 +249,18 @@
     if (!e.why) e.why = WHY[n];
     if (TITLE[n]) e.title = TITLE[n];
   });
+  // The 2D arm is shorter than the 3D one, so a press reaching for the 2D hand stops short of
+  // lockout. ik.reach stretches the reach from the shoulder so the top of each press (and the
+  // hang of each pull) is a straight-but-soft elbow (about 165 degrees), measured by the contact audit.
+  const REACH = {
+    "Barbell bench press": 1.09, "Machine chest press": 1.08, "Incline dumbbell press": 1.04, "Dips": 1.11,
+    "Incline bench press": 1.04, "Decline bench press": 1.1, "Dumbbell bench press": 1.1, "Close-grip bench press": 1.1,
+    "Dumbbell shoulder press": 1.04, "Assisted dip": 1.11, "Assisted pull-up": 1.03, "Inverted row": 1.04
+  };
+  EXERCISES.forEach((ex) => {
+    const r = REACH[ex.name], f = ex.figure3d;
+    if (r && f && f.ik && !f.ik.reach) f.ik = { ...f.ik, reach: r };
+  });
   // hands: "both" (each hand on an implement; one bar or a pair), "R" (right hand only), "flat"
   // (palms on the floor or a bench), "free" (no implement). feet: "planted" (stay put all rep),
   // "moving" (step, jump or lift; checked only while in contact), "machine" (on a moving pad or
@@ -271,7 +283,7 @@
     "Dumbbell curl": ["both", "planted"], "Incline dumbbell curl": ["both", "planted"], "Cable curl": ["both", "planted"],
     "Preacher curl": ["both", "planted"], "Assisted pull-up": ["both", "machine"], "Dumbbell row": ["R", "planted"],
     "T-bar row": ["both", "planted"], "Single-arm cable row": ["R", "planted"], "Straight-arm pulldown": ["both", "planted"],
-    "Side plank": ["free", "planted"], "Crunch": ["free", "planted"], "Knee raise": ["both", "moving"],
+    "Side plank": ["free", "planted"], "Crunch": ["free", "planted"], "Knee raise": ["both", "hang"],
     "Russian twist": ["both", "planted"], "Ab wheel rollout": ["both", "planted"], "Front squat": ["both", "planted"],
     "Goblet squat": ["both", "planted"], "Hack squat": ["both", "planted"], "Bulgarian split squat": ["both", "planted"],
     "Reverse lunge": ["both", "moving"], "Leg extension": ["both", "machine"], "Seated calf raise": ["both", "planted"],

@@ -60,7 +60,11 @@ const EXERCISES = [
     good: { cue: "Bench at 30°. Lower until the dumbbells sit beside your upper chest, forearms vertical.", highlight: ["arm"] },
     bad: { cue: "Half reps. The dumbbells stop well above the chest, so the chest never gets a full stretch.", highlight: ["elbow"],
       b: { ua: 70, fa: -20 } },
-    figure3d: { kit: "inclineDB", ik: { grip: 23, pole: [-0.6, -0.5, 1] }, legAbd: 14 },
+    // 3D: the dumbbells start over the shoulders a little inside shoulder width and lower to beside
+    // the upper chest, wider than the shoulders, elbows about 45-60 degrees from the torso.
+    figure3d: { kit: "inclineDB", ik: { grip: 23, pole: [-0.6, -0.5, 1] }, legAbd: 14,
+      a: { x: 82, y: 150, anchor: "hip", shin: -8, thigh: -92, torso: -34, neck: -30, ua: 0, fa: 0, gz: 16 },
+      b: { x: 82, y: 150, anchor: "hip", shin: -8, thigh: -92, torso: -34, neck: -30, ua: 150, fa: 0, gz: 31 } },
     figure: { props: [{ line: [76, 156, 104, 156], w: 7 }, { line: [74, 156, 40, 106], w: 7 }, { line: [86, 160, 86, 188], w: 5 }],
       load: { type: "dumbbell" },
       a: { x: 82, y: 150, anchor: "hip", shin: -8, thigh: -92, torso: -34, neck: -30, ua: 0, fa: 0 },
@@ -72,7 +76,7 @@ const EXERCISES = [
     good: { cue: "Keep a soft, fixed bend in the elbows and hug the hands together in front of your chest.", highlight: ["elbow"] },
     bad: { cue: "Bending and straightening the elbows turns it into a press and takes the stretch off the chest.", highlight: ["elbow", "forearm"],
       b: { ua: 170, fa: 70 } },
-    figure3d: { kit: "crossover", pulleyY: 150, ik: { grip: 30, pole: [-0.6, -0.5, 0.6] }, grip: "neutral", armsOut: true,
+    figure3d: { kit: "crossover", pulleyY: 150, ik: { grip: 30, pole: [-0.6, -0.5, 0.6] }, grip: "neutral", thumb: "up", armsOut: true,
       // Arms open wide at chest height, then hug the hands together in front.
       a: { ...STAND, x: 104, torso: 14, neck: 10, ua: 262, fa: 264, shin: 4, thigh: -4, gz: 48 },
       b: { ...STAND, x: 104, torso: 14, neck: 10, ua: 100, fa: 92, shin: 4, thigh: -4, gz: 4 } },
@@ -126,7 +130,10 @@ const EXERCISES = [
     good: { cue: "Start from a full hang and pull until your chin clears the bar.", highlight: ["arm"] },
     bad: { cue: "Kicking the legs and swinging for momentum. The lats only do part of the work.", highlight: ["hip", "thigh"],
       b: { thigh: -62, shin: 10, torso: -20 } },
-    figure3d: { kit: "pullupBar", hold: "hands", path: "neck", ik: { grip: 46, pole: [0.2, -0.6, 1] } },
+    figure3d: { kit: "pullupBar", hold: "hands", path: "neck", ik: { grip: 46, pole: [0.2, -0.6, 1] },
+      // 3D: at the top the chest leads and the head tips back a little so the chin clears the bar.
+      a: { x: 100, y: 14, anchor: "hand", foot: 160, shin: 70, thigh: -6, torso: -9, neck: -16, ua: 4, fa: 0 },
+      b: { x: 100, y: 14, anchor: "hand", foot: 160, shin: 70, thigh: -6, torso: -15, neck: -28, ua: 172, fa: -8 } },
     figure: { noFloor: true, armsOut: true, abd: 28, props: [{ line: [40, 14, 170, 14], w: 6, axis: "z" }], load: { type: "none" },
       a: { x: 100, y: 14, anchor: "hand", foot: 160, shin: 70, thigh: -6, torso: -4, neck: 0, ua: 4, fa: 0 },
       b: { x: 100, y: 14, anchor: "hand", foot: 160, shin: 70, thigh: -6, torso: -8, neck: 0, ua: 172, fa: -8 } }
@@ -256,7 +263,10 @@ const EXERCISES = [
     good: { cue: "Sit tall. Start palms facing you and rotate them forward as you press up.", highlight: ["arm"] },
     bad: { cue: "Arching the back and leaning away to get the weight up.", highlight: ["spine"],
       b: { torso: -22, bend: -9, neck: -16 } },
-    figure3d: { kit: "seatedDB" },
+    // 3D: the feet sit a little forward of the bench legs.
+    figure3d: { kit: "seatedDB",
+      a: { x: 84, y: 136, anchor: "hip", shin: -12, thigh: -90, torso: 0, neck: 0, ua: 168, fa: 18 },
+      b: { x: 84, y: 136, anchor: "hip", shin: -12, thigh: -90, torso: 0, neck: 0, ua: 4, fa: 0 } },
     figure: { props: [...SEAT(84, 142), { line: [70, 140, 70, 80], w: 7 }], load: { type: "dumbbell" },
       a: { x: 84, y: 136, anchor: "hip", shin: 0, thigh: -90, torso: 0, neck: 0, ua: 168, fa: 18 },
       b: { x: 84, y: 136, anchor: "hip", shin: 0, thigh: -90, torso: 0, neck: 0, ua: 4, fa: 0 } }
@@ -282,7 +292,9 @@ const EXERCISES = [
     good: { cue: "Rope at eye height. Pull it toward your face, elbows high, and pull the ends apart.", highlight: ["upperArm", "elbow"] },
     bad: { cue: "Elbows drop below the shoulders and it turns into a row.", highlight: ["upperArm", "elbow"],
       b: { ua: 205, fa: 70 } },
-    figure3d: { kit: "tower", tower: { handle: "rope", y: 160, dx: 72 }, grip: "neutral" },
+    figure3d: { kit: "tower", tower: { handle: "rope", y: 160, dx: 72 }, grip: "neutral",
+      // 3D: the rope ends beside the ears with the elbows bent about 60-70 degrees, not folded shut.
+      b: { ...STAND, x: 86, torso: -6, neck: -2, ua: 258, fa: 2 } },
     figure: { armsOut: true, abd: 40, props: [{ line: [184, 20, 184, 188], w: 6 }], load: { type: "cable", from: [184, 44] },
       a: { ...STAND, x: 86, torso: -6, neck: -2, ua: 82, fa: 84 },
       b: { ...STAND, x: 86, torso: -6, neck: -2, ua: 258, fa: 22 } }

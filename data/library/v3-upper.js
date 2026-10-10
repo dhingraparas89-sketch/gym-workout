@@ -36,7 +36,7 @@
       bad: { cue: "The elbows bend and straighten, turning the fly into a press and losing the chest stretch.", highlight: ["elbow"],
         b: { ua: 170, fa: 70 } },
       bad3d: { b: { ...LEAN, ua: 150, fa: 40, gz: 18 } },
-      figure3d: { kit: "crossover", pulleyY: 204, ik: { grip: 30, pole: [-0.6, -0.5, 0.6] }, grip: "neutral", armsOut: true, view: [0.9, 0.12],
+      figure3d: { kit: "crossover", pulleyY: 204, ik: { grip: 30, pole: [-0.6, -0.5, 0.6] }, grip: "neutral", thumb: "up", armsOut: true, view: [0.9, 0.12],
         a: { ...LEAN, ua: 44, fa: -48.5, gz: 52 }, b: { ...LEAN, ua: 168.2, fa: 121.5, gz: 6 } },
       figure: { armsOut: true, props: [{ line: [16, 12, 16, 188], w: 6 }], load: { type: "cable", from: [16, 20] },
         a: { ...LEAN, ua: 210, fa: 200 }, b: { ...LEAN, ua: 168, fa: 121 } }

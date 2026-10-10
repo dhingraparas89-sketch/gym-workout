@@ -997,7 +997,8 @@ GYM3D.kits = (() => {
 
   // Pull-up station: two uprights on braced feet with a knurled bar where the hands hang.
   K.pullupBar = { ground: "hang", build(ctx) {
-    const P = ctx.P, M = P.M, fy = P.floorY, bar = mid(ctx.S[0].grip.R, ctx.S[0].grip.L), H = bar.y - fy + 16;
+    // The top crossbeam sits well above the bar so the head clears it with the chin over the bar.
+    const P = ctx.P, M = P.M, fy = P.floorY, bar = mid(ctx.S[0].grip.R, ctx.S[0].grip.L), H = bar.y - fy + 46;
     [1, -1].forEach((s) => {
       const z = s * 76;
       P.beam(V(bar.x, fy + 9, z), V(bar.x, fy + H, z), 7.5, 7.5, V(0, 0, 1), { caps: [false, true] });
