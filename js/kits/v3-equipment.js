@@ -514,4 +514,94 @@
     L.flatBench(ctx, hip.x - 76, hip.x + 16, { only: (b) => /lowerTorso/.test(b) });
     return { update: L.barbell(ctx, [[12.6, 2.6]], "iron") };
   } };
+
+  // ---------- Resistance band: a latex tube band that stretches between its anchor and the hands ----------
+  // fig.band: { anchor: "feet" | "post" | "hands", y (post: anchor height above the floor, cm),
+  // dx (post: how far in front of the hands' start position), color }.
+  //  feet:  one band runs under both arches and up to a soft handle in each hand (band curl);
+  //  post:  the band loops round an upright at height y and each strand runs to a handle (pushdown);
+  //  hands: a loop band held in both fists, stretched between them (pull-apart).
+  // Each strand thins as it stretches (the latex keeps its volume), so the tension reads at a glance.
+  // Strands are tagged userData.soft (they bend round the body like a cable, they are not rigid parts).
+  const BAND_MATS = {};
+  const bandMat = (c) => BAND_MATS[c] || (BAND_MATS[c] = new (T().MeshStandardMaterial)({ color: c, roughness: 0.62, metalness: 0 }));
+  function bandStrand(P, r0, mat) {
+    const m = G.mesh(new (T().CylinderGeometry)(1, 1, 1, 12).translate(0, 0.5, 0), mat); m.userData.soft = true; P.add(m);
+    let rest = null;
+    // a -> b; the first length it is drawn at is its rest length.
+    return (a, b) => {
+      const len = Math.max(0.01, G.between(m, a, b));
+      if (rest == null) rest = len;
+      const r = r0 * Math.sqrt(Math.min(1.15, rest / len));
+      m.scale.set(r, len, r);
+      return m;
+    };
+  }
+  K.band = { build(ctx) {
+    const THREE = T(), P = ctx.P, M = P.M, fy = P.floorY, S = ctx.S, o = ctx.fig.band || {};
+    const mat = bandMat(o.color || 0x2f5d8a), anchor = o.anchor || "feet";
+    // Handles: a foam grip on a short tube, the band tied through an eye toward the anchor.
+    const handle = (s) => {
+      const g = new THREE.Group(); P.add(g);
+      P.rod(V(0, 0, -6.2), V(0, 0, 6.2), 0.7, M.chrome, g);
+      const grip = P.rod(V(0, 0, -5), V(0, 0, 5), 1.6, M.foamGrip, g); void grip;
+      // Webbing loop from both ends of the tube to the eye at (0, 6.5, 0).
+      [1, -1].forEach((k) => P.rod(V(0, 0, k * 5.9), V(0, 6.2, k * 0.8), 0.45, M.rubber, g));
+      const eye = G.mesh(new THREE.TorusGeometry(1.05, 0.34, 8, 16), M.zinc, false); eye.position.y = 6.8; eye.rotation.y = Math.PI / 2; g.add(eye);
+      return (f, toward) => {
+        const G0 = f.grip[s], z = f.axis[s].clone().normalize();
+        const y = toward.clone().sub(G0); y.sub(z.clone().multiplyScalar(y.dot(z))).normalize();
+        g.position.copy(G0); g.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(new THREE.Vector3().crossVectors(y, z), y, z));
+        return G0.clone().addScaledVector(y, 7.6);
+      };
+    };
+    if (anchor === "hands") {
+      // A loop band: two strands side by side between the fists, wrapping round each fist.
+      const strands = [0, 1].map(() => bandStrand(P, 0.62, mat)), wraps = [0, 1, 2, 3].map(() => bandStrand(P, 0.62, mat));
+      const update = (f) => {
+        const aR = f.axis.R.clone().normalize(), aL = f.axis.L.clone().normalize();
+        // The band leaves each fist on its thumb side (toward the other hand).
+        const outR = f.grip.R.clone().addScaledVector(aR, 4.6), outL = f.grip.L.clone().addScaledVector(aL, 4.6);
+        const across = outL.clone().sub(outR).normalize(), up = new THREE.Vector3(0, 1, 0);
+        const off = new THREE.Vector3().crossVectors(across, up); if (off.lengthSq() < 1e-4) off.set(1, 0, 0); off.normalize().multiplyScalar(0.7);
+        strands[0](outR.clone().add(off), outL.clone().add(off)); strands[1](outR.clone().sub(off), outL.clone().sub(off));
+        // Through each fist and out at the little finger.
+        [[f.grip.R, aR], [f.grip.L, aL]].forEach(([g, a], i) => {
+          wraps[2 * i](g.clone().addScaledVector(a, 4.6).add(off), g.clone().addScaledVector(a, -4.8).add(off));
+          wraps[2 * i + 1](g.clone().addScaledVector(a, 4.6).sub(off), g.clone().addScaledVector(a, -4.8).sub(off));
+        });
+      };
+      S.forEach(update);
+      return { update };
+    }
+    const hR = handle("R"), hL = handle("L");
+    const strandR = bandStrand(P, 0.85, mat), strandL = bandStrand(P, 0.85, mat);
+    let anchorOf;
+    if (anchor === "post") {
+      // A rack upright (or a door anchor) in front of the lifter, the band looped round it.
+      const g0 = mid(S[0].grip.R, S[0].grip.L), x = g0.x + (o.dx ?? 42), y = fy + (o.y ?? 196);
+      P.box(30, 1.6, 30, M.steel, V(x + 2, fy + 0.8, 0));
+      P.beam(V(x + 2, fy + 1.6, 0), V(x + 2, fy + 214, 0), 7.6, 7.6, V(1, 0, 0));
+      // The loop round the upright, and its clamp.
+      P.box(9.6, 4.2, 9.6, M.graphite, V(x + 2, y + 4.4, 0));
+      const loop = bandStrand(P, 0.85, mat), loop2 = bandStrand(P, 0.85, mat);
+      loop(V(x - 2.4, y, -2.2), V(x - 2.4, y, 2.2)); loop2(V(x - 2.4, y, 2.2), V(x + 6.4, y, 2.2));
+      const A = { R: V(x - 2.4, y, 2.2), L: V(x - 2.4, y, -2.2) };
+      anchorOf = (s) => A[s];
+    } else {
+      // Under the arches: a strand along the floor from foot to foot, out at each foot's outer edge.
+      const fb = (s) => boundsAt(ctx, 0, (b) => b === "foot" + s);
+      const bR = fb("R"), bL = fb("L"), ax = (bR.min.x + bR.max.x) / 2 - 1.5, ay = fy + 1.1;
+      const A = { R: V(ax, ay, bR.max.z + 0.6), L: V(ax, ay, bL.min.z - 0.6) };
+      const under = bandStrand(P, 0.85, mat); under(A.R.clone().setZ(A.R.z + 0.4), A.L.clone().setZ(A.L.z - 0.4));
+      anchorOf = (s) => A[s];
+    }
+    const update = (f) => {
+      strandR(anchorOf("R"), hR(f, anchorOf("R")));
+      strandL(anchorOf("L"), hL(f, anchorOf("L")));
+    };
+    // Rest length: the shortest the strands get over the rep, so the band is never slack-thick.
+    S.forEach(update);
+    return { update };
+  } };
 })();
