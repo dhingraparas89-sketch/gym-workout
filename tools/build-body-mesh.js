@@ -570,7 +570,7 @@ Object.entries(bodies).forEach(([sex, b]) => {
     const nk = smooth(neckY - 0.25, neckY + 0.25, p[1] + 0.25 * Math.max(0, Math.abs(p[0]) - 0.5)) * (1 - smooth(0.62, 0.95, Math.abs(p[0])));
     // The head turns on the neck in a band about 4 cm wide (under the jaw, at the skull base),
     // so a nod stretches the skin there instead of creasing it along one edge loop.
-    const hh = smooth(-(+(process.env.HB || 0.5)), +(process.env.HB || 0.5), headSide(p) + (+(process.env.HOFF || 0)));
+    const hw = 0.5 * (1 + 0.6 * smooth(hd[2] + 0.1, hd[2] + 0.6, p[2])), hh = smooth(-hw, hw, headSide(p)); // (wider under the jaw, where a nod stretches the throat)
     const parts = { lowerTorso: (1 - up) * (1 - nk), upperTorso: up * (1 - nk), neck: nk * (1 - hh), head: nk * hh };
     Object.entries(parts).forEach(([n, w]) => { bw[v * BONES.length + BI[n]] = tr * w; });
     groups.forEach((g, gi) => { if (g !== "trunk") bw[v * BONES.length + BI[g]] = W[v * G + gi]; });
