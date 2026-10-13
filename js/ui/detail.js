@@ -174,7 +174,7 @@ function renderDetail(ex, ctx) {
 
   const slot = wrap.querySelector(".fig-slot"), caption = wrap.querySelector(".stage-caption");
   const setCaption = () => {
-    const beta = ex.demo === "beta" ? `<span class="beta-note">${ICON.info}Preview animation: the demonstration is still approximate.</span>` : "";
+    const beta = ex.demo === "beta" ? `<span class="beta-note">${ICON.info}Preview animation: the demonstration is still approximate.${ex.demoNote ? " " + esc(ex.demoNote) : ""}</span>` : "";
     if (st.mode === "bad" && f) {
       caption.innerHTML = `<span class="cap-kind is-bad">${ICON.warn}Common mistake</span><span>${esc(f.error.title)}. Instructional example, with the recommended form as a faint outline.</span>
         <span class="cap-legend"><span><i class="ln ln-bad"></i>Common mistake path</span><span><i class="ln ln-good"></i>Recommended path</span></span>${beta}`;
