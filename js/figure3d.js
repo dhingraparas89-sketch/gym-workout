@@ -2619,19 +2619,20 @@ function createViewer3D(container, mode, opts = {}) {
     const A = to3(pl.a2 || ank2(j, s, p)).add(pl.delta);
     const kneeFK = endOf(th, 42), toA = A.clone().sub(hip3);
     // Soft reach near full extension (see solveArm): the knee never snaps straight-to-bent.
-    const rawL = toA.length(), softL = rawL > 82.8 ? 84 - 1.2 * Math.exp(-(rawL - 82.8) / 1.2) : rawL;
+    const rawL = toA.length(), softL = rawL > 83.4 ? 84 - 0.6 * Math.exp(-(rawL - 83.4) / 0.6) : rawL;
     const d = Math.min(Math.max(softL, 8), 83.9), u = toA.normalize();
     // With a set stance the knee bends toward the toes (knee tracks over the foot); otherwise it
     // keeps the side the 2D pose bends it to.
     const wTrack = new THREE.Vector3(Math.cos(pl.yaw), 0.15, -Math.sin(pl.yaw));
     let w = pl.track ? wTrack : kneeFK.clone().sub(hip3);
     w.sub(u.clone().multiplyScalar(w.dot(u)));
-    // A nearly straight 2D leg gives no bend direction: hand over to the toe-ward pole smoothly
-    // instead of letting the knee flip.
+    // A nearly straight 2D leg gives no bend direction: hand over smoothly to bending toward the
+    // toes (forward when standing, toward the floor in a plank) instead of letting the knee flip.
     if (!pl.track) {
-      const m = w.length(), k = smoothStep(0.5, 6, m);
-      const wt = wTrack.clone().sub(u.clone().multiplyScalar(wTrack.dot(u))).normalize();
-      w = w.normalize().multiplyScalar(k).add(wt.multiplyScalar(1 - k));
+      const m = w.length(), k = smoothStep(0.5, 6, m), fr = (footDir * Math.PI) / 180;
+      const wt = new THREE.Vector3(Math.sin(fr), Math.cos(fr), 0).applyAxisAngle(Y, pl.yaw);
+      wt.sub(u.clone().multiplyScalar(wt.dot(u)));
+      if (wt.lengthSq() > 1e-6) w = w.normalize().multiplyScalar(k).add(wt.normalize().multiplyScalar(1 - k));
     }
     if (w.lengthSq() < 1e-4) w = new THREE.Vector3(1, 0, 0).sub(u.clone().multiplyScalar(u.x));
     w.normalize();
