@@ -64,7 +64,8 @@
   // ----- Bulgarian split squat: the rear instep on a flat bench, dumbbells in the hands -----
   K.loBulgarian = { build(ctx) {
     const fb = ctx.bounds((b) => b === "footL");
-    const x1 = fb.max.x + 7;
+    // The pad's end sits just in front of the ankle, so the rear shin clears its edge at the bottom.
+    const x1 = fb.max.x + 1.5;
     L.flatBench(ctx, x1 - 104, x1, { only: (b) => b === "footL" });
     const r = ctx.fig.db || [7, 6];
     return { update: L.dumbbells(ctx, r[0], r[1]) };

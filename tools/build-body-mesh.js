@@ -341,6 +341,13 @@ Object.entries(bodies).forEach(([sex, b]) => {
     if (process.env.DEBUG) console.log(sex, "nipple", c.map((x) => x.toFixed(2)), P.filter((p) => len(sub(p, c)) < r).length);
     const bef = P.map((p) => p.slice());
     fair(P, P.map((p) => (len(sub(p, c)) < r ? 1 : 0)));
+    // The female's breast as a rounded form (MakeHuman's is a little conical): the apex is
+    // eased back and the area around it evened out.
+    if (sex === "female") {
+      const RB = +(process.env.BR || 0.42), DB = +(process.env.BD || 0.09);
+      P.forEach((p, v) => { const q = Math.hypot(p[0] - c[0], p[1] - c[1]); if (q < 3 * RB && p[2] > c[2] - 0.8) P[v] = [p[0], p[1], p[2] - DB * Math.exp(-((q / RB) ** 2))]; });
+      taubin(P, P.map((p) => { const q = Math.hypot(p[0] - c[0], p[1] - c[1]); return p[2] > c[2] - 0.8 ? 0.6 * (1 - smooth(0.4, 0.8, q)) : 0; }), 4);
+    }
     if (process.env.DEBUG) { let mi = 0; P.forEach((p, v) => { if (len(sub(p, bef[v])) > len(sub(P[mi], bef[mi]))) mi = v; }); console.log("moved", len(sub(P[mi], bef[mi])).toFixed(3), bef[mi].map((x) => x.toFixed(2))); }
   });
   // Groin: a smooth mannequin form (it is always under the shorts).

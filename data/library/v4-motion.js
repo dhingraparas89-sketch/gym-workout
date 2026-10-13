@@ -438,16 +438,18 @@
     // Squats: feet planted shoulder-width with the toes turned out; the knees bend toward the toes
     // (stance IK); the trunk leans so the bar stays over the mid-foot all the way down.
     "Back squat": { stance: { w: 17, toe: 22 }, keysEase: "spline",
-      a: { ...S0, x: 94, shin: 4, thigh: -2, torso: 10, neck: 5, ua: 195, fa: -12 },
+      a: { ...S0, x: 94, shin: 5, thigh: -2, torso: 12, neck: 6, ua: 195, fa: -12 },
       keys: [{ at: 0.5, shin: 26, thigh: -55, torso: 38, neck: 22 }],
       b: { ...S0, x: 94, shin: 35, thigh: -82, torso: 45, neck: 26, ua: 235, fa: 28 } },
     "Front squat": { stance: { w: 16, toe: 18 } },
     "Goblet squat": { stance: { w: 18, toe: 22 } },
     "Bodyweight squat": { stance: { w: 15, toe: 16 } },
+    // Sumo: wide stance, toes well out; the hips sink almost straight down between the heels.
+    "Sumo squat": { stance: { w: 27, toe: 35 }, b: { ...S0, x: 96, shin: 47.2, thigh: -56, torso: 15, neck: 8, ua: 168, fa: 170 } },
     // Hinges: the bar travels straight up and down over the mid-foot, touching the legs; knees and
     // hips extend together off the floor (trunk angle nearly constant), then the hips come through.
     "Deadlift": { keysEase: "spline",
-      a: { ...S0, x: 96, ua: 180, fa: 180 },
+      a: { ...S0, x: 96, shin: 3, thigh: 3, torso: 2, neck: 2, ua: 180, fa: 180 },
       keys: [{ at: 0.34, shin: 2, thigh: -34, torso: 34, neck: 30, ua: 181, fa: 181 },
         { at: 0.64, shin: 3, thigh: -50.7, torso: 50, neck: 42, ua: 183, fa: 182 }],
       b: { ...S0, x: 96, shin: 10, thigh: -74.6, torso: 57.3, neck: 46, ua: 184, fa: 183 } },
@@ -459,10 +461,18 @@
       a: { ...S0, x: 104, ua: 180, fa: 180 },
       keys: [{ at: 0.5, shin: 2, thigh: -30, torso: 34, neck: 30, ua: 182, fa: 182 }],
       b: { ...S0, x: 104, shin: 3, thigh: -59.8, torso: 61.5, neck: 52, ua: 184, fa: 183 } },
+    // Barbell row: hips back so the hanging bar is over the mid-foot; the trunk holds still while
+    // the elbows drive back.
+    "Barbell row": { a: { ...S0, x: 96, shin: 12, thigh: -61.3, torso: 54.2, neck: 60, ua: 186, fa: 186 },
+      b: { ...S0, x: 96, shin: 12, thigh: -61.3, torso: 54.2, neck: 60, ua: 251, fa: 161 } },
+    // Good morning: the hips travel back (soft knees) as the trunk hinges, keeping the bar over the feet.
+    "Good morning": { b: { ...S0, x: 94, shin: 8, thigh: -46, torso: 64, neck: 56, ua: 271, fa: 64 } },
+    // Single-leg RDL: the stance hip travels back further so the weight stays over the mid-foot.
+    "Single-leg Romanian deadlift": { b: { x: 104, y: 186, shin: 8, thigh: -24, torso: 80, neck: 74, ua: 180, fa: 180, t2: 262, s2: 264, f2: 172 } },
     // Overhead press: the bar leaves the front of the shoulders, the head moves back as it passes
     // the face, and the bar finishes over the shoulders and mid-foot with the head through.
-    "Overhead press": { keysEase: "spline", ik: { direct: true, grip: 25, pole: [0.45, -1, 0.75] },
-      a: { ...S0, torso: -3, neck: -3, ua: 131.9, fa: -21.7 },
+    "Overhead press": { keysEase: "spline", ik: { direct: true, grip: 25, reach: 1.1, pole: [0.45, -1, 0.75] },
+      a: { ...S0, torso: -3, neck: -3, ua: 117.8, fa: -26.6 },
       keys: [{ at: 0.3, torso: -3, neck: -14, ua: 99.6, fa: -47.3 }, { at: 0.56, torso: -2, neck: -10, ua: 69.1, fa: -51.9 },
         { at: 0.8, torso: -1, neck: 0, ua: 45.7, fa: -41.3 }],
       b: { ...S0, torso: 0, neck: 4, ua: 7.8, fa: -7.3 } },
@@ -480,8 +490,38 @@
         { at: 0.45, shin: 24.5, thigh: -40.8, torso: 16, neck: 12, t2: 210.4, s2: 240.9, f2: 118, toeL: [66, 188] },
         { at: 0.6, shin: 25.9, thigh: -54.8, torso: 17, neck: 13, t2: 211.3, s2: 247.6, f2: 126, toeL: [55, 193] }],
       b: { ...S0, x: 120, shin: 18.6, thigh: -80.1, torso: 10, neck: 8, t2: 177.5, s2: 281.8, f2: 154, toeL: [55, 193] } },
+    // Arnold press: dumbbells start in front of the face, palms toward you, elbows forward; the
+    // elbows swing out to the sides as the palms turn forward, and the press finishes overhead.
+    "Arnold press": { keysEase: "spline", grip: "neutral", ik: { direct: true, grip: 14, reach: 1.04, pole: [0.15, -0.55, 1] },
+      a: { x: 84, y: 136, anchor: "hip", shin: -12, thigh: -90, torso: 0, neck: 0, ua: 135.3, fa: -12.6, gz: 11, sup: 90, pole: [1, -0.7, 0.15] },
+      keys: [{ at: 0.45, ua: 75.5, fa: -63.5, gz: 32, sup: 10, pole: [0.15, -0.6, 1] }],
+      b: { x: 84, y: 136, anchor: "hip", shin: -12, thigh: -90, torso: 0, neck: 0, ua: 1.5, fa: -0.6, gz: 17, sup: -80, pole: [0.1, -0.5, 1] } },
     // Curls: the forearm turns from palm-in at the bottom to palm-up at the top.
     "Dumbbell curl": { grip: "neutral", a: { ...S0, ua: 178, fa: 175, sup: 0 }, b: { ...S0, ua: 172, fa: 28, sup: 80 } },
+    // Bulgarian split squat: the rear ankle stays planted on the bench edge while the
+    // rear knee drops nearly straight down; trunk tall with a slight forward lean.
+    "Bulgarian split squat": {
+      a: { x: 120, y: 186, shin: -5, thigh: -17, torso: 8, neck: 6, ua: 180, fa: 180, t2: 202.5, s2: 272.5, f2: 257 },
+      b: { x: 120, y: 186, shin: 10, thigh: -79.5, torso: 15, neck: 10, ua: 180, fa: 180, t2: 202.9, s2: 325.7, f2: 261 } },
+    // Cable kickback: the working foot hovers just off the floor behind the standing foot at the
+    // start (it never scuffs along the floor) and the heel drives back until the thigh lines up.
+    "Cable kickback": {
+      a: { x: 100, y: 186, shin: 6, thigh: -8, torso: 35, neck: 30, ua: 100, fa: 95, t2: 178, s2: 212, f2: 104 },
+      b: { x: 100, y: 186, shin: 6, thigh: -8, torso: 35, neck: 30, ua: 100, fa: 95, t2: 218, s2: 226, f2: 150 } },
+    // Standing calf raise: the body pivots about the tip of the foot on the step edge (the rig has
+    // no toe joint), so the forefoot stays put while the heels drop below the step and rise.
+    "Standing calf raise": {
+      a: { x: 115.1, y: 188.4, anchor: "ball", shin: 0, thigh: 0, torso: 0, neck: 0, foot: 108, ua: 165, fa: 95 },
+      b: { x: 115.1, y: 188.4, anchor: "ball", shin: 0, thigh: 0, torso: 0, neck: 0, foot: 145, ua: 165, fa: 95 } },
+    // Face pull: the hands travel from the rope at arm's length straight in toward the forehead
+    // (reach IK around the shoulder) while the elbows open out to the sides at shoulder height;
+    // the elbows never drop through a row-like path.
+    "Face pull": { ik: { grip: 5, reach: 1.22, pole: [-0.3, 0.25, 1] },
+      a: { ...S0, x: 86, torso: -6, neck: -2, ua: 82, fa: 84, gz: 5 },
+      b: { ...S0, x: 86, torso: -6, neck: -2, ua: 109, fa: -17.4, gz: 13 } },
+    // Push-up: hands stay planted; the whole body lowers as one line until the chest is a few
+    // centimetres off the floor (elbows about 40 degrees from the trunk via the elbow pole).
+    "Push-up": { b: { x: 30, y: 166, foot: 160, shin: 90, thigh: 90, torso: 90, neck: 93, ua: 235, fa: 126 } },
     // Bench pressing keeps the shoulder blades pinned back and down.
     "Barbell bench press": { scap: { k: 0, prot: -1.6 } }, "Incline bench press": { scap: { k: 0, prot: -1.6 } },
     "Decline bench press": { scap: { k: 0, prot: -1.6 } }, "Close-grip bench press": { scap: { k: 0, prot: -1.6 } },
@@ -494,6 +534,14 @@
   const ISO = { ms: 4400, segs: [[0.5, 0, 1, "ecc"], [1, 1, 0, "ecc"]] }; // a held position, breathing
   const KEEP = /^(Jump squat|Burpee|Mountain climber|Farmer's carry|Battle rope|Box jump|Sled push|Sled pull|Alternating curl|Bicycle crunch|Kettlebell swing|Bird dog|Dead bug|Russian twist)$/;
   const LOWER_FIRST = /lower|descend|hinge|open wide|roll out|slide down|step back|knees forward|step and/i;
+  // Honest demonstration status after the round-5 review (contact + biomechanics audits and
+  // front/side/three-quarter contact sheets of both athletes). demoNote names the known defect.
+  const DEMO = {
+  };
+  EXERCISES.forEach((ex) => {
+    const d = DEMO[ex.name];
+    if (d) { ex.demo = d[0]; ex.demoNote = d[1]; } else ex.demo = "ready";
+  });
   EXERCISES.forEach((ex) => {
     const m = MOTION5[ex.name];
     if (m) ex.figure3d = { ...(ex.figure3d || {}), ...m };

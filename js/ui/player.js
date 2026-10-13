@@ -110,7 +110,7 @@ function mountPlayer(host, viewers, opts = {}) {
     off = v.onFrame((f) => {
       drawPhases(v);
       if (scrub && !scrubbing) scrub.value = Math.round(f.t * 1000);
-      if (f.phaseIndex !== lastPhase && phasesEl) {
+      if (f.phaseIndex !== lastPhase && phasesEl && !f.done) {
         lastPhase = f.phaseIndex;
         phaseEl.textContent = f.phase || "—";
         phasesEl.querySelectorAll("[data-ph]").forEach((s) => s.classList.toggle("is-on", +s.dataset.ph === f.phaseIndex));
@@ -120,7 +120,7 @@ function mountPlayer(host, viewers, opts = {}) {
         lastDone = !!f.done;
         if (doneEl) doneEl.hidden = !lastDone;
         if (lastDone && phaseEl) phaseEl.textContent = "Rep complete";
-        lastPhase = -2;
+        if (!lastDone) lastPhase = -2;
       }
       if (playBtn && playBtn.classList.contains("is-paused") === f.playing) setPlayIcon(f.playing);
     });
