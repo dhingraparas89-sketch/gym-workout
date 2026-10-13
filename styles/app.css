@@ -204,6 +204,8 @@
 
 /* ---------- Exercise page ---------- */
 .dx { grid-template-columns: minmax(0, 1.35fr) minmax(340px, .65fr); gap: clamp(20px, 2.6vw, 36px); }
+.dx > *, .dx-stage > * { min-width: 0; }
+.dx-stage { grid-template-columns: minmax(0, 1fr); }
 .dx-stage { top: 76px; gap: 10px; }
 .dx-stage .stage .fig-slot { height: clamp(420px, calc(100vh - 370px), 720px); }
 .dx-title h1 { font-size: clamp(28px, 3vw, 40px); }
@@ -337,6 +339,9 @@ body[data-level="beginner"] .cam-hint span { display: none; }
   .nav a[aria-current="page"]::after { left: 8px; right: 8px; }
   .level-label { display: none; }
   .dx { grid-template-columns: minmax(0, 1fr) minmax(320px, .8fr); }
+}
+/* The player's controls wrap onto two rows before they can push the stage wider than its column. */
+@media (max-width: 1340px) {
   .pb-main { grid-template-columns: auto minmax(0, 1fr) auto; }
   .pb-steps { grid-column: 1 / -1; order: 3; justify-content: center; }
   .cam-hint { display: none; }
@@ -610,17 +615,17 @@ body[data-level="beginner"] .cam-hint span { display: none; }
 /* ======================================================================
    Round 5: light studio stage, loop / turn controls, keyboard focus.
    ====================================================================== */
-/* The 3D stage is a light photo studio inside the dark UI: a clean lightbox with a soft inner
-   edge, the same tone as the rendered cyclorama so loading and resizing never flash. The 2D
-   fallback figure keeps the dark stage it was drawn for. */
-:root { --studio-bg: #c9cbce; --studio-bg-2: #bfc1c4; }
-.fig-slot.fig-3d { background: linear-gradient(180deg, var(--studio-bg), var(--studio-bg-2)); color-scheme: light; }
+/* The 3D stage is a graphite training studio (round 6, was a light-grey lightbox): a deep wall
+   over a softly lit floor, the same tones as the rendered cyclorama (GYM3D.floor) so loading and
+   resizing never flash. The 2D fallback figure keeps the dark stage it was drawn for. */
+:root { --studio-bg: #1f2124; --studio-bg-2: #3a3c40; }
+.fig-slot.fig-3d { background: linear-gradient(180deg, var(--studio-bg) 0%, #2a2c30 52%, var(--studio-bg-2) 100%); color-scheme: dark; }
 .stage:has(> .fig-slot.fig-3d), .mx-3d .fig-slot.fig-3d, .hero-visual:has(.fig-3d) { border-color: rgba(255, 255, 255, .14); box-shadow: 0 1px 0 rgba(255, 255, 255, .04) inset, 0 24px 60px rgba(0, 0, 0, .45); }
-.fig-slot.fig-3d::after { content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: inherit; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .06), inset 0 -40px 60px -50px rgba(0, 0, 0, .18); z-index: 1; }
+.fig-slot.fig-3d::after { content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: inherit; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .05), inset 0 50px 70px -60px rgba(0, 0, 0, .35); z-index: 1; }
 .fig-slot.fig-3d { position: relative; }
 .fig-slot.fig-3d:focus { outline: none; }
 .fig-slot.fig-3d:focus-visible::after { box-shadow: inset 0 0 0 3px var(--accent); }
-/* Overlays on the light stage: dark chips with light text keep their contrast. */
+/* Overlays on the studio stage: dark chips with light text keep their contrast. */
 .fig-3d .v3-loading { color: #e7eaed; background: rgba(20, 22, 25, .86); border-color: rgba(255, 255, 255, .08); }
 .fig-3d .v3-failed { color: #e7eaed; }
 .v3-unavailable { position: absolute; inset: 0; display: grid; place-content: center; gap: 8px; padding: 24px; text-align: center; color: var(--muted); background: var(--stage-bg); z-index: 2; }

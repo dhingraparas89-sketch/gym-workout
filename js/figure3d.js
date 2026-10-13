@@ -17,7 +17,7 @@ const VIEW3D = {
   hipHalf: 8.5,
   yaw: 0.62,      // default camera angle around the figure (radians from a pure side view)
   pitch: 0.12,
-  skin: "#474a50",       // matte charcoal body
+  skin: "#53575e",       // charcoal mannequin body (mid charcoal: the forms read under the studio light)
   active: "#3cc9ad",     // muscle activation on the optimal form (main movers full, helpers softer)
   activeBad: "#5a9bd0",  // muscle activation on the mistake
   compensate: "#e0913f", // muscles taking over the work in a mistake
@@ -446,7 +446,12 @@ function buildSkinData(segs, mesh) {
           // with the arm (the arm's own weights from the base mesh barely reach them), so a raised
           // arm stretches them instead of leaving a web of skin behind.
           local(segs[c], pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2], L);
-          const x = wa * 0.6 * (1 - skinSmooth(7, 15, Math.hypot(L[0], L[1], L[2])));
+          // (Round 6: wider and fuller behind and under the arm, the blade and the back of the armpit,
+          // so a raised arm folds fewer creases there; the front, pecs and breasts, keeps the narrower
+          // band so the chest is not dragged up with the arm.)
+          const e = segs[c].inv, jx = -(e[0] * e[12] + e[1] * e[13] + e[2] * e[14]), fr = skinSmooth(2, 9, pos[v * 3] - jx);
+          const r0 = (mesh.shR0 ?? 10) + (7 - (mesh.shR0 ?? 10)) * fr, r1 = (mesh.shR1 ?? 20) + (15 - (mesh.shR1 ?? 20)) * fr;
+          const x = wa * ((mesh.shX ?? 0.8) + (0.6 - (mesh.shX ?? 0.8)) * fr) * (1 - skinSmooth(r0, r1, Math.hypot(L[0], L[1], L[2])));
           wb[v * B + a] -= x; wb[v * B + B0 + h] += x; wa -= x;
         }
         const m = Math.min(wa, wc);
@@ -457,7 +462,7 @@ function buildSkinData(segs, mesh) {
         // and only near the joint itself (the base weights spread far from the hips).
         local(segs[c], pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2], L);
         // (The shoulder's band is wider: the blade and the back of the armpit go with the arm.)
-        const R = h < 2 ? 18 : 11;
+        const R = h < 2 ? (mesh.shR ?? 18) : 11;
         const t = Math.min(1, 2.2 * m) * skinSmooth(0.75, 0.92, wa + wc) * (1 - skinSmooth(R - 6, R, Math.hypot(L[0], L[1], L[2])));
         wb[v * B + a] -= m * t; wb[v * B + c] -= m * t; wb[v * B + B0 + h] += 2 * m * t;
       }
@@ -473,6 +478,17 @@ function buildSkinData(segs, mesh) {
       for (let it = 0; it < 2; it++) for (let v = 0; v < nv; v++) {
         if (!free[v]) continue;
         const n = nb[v]; let c = 1; tmp.fill(0);
+        for (let k = 0; k < B; k++) tmp[k] = wb[v * B + k];
+        n.forEach((u) => { if (!free[u]) return; c++; for (let k = 0; k < B; k++) tmp[k] += wb[u * B + k]; });
+        for (let k = 0; k < B; k++) wb[v * B + k] = tmp[k] / c;
+      }
+      // Within the joint bands (where a helper carries the skin) a few more passes, so a deep bend
+      // folds the skin in one smooth crease instead of a jagged one (MOTION, round 6).
+      const NJ = mesh.jointSmooth != null ? mesh.jointSmooth : 4, inBand = new Uint8Array(nv);
+      for (let v = 0; v < nv; v++) { let hw = 0; for (let h = 0; h < JH.length; h++) hw += wb[v * B + B0 + h]; inBand[v] = free[v] && hw > 0.02 ? 1 : 0; }
+      for (let it = 0; it < NJ; it++) for (let v = 0; v < nv; v++) {
+        if (!inBand[v]) continue;
+        const n = nb[v]; let c = 1;
         for (let k = 0; k < B; k++) tmp[k] = wb[v * B + k];
         n.forEach((u) => { if (!free[u]) return; c++; for (let k = 0; k < B; k++) tmp[k] += wb[u * B + k]; });
         for (let k = 0; k < B; k++) wb[v * B + k] = tmp[k] / c;
@@ -530,7 +546,7 @@ function buildSkinData(segs, mesh) {
 
 // ---------- Base mesh ----------
 // The athletes' surface is a sculpted human base mesh (MakeHuman 1.1, CC0; see assets/body-mesh.js
-// and tools/build-body-mesh.js), its head softly sculpted (or faceless, FACE_STYLE), and moved onto this skeleton's rest pose. Here it is
+// and tools/build-body-mesh.js) with a new featureless head grown from the neck, and moved onto this skeleton's rest pose. Here it is
 // smoothed once (Catmull-Clark: every quad becomes four), its skin weights carried along.
 function skinMeshSurface(mesh) {
   let nv = mesh.nv, P = mesh.pos;
@@ -812,7 +828,7 @@ function skinMeshRegions(pos, dom, frames, sex) {
         if (d === "neck" || y > clav + 0.5) {
           if (seg2(az, y, 5.0, 63.5, 2.4, 53.8) < 1.6 && x > -2) r = "scm";
           else if (x < 1.5 - Math.max(0, 61 - y) * 0.1 && (az > 2.2 || x < -2)) r = "trap-upper";
-          else if (ang > 95) r = "trap-upper";
+          else if (ang > 95 || x < 0) r = "trap-upper";
           else r = "neck-front";
         } else if (x > 0 && ang < 72) {
           // Front of the trunk.
@@ -950,25 +966,39 @@ function skinMeshMuscles(pos, nb, W, mesh, segs, sex) {
     nb[v].forEach((u) => { if (lab[u] !== lab[v]) return; const e = d + len(u, v); if (e < dist[u]) { dist[u] = e; across[u] = across[v]; push(e, u); } });
   }
   // Relief, fibers and weights.
-  const K = (mesh.reliefK ?? 1) * (F ? 0.75 : 1.5), disp = new Float32Array(nv), fib = new Float32Array(nv * 4), weights = {}, SP = 0.7;
+  const K = (mesh.reliefK ?? 1) * (F ? 1.0 : 2.0), disp = new Float32Array(nv), fib = new Float32Array(nv * 4), weights = {}, SP = 0.7;
   TAB.forEach((r) => { if (r[1] && !weights[r[1]]) weights[r[1]] = new Float32Array(nv); });
   const ss = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
   const width = (fb) => { const P = fb.c || [[(fb.a[0][0] + fb.b[0][0]) / 2, (fb.a[0][1] + fb.b[0][1]) / 2], [(fb.a[1][0] + fb.b[1][0]) / 2, (fb.a[1][1] + fb.b[1][1]) / 2]]; return Math.max(1.5, Math.hypot(P[1][0] - P[0][0], P[1][1] - P[0][1])); };
   const WID = TAB.map((r) => (r[4] ? width(r[4]) : 1));
+  const NBW = mesh.bones.length, HB = mesh.bones.indexOf("head"), headW = (v) => (HB >= 0 ? W[v * NBW + HB] : 0);
+  // Distance over the surface from the head: the neck's muscles flatten out as they reach it, so
+  // the head joins the neck in one smooth surface (under the jaw and at the skull base).
+  const RH = TAB.findIndex((r) => r[0] === "head"), dHead = new Float32Array(nv).fill(1e9);
+  {
+    const q = []; for (let v = 0; v < nv; v++) if (lab[v] === RH) { dHead[v] = 0; q.push(v); }
+    for (let it = 0; it < 40 && q.length; it++) {
+      const nq = [];
+      q.forEach((v) => nb[v].forEach((u) => { const e = dHead[v] + len(u, v); if (e < dHead[u]) { dHead[u] = e; nq.push(u); } }));
+      q.length = 0; q.push(...new Set(nq));
+    }
+  }
+  const neckFade = (v) => ss(0.5, 6, dHead[v]) * (1 - ss(0.02, 0.35, headW(v)));
   for (let v = 0; v < nv; v++) {
     const R = TAB[lab[v]], d = dist[v], fb = R[4];
     const named = R[0] !== "none" && R[0] !== "head" && R[0] !== "hand" && R[0] !== "foot";
-    // Soft valley where two regions meet (none on the hands, feet and head).
-    fib[v * 4 + 3] = named && TAB[across[v]][2] > 0 ? Math.exp(-((d / 0.9) ** 2)) : 0;
+    // Soft valley where two regions meet (none on the hands, feet and head, and fading out up the
+    // neck where it turns into the head).
+    fib[v * 4 + 3] = named && TAB[across[v]][2] > 0 ? Math.exp(-((d / 0.9) ** 2)) * neckFade(v) : 0;
     if (!fb) continue;
     const [u, w, tn] = skinFiberChart(fb, cs[v], ct[v]);
     const rise = 1 - (1 - Math.min(1, d / R[3])) ** 2;
     const along = 0.35 + 0.65 * ss(0, 0.22, tn) * (1 - ss(0.72, 1, tn));
     // Belly relief, and a shallow groove right at the edge where it meets another muscle, so
     // neighbouring muscles read apart (not against the head, hands, feet or bone).
-    const groove = R[2] >= 0.3 && TAB[across[v]][2] >= 0.3 ? 0.16 * K * Math.exp(-((d / 0.6) ** 2)) : 0;
+    const groove = R[2] >= 0.3 && TAB[across[v]][2] >= 0.3 ? 0.2 * K * Math.exp(-((d / 0.5) ** 2)) : 0;
     // Under the jaw and at the skull base the neck flows into the head without a step.
-    disp[v] = (R[2] * K * rise * along - groove) * (TAB[across[v]][0] === "head" ? ss(0, 4, d) : 1);
+    disp[v] = (R[2] * K * rise * along - groove) * (TAB[across[v]][0] === "head" ? ss(0, 4, d) : 1) * neckFade(v);
     fib[v * 4] = u; fib[v * 4 + 1] = (w * WID[lab[v]]) / SP; fib[v * 4 + 2] = ss(0, 1.4, d) * (0.55 + 0.45 * along);
     if (R[1]) weights[R[1]][v] = 0.45 + 0.55 * ss(0, 1.2, d);
   }
@@ -1019,11 +1049,6 @@ const BODY_MESH_SRC = (() => {
   try { const s = document.currentScript && document.currentScript.src; return s ? new URL("../assets/body-mesh.js", s).href : "assets/body-mesh.js"; }
   catch (e) { return "assets/body-mesh.js"; }
 })();
-// The head: "sculpted" (default) is a calm carved face from the base mesh (brow, closed lids,
-// nose, closed lips, chin, ears at low relief, no painted eyes); "faceless" fairs the features
-// away into a smooth mannequin head. One switch for both athletes; test pages may override it
-// with window.FACE_STYLE before this script loads.
-const FACE_STYLE = (typeof window !== "undefined" && window.FACE_STYLE === "faceless") ? "faceless" : "sculpted";
 let bodyMeshWait = null;
 function loadBodyMesh(cb) {
   if (typeof window === "undefined" || window.BODY_MESH || window.BODY_MESH === false) { cb((typeof window !== "undefined" && window.BODY_MESH) || null); return; }
@@ -1048,15 +1073,9 @@ function bodyMeshFor(sex) {
   const u8 = (b) => { const t = atob(b), a = new Uint8Array(t.length); for (let i = 0; i < t.length; i++) a[i] = t.charCodeAt(i); return a; };
   const B = D.bodies[sex], q = new Uint16Array(u8(B.pos).buffer), pos = new Float32Array(D.nv * 3);
   for (let v = 0; v < D.nv; v++) for (let k = 0; k < 3; k++) pos[v * 3 + k] = B.lo[k] + ((B.hi[k] - B.lo[k]) * q[v * 3 + k]) / 65535;
-  // The faceless head is the same mesh with its features faired away (offsets in 1/100 cm).
-  const face = FACE_STYLE === "faceless" && B.faceless ? "faceless" : "sculpted";
-  if (face === "faceless") {
-    const fv = new Uint16Array(u8(B.faceless.v).buffer), fd = new Int16Array(u8(B.faceless.d).buffer);
-    for (let i = 0; i < fv.length; i++) for (let k = 0; k < 3; k++) pos[fv[i] * 3 + k] += fd[i * 3 + k] / 100;
-  }
   return (BODY_MESH_CACHE[sex] = { nv: D.nv, pos, quads: new Uint16Array(u8(D.quads).buffer), si: u8(B.si), sw: u8(B.sw), bones: D.bones,
-    fingers: B.fingers, SH: D.skel[sex].SH, sex, levels: 1, face, reliefK: typeof window !== "undefined" && window.RELIEF_K != null ? +window.RELIEF_K : null,
-    noHelpers: typeof window !== "undefined" && !!window.NO_JOINT_HELPERS }); // (test pages only: both overrides)
+    fingers: B.fingers, SH: D.skel[sex].SH, sex, levels: 1, reliefK: typeof window !== "undefined" && window.RELIEF_K != null ? +window.RELIEF_K : null,
+    noHelpers: typeof window !== "undefined" && !!window.NO_JOINT_HELPERS, jointSmooth: typeof window !== "undefined" && window.JOINT_SMOOTH != null ? +window.JOINT_SMOOTH : null, ...(typeof window !== "undefined" && window.SKIN_TUNE) }); // (SKIN_TUNE: test pages only) // (test pages only: both overrides)
 }
 function requestSkin(segs, done, athlete) {
   const SKIN = SKINS[athlete] || SKINS.male;
@@ -1117,6 +1136,8 @@ function makeBody3D(THREE, mats, athlete) {
     if (!geo.attributes.fib) geo.setAttribute("fib", new THREE.Float32BufferAttribute(new Float32Array(n * 4), 4));
     if (!geo.attributes.cloth) geo.setAttribute("cloth", new THREE.Float32BufferAttribute(new Float32Array(n), 1));
     if (!geo.attributes.act) geo.setAttribute("act", new THREE.Float32BufferAttribute(new Float32Array(n), 1));
+    if (!geo.attributes.jnt) geo.setAttribute("jnt", new THREE.Float32BufferAttribute(new Float32Array(n * 4), 4)); // MOTION correctives: none
+    if (!geo.attributes.tens) geo.setAttribute("tens", new THREE.Float32BufferAttribute(new Float32Array(n * 4), 4));
     if (!geo.attributes.aux) { const a = new Float32Array(n * 4); for (let i = 0; i < n; i++) { a[i * 4] = 1; a[i * 4 + 2] = 1; } geo.setAttribute("aux", new THREE.Float32BufferAttribute(a, 4)); } // ao 1, no seam
   }
   function seg(name) { const g = new THREE.Group(); parts[name] = g; return g; }
@@ -1572,6 +1593,68 @@ function makeBody3D(THREE, mats, athlete) {
     return { bones: [...defs.map((d) => boneOf(d.name)), ...hands.R.twist, ...hands.L.twist, ...FINGER_BONES.map((b) => b.g), ...helperBones],
       inv: [...inv, ...tw, ...finv, ...hinv] };
   }
+  // Per-vertex data for the skin shader's motion correctives (MOTION, see patchSkin and
+  // updateMotionUniforms): jnt = (joint helper index + 1, side * share, muscle channel + 1,
+  // breathing share) and tens = (rest-space gradient of the muscle's tension profile, profile).
+  //   joint/side: hips, elbows and knees; side +1 on the child segment's side of the joint (rest
+  //   pose), share fades with distance from the joint and with the weight of the joint's bones.
+  //   muscle channels: 0 biceps, 1 triceps, 2 quads, 3 calves (the belly, smooth to its edges).
+  //   breathing: the front and sides of the ribcage and the upper belly.
+  function motionAttrs(geo, data, sex, bp) {
+    if (data.motionAttrs) { geo.setAttribute("jnt", new THREE.BufferAttribute(data.motionAttrs[0], 4)); geo.setAttribute("tens", new THREE.BufferAttribute(data.motionAttrs[1], 4)); return; }
+    const pos = geo.attributes.position.array, nor = geo.attributes.normal.array, nv = pos.length / 3;
+    const si = geo.attributes.skinIndex.array, sw = geo.attributes.skinWeight.array, idx = geo.index.array;
+    const defs = defsFor(sex), boneIx = (o) => bp.bones.indexOf(o);
+    const jnt = new Float32Array(nv * 4), tens = new Float32Array(nv * 4);
+    const wOf = (v, set) => { let w = 0; for (let k = 0; k < 4; k++) if (set.includes(si[v * 4 + k])) w += sw[v * 4 + k]; return w; };
+    // Contact joints: [helper index, fade radius in, out (cm)].
+    const JR = { 2: [14, 24], 3: [14, 24], 4: [10, 17], 5: [10, 17], 6: [16, 26], 7: [16, 26] };
+    const J = Object.keys(JR).map(Number).map((h) => {
+      const [pa, ch] = JOINT_HELPERS[h], m = defs.find((d) => d.name === ch).rest.clone(), p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3();
+      m.decompose(p, q, s);
+      return { h, R: JR[h], bones: [boneIx(parts[pa]), boneIx(parts[ch]), boneIx(helperBones[h])], inv: new THREE.Matrix4().compose(p, q, new THREE.Vector3(1, 1, 1)).invert(), side: /R$/.test(ch) ? 1 : -1, hip: h < 4 };
+    });
+    const v3 = new THREE.Vector3(), up = boneIx(parts.upperTorso), lo = boneIx(parts.lowerTorso);
+    for (let v = 0; v < nv; v++) {
+      let best = 0, bj = 0, bs = 0;
+      J.forEach((j) => {
+        let m = wOf(v, j.bones); if (m < 0.05) return;
+        if (j.hip && pos[v * 3 + 2] * j.side < 1.5) return; // each hip keeps to its own leg's side of the midline
+        v3.fromArray(pos, v * 3).applyMatrix4(j.inv);
+        const d = v3.length(); m *= 1 - skinSmooth(j.R[0], j.R[1], d);
+        if (m > best) { best = m; bj = j.h + 1; bs = Math.max(-1, Math.min(1, v3.y / 1.5)); }
+      });
+      jnt[v * 4] = bj; jnt[v * 4 + 1] = bs * best;
+      // Breathing: ribcage front and sides, a little of the upper belly.
+      const wu = wOf(v, [up]), wl = wOf(v, [lo]), nx = nor[v * 3];
+      jnt[v * 4 + 3] = (wu + 0.45 * wl * skinSmooth(-4, 6, pos[v * 3 + 1] - (defs.find((d) => d.name === "upperTorso").rest.elements[13] - 14))) * skinSmooth(-0.45, 0.5, nx);
+    }
+    // Tension profiles: each muscle's weight evened out over the surface (soft to its edges), the
+    // strongest of the four per vertex.
+    const W = data.weights || {}, CH = [W.biceps, W.triceps, W.quads, W.calves];
+    const nb = Array.from({ length: nv }, () => []);
+    for (let t = 0; t < idx.length; t += 3) for (let a = 0; a < 3; a++) { const i = idx[t + a], k = idx[t + (a + 1) % 3]; nb[i].push(k); nb[k].push(i); }
+    const prof = CH.map((w) => {
+      if (!w) return null;
+      let f = Float32Array.from(w, (x) => Math.max(0, x - 0.3) / 0.7), g = new Float32Array(nv);
+      for (let it = 0; it < 6; it++) { for (let v = 0; v < nv; v++) { let s = f[v]; nb[v].forEach((u) => { s += f[u]; }); g[v] = s / (nb[v].length + 1); } [f, g] = [g, f]; }
+      return f;
+    });
+    for (let v = 0; v < nv; v++) {
+      let c = -1, best = 0.02;
+      prof.forEach((f, k) => { if (f && f[v] > best) { best = f[v]; c = k; } });
+      if (c < 0) continue;
+      const f = prof[c]; let gx = 0, gy = 0, gz = 0, l2 = 0;
+      nb[v].forEach((u) => { const dx = pos[u * 3] - pos[v * 3], dy = pos[u * 3 + 1] - pos[v * 3 + 1], dz = pos[u * 3 + 2] - pos[v * 3 + 2], df = f[u] - f[v]; gx += df * dx; gy += df * dy; gz += df * dz; l2 += dx * dx + dy * dy + dz * dz; });
+      const k = l2 > 0 ? 2 / l2 : 0; // least squares over the ring: sum(df dp) = (sum|dp|^2 / 2) grad
+      jnt[v * 4 + 2] = c + 1; tens[v * 4] = gx * k; tens[v * 4 + 1] = gy * k; tens[v * 4 + 2] = gz * k; tens[v * 4 + 3] = f[v];
+    }
+    geo.setAttribute("jnt", new THREE.BufferAttribute(jnt, 4));
+    geo.setAttribute("tens", new THREE.BufferAttribute(tens, 4));
+    data.motionAttrs = [jnt, tens]; // (the same for every body built from this skin)
+  }
+  body.motionAttrs = motionAttrs;
+  body.jointHelpers = helperBones;
   // The jointed capsule fingers are only for the procedural body; the mesh has its own hands.
   const capsules = skinList.slice();
   function useMeshHands(on) {
@@ -1587,6 +1670,7 @@ function makeBody3D(THREE, mats, athlete) {
   skinOf(athlete, (data) => {
     const skin = new THREE.SkinnedMesh(geoOf(data), mats.skin), bp = bindPose(athlete, data);
     skin.bind(new THREE.Skeleton(bp.bones, bp.inv), new THREE.Matrix4());
+    if (data.mesh) motionAttrs(skin.geometry, data, athlete, bp);
     skin.castShadow = true; skin.receiveShadow = true; skin.frustumCulled = false;
     skin.boundingSphere = new THREE.Sphere(new THREE.Vector3(), 1e4); // posed anywhere: never cull, raycast against triangles
     skin.userData.weights = data.weights; skin.userData.tone = 1; skin.userData.region = data.region || null;
@@ -1611,6 +1695,7 @@ function makeBody3D(THREE, mats, athlete) {
       skin.skeleton.dispose();
       skin.bind(new THREE.Skeleton(bp.bones, bp.inv), new THREE.Matrix4());
       useMeshHands(!!data.mesh);
+      if (data.mesh) motionAttrs(skin.geometry, data, sex, bp);
       old.dispose();
       body.shoulderHalf = shoulderOf(sex);
       body.hairOn = sex === "female";
@@ -1823,11 +1908,17 @@ function createViewer3D(container, mode, opts = {}) {
   if (!THREE) return null;
   let athlete = opts.athlete === "female" ? "female" : "male";
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  // Pixel ratio: sharp on retina screens (capped at 2), a little lower on small, low-core devices
+  // where the fragment shader cost of a 3x phone screen would cost frame rate.
+  const lowPower = (navigator.hardwareConcurrency || 8) <= 4 && Math.min(screen.width || 9999, screen.height || 9999) < 500;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, lowPower ? 1.5 : 2));
+  // Soft filtered shadows (PCF with bilinear taps): no stair-stepping, no acne on the skin.
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFShadowMap;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   if ("outputColorSpace" in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  // Tone mapping: ACES filmic by default (GYM3D.STUDIO.tone); compared with AgX it keeps the
+  // fabric black and the forms contrasty, where AgX lifted and greyed them.
+  renderer.toneMapping = GYM3D.STUDIO && GYM3D.STUDIO.tone === "agx" && THREE.AgXToneMapping ? THREE.AgXToneMapping : THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = GYM3D.STUDIO ? GYM3D.STUDIO.exposure : 1;
   renderer.domElement.className = "figure3d";
   container.appendChild(renderer.domElement);
@@ -1841,13 +1932,13 @@ function createViewer3D(container, mode, opts = {}) {
 
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(28, 1, 2, 5000);
-  // A commercial gym: reflections of overhead light panels on the metal, a soft key light from
-  // above that casts the shadows, a cool fill, a rim light from behind.
+  // A training studio (GYM3D): soft reflections of an overhead softbox and strip boxes, a large
+  // soft key from the upper front that casts the shadows, a cool fill, two rims from behind.
   scene.environment = GYM3D.environment(renderer);
   const LIGHTS = GYM3D.lights(scene), { key, rim } = LIGHTS;
   // The light rig turns with the camera (about the vertical axis), so whichever side of the body
-  // is in view keeps the same modelling: key from the upper left, fill opposite, rims behind.
-  const RIG = ["key", "fill", "rim", "rim2"].filter((k) => LIGHTS[k]).map((k) => [LIGHTS[k], LIGHTS[k].position.clone()]);
+  // is in view keeps the same modelling: key from the upper front, fill opposite, rims behind.
+  const RIG = ["key", "fill", "rim", "rim2", "top"].filter((k) => LIGHTS[k]).map((k) => [LIGHTS[k], LIGHTS[k].position.clone()]);
 
   const col = (name, fb) => new THREE.Color(css(name, fb));
   // Skin shader: fine fiber striations along each muscle's fiber direction, darker grooves where
@@ -1855,6 +1946,51 @@ function createViewer3D(container, mode, opts = {}) {
   // Per viewer: activation color (teal on the optimal form, blue on the mistake), the color of
   // muscles that take over in a mistake, the energy rim around a correct body, and the scan band
   // that sweeps up the body when an exercise is first analyzed.
+  // MOTION: skin correctives after skinning (vertex side only; see motionAttrs and
+  // updateMotionUniforms). In order: a restrained tension change of the working muscle (a few mm
+  // along the normal, the normal tilted to match), breathing (ribcage and upper belly), and soft
+  // contact at deeply bent hips, elbows and knees: on the inside of the bend the two sides of the
+  // joint meet on the plane halfway between the bones instead of passing through each other (the
+  // jagged creases behind the knee, in the groin and the crook of the elbow); the flesh pressed off
+  // that plane spreads out a little around it, so the joint keeps its volume.
+  const motionUniforms = {
+    uJC: { value: Array.from({ length: 8 }, () => new THREE.Vector3()) }, uJN: { value: Array.from({ length: 8 }, () => new THREE.Vector3(0, 1, 0)) },
+    uJV: { value: Array.from({ length: 8 }, () => new THREE.Vector4()) }, uTen: { value: new Array(8).fill(0) }, uBreath: { value: 0 }
+  };
+  const MOTION_VERT_DECL = "\nattribute vec4 jnt;\nattribute vec4 tens;\nuniform vec3 uJC[8];\nuniform vec3 uJN[8];\nuniform vec4 uJV[8];\nuniform float uTen[8];\nuniform float uBreath;";
+  const MOTION_VERT = `#ifdef USE_SKINNING
+    {
+      vec3 mN = objectNormal;
+      int mc = int(jnt.z + 0.5) - 1;
+      if (mc >= 0) {
+        float ta = uTen[mc + (position.z < 0.0 ? 4 : 0)];
+        if (ta != 0.0) {
+          transformed += mN * ta * tens.w;
+          vec3 tg = (skinMatrix * vec4(tens.xyz, 0.0)).xyz;
+          mN = normalize(mN - ta * (tg - mN * dot(tg, mN)));
+        }
+      }
+      transformed += mN * uBreath * jnt.w;
+      int ji = int(jnt.x + 0.5) - 1;
+      if (ji >= 0 && jnt.y != 0.0) {
+        vec4 cv = uJV[ji];
+        if (cv.w > 0.0) {
+          vec3 jn = uJN[ji], rel = transformed - uJC[ji];
+          float js = sign(jnt.y), jw = smoothstep(-1.5, 2.5, dot(rel, cv.xyz)) * cv.w * abs(jnt.y);
+          float jd = dot(rel, jn) * js;
+          float jq = jd >= 1.0 ? jd : (jd <= -1.0 ? 0.0 : (jd + 1.0) * (jd + 1.0) * 0.25);
+          float push = (jq - jd) * jw;
+          vec3 rad = rel - jn * dot(rel, jn);
+          float rl = length(rad);
+          transformed += jn * js * push + (rl > 0.001 ? rad / rl : vec3(0.0)) * min(push, 3.0) * 0.3;
+          mN = normalize(mix(mN, -js * jn, smoothstep(0.0, 1.5, push) * 0.6));
+        }
+      }
+      #ifndef FLAT_SHADED
+      vNormal = normalize(normalMatrix * mN);
+      #endif
+    }
+    #endif`;
   const fiberUniforms = {
     uTime: { value: 0 }, uEffort: { value: 1 }, uActScale: { value: 0 }, uFiber: { value: 0 }, uMap: { value: 1 }, uClothOn: { value: 1 },
     uActColor: { value: new THREE.Color(mode === "bad" ? VIEW3D.activeBad : VIEW3D.active) },
@@ -1882,12 +2018,18 @@ function createViewer3D(container, mode, opts = {}) {
       float det = dot(sx, r1) * fd;
       vec3 g = sign(det) * (dFdx(hgt) * r1 + dFdy(hgt) * r2);
       return normalize(abs(det) * n - g);
+    }
+    // A thin line |d| < hw (d in cm), antialiased; below a pixel it fades by its coverage instead of aliasing.
+    float aaLine(float d, float hw) {
+      float w = max(fwidth(d), 1e-4);
+      return (1.0 - smoothstep(max(hw - 0.5 * w, 0.0), hw + 0.5 * w, abs(d))) * min(1.0, 2.0 * hw / w + 0.15);
     }`;
   function patchSkin(mat) {
     mat.onBeforeCompile = (shader) => {
-      Object.assign(shader.uniforms, fiberUniforms);
+      Object.assign(shader.uniforms, fiberUniforms, motionUniforms);
       shader.vertexShader = shader.vertexShader
-        .replace("#include <common>", "#include <common>\nattribute vec4 fib;\nattribute float act;\nattribute float cloth;\nattribute vec4 aux;\nvarying vec4 vFib;\nvarying float vAct;\nvarying float vWorldY;\nvarying float vCloth;\nvarying vec4 vAux;\nvarying vec3 vObjP;")
+        .replace("#include <common>", "#include <common>\nattribute vec4 fib;\nattribute float act;\nattribute float cloth;\nattribute vec4 aux;\nvarying vec4 vFib;\nvarying float vAct;\nvarying float vWorldY;\nvarying float vCloth;\nvarying vec4 vAux;\nvarying vec3 vObjP;" + MOTION_VERT_DECL)
+        .replace("#include <skinning_vertex>", "#include <skinning_vertex>\n" + MOTION_VERT)
         .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFib = fib; vAct = act; vCloth = cloth; vAux = aux; vObjP = position;")
         .replace("#include <project_vertex>", "#include <project_vertex>\nvWorldY = (modelMatrix * vec4(transformed, 1.0)).y;");
       shader.fragmentShader = shader.fragmentShader
@@ -1902,18 +2044,30 @@ function createViewer3D(container, mode, opts = {}) {
           float clothM = smoothstep(0.5 - cfw, 0.5 + cfw, vCloth) * uClothOn;
           float hairM = smoothstep(0.5 - hfw, 0.5 + hfw, vAux.y);
           float sd = (vAux.z - 0.5) * 3.0, sfw = max(fwidth(sd), 0.002);
-          // A seam is a thin stitched line where the signed distance crosses zero (not where two pieces meet).
-          float seamM = (1.0 - smoothstep(0.12 - sfw, 0.12 + sfw, abs(sd))) * (1.0 - smoothstep(1.6, 2.4, sfw / max(length(fwidth(vObjP)), 1e-4))) * clothM;
+          // The seam line is where the signed distance sd (cm) crosses zero (not where two pieces meet).
           float detail = 1.0 - smoothstep(0.25, 0.6, length(fwidth(vObjP))); // fade fine detail when far away
+          float fine = 1.0 - smoothstep(0.06, 0.16, length(fwidth(vObjP)));  // sub-millimetre detail, close-ups only
+          // Garments: distance in from the edge (cm), from the mask's smooth ramp (about +-1.8 cm
+          // around the edge); a folded elastic band (darker, smoother, ribbed up close) along every edge (waistband,
+          // leg hems, the bra's underband, neckline and straps) and double-needle stitching in a
+          // slightly lighter thread on the seam line (dashes resolve only up close).
+          float edgeD = -3.64 * sin(asin(1.0 - 2.0 * clamp(vCloth, 0.0, 1.0)) / 3.0);
+          float bandM = clothM * (1.0 - smoothstep(1.0, 1.75, edgeD));
+          float seamOk = 1.0 - smoothstep(1.6, 2.4, sfw / max(length(fwidth(vObjP)), 1e-4));
+          float dash = mix(0.55, smoothstep(-0.2, 0.4, sin(dot(vObjP, vec3(4.4, 1.3, 4.4)))), fine);
+          float stitch = clamp((aaLine(sd - 0.24, 0.045) + aaLine(sd + 0.24, 0.045)) * seamOk, 0.0, 1.0) * dash * clothM;
           vec3 hq = vObjP - uHairTie;
           float hairV = atan(hq.z, hq.y) * 40.0;
           {
             // Skin: a very fine, irregular surface (no pores); fabric: soft folds plus a knit; hair: strands.
-            float skinH = (vn3(vObjP * 0.9) * 0.6 + vn3(vObjP * 2.3) * 0.4) * 0.05 * detail;
+            float skinH = (vn3(vObjP * 0.9) * 0.6 + vn3(vObjP * 2.3) * 0.4) * 0.05 * detail + vn3(vObjP * 7.0) * 0.012 * fine;
             vec3 q = vObjP;
             float fold = sin(q.y * 0.75 + 2.2 * sin(q.x * 0.21 + q.z * 0.17)) * (0.6 + 0.4 * sin(q.x * 0.09 - q.z * 0.13 + q.y * 0.05));
             fold += 0.45 * sin(q.y * 1.5 + q.z * 0.4 + 1.3 * sin(q.x * 0.33));
-            float clothH = fold * 0.1 + vn3(q * 3.1) * 0.05 * detail - seamM * 0.1;
+            // Knit: fine courses and wales (up close), ribs along the elastic bands, sunken stitches.
+            float knit = (0.5 + 0.5 * sin(q.y * 36.0 + 1.5 * sin((q.x + q.z) * 18.0))) * (0.5 + 0.5 * sin((q.x - q.z) * 22.0));
+            float clothH = fold * 0.1 + vn3(q * 3.1) * 0.05 * detail + knit * 0.018 * fine
+              + 0.01 * sin(edgeD * 20.9) * bandM * fine - 0.03 * stitch;
             float hfv = fwidth(hairV), hAA = 1.0 - smoothstep(0.4, 1.2, hfv);
             float hairH = (sin(hairV + 2.5 * vn3(vObjP * 0.5)) * 0.6 + sin(hairV * 0.37 + 3.0 * vn3(vObjP * 0.9)) * 0.4) * 0.05 * hAA;
             // Fine fiber striations as surface detail: absent in surface mode, faint on the map,
@@ -1924,7 +2078,10 @@ function createViewer3D(container, mode, opts = {}) {
             // The valleys between muscles catch the light as soft grooves (definition from the
             // surface, not from exaggerated geometry).
             skinH -= 0.3 * smoothstep(0.05, 0.8, vFib.w);
-            float hgt = mix(mix(skinH, clothH, clothM), hairH, hairM);
+            // The height steps from skin to fabric over a few pixels: the garment edge reads as a
+            // soft ridge without sparkling.
+            float clothMh = smoothstep(0.5 - 3.0 * cfw, 0.5 + 3.0 * cfw, vCloth) * uClothOn;
+            float hgt = mix(mix(skinH, clothH, clothMh), hairH, hairM);
             normal = bumpN(-vViewPosition, normal, hgt, faceDirection);
           }`)
         .replace("#include <emissivemap_fragment>", `#include <emissivemap_fragment>
@@ -1941,12 +2098,17 @@ function createViewer3D(container, mode, opts = {}) {
             float tint = vn3(vObjP * 0.07);
             diffuseColor.rgb *= mix(vec3(1.035, 0.995, 0.975), vec3(0.975, 0.995, 1.03), tint);
             diffuseColor.rgb *= (1.0 + 0.05 * belly) * (1.0 - 0.12 * sep * (1.0 - clothM)) * (0.985 + 0.03 * mottle);
-            // Roughness: a soft, even skin sheen (never glossy), a little smoother over taut bellies,
-            // drier in the creases.
-            roughnessFactor = clamp(0.64 + 0.08 * (mottle - 0.5) + 0.06 * sep - 0.05 * belly, 0.52, 0.8);
-            // Fabric: near-black matte knit, a slightly darker stitched seam line.
-            diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.013, 0.0135, 0.015) * (1.0 - 0.3 * seamM), clothM);
-            roughnessFactor = mix(roughnessFactor, 0.93, clothM);
+            // Roughness: satin skin (never glossy), varied at two scales so highlights break up
+            // naturally; a little smoother over taut bellies, drier in the creases.
+            float fineR = vn3(vObjP * 3.1);
+            roughnessFactor = clamp(0.57 + 0.1 * (mottle - 0.5) + 0.08 * (fineR - 0.5) + 0.07 * sep - 0.05 * belly, 0.45, 0.76);
+            // Fabric: near-black matte knit with a faint heathered variation, the elastic bands a
+            // shade darker and smoother, the stitching a lighter grey thread.
+            float heather = vn3(vObjP * 1.7) * 0.6 + vn3(vObjP * 4.3) * 0.4;
+            vec3 fabric = vec3(0.016, 0.0166, 0.0185) * (0.95 + 0.1 * heather) * (1.0 - 0.15 * bandM);
+            fabric = mix(fabric, vec3(0.06, 0.062, 0.066), 0.75 * stitch);
+            diffuseColor.rgb = mix(diffuseColor.rgb, fabric, clothM);
+            roughnessFactor = mix(roughnessFactor, 0.9 - 0.08 * bandM - 0.15 * stitch + 0.04 * (heather - 0.5), clothM);
             // Hair: very dark, combed back toward the tie, with a soft broken sheen along the strands.
             float strand = mix(0.5, 0.5 + 0.5 * sin(hairV * 0.37 + 3.0 * vn3(vObjP * 0.9)), 1.0 - smoothstep(0.4, 1.2, fwidth(hairV)));
             diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.0085, 0.009, 0.011) * (0.85 + 0.3 * strand), hairM);
@@ -1986,8 +2148,11 @@ function createViewer3D(container, mode, opts = {}) {
             float band = exp(-pow((vWorldY - uScanY) / 3.5, 2.0));
             totalEmissiveRadiance += uScanColor * band * (0.35 + 0.65 * rim) * 0.6;
           }`)
-        // Fabric and hair keep only a little of the skin's soft sheen.
-        .replace("#include <lights_physical_fragment>", "#include <lights_physical_fragment>\n#ifdef USE_SHEEN\nmaterial.sheenColor *= 1.0 - 0.7 * max(clothM, hairM);\n#endif")
+        // Sheen is mostly the fabric's (a soft grazing glow, the knit's response); the skin keeps a
+        // little. The thin clear coat (crisp, small highlights on the skin) is skin only, and it
+        // follows the micro surface and the muscle grooves instead of the smooth geometry.
+        .replace("#include <clearcoat_normal_fragment_maps>", "#include <clearcoat_normal_fragment_maps>\n#ifdef USE_CLEARCOAT\nclearcoatNormal = normal;\n#endif")
+        .replace("#include <lights_physical_fragment>", "#include <lights_physical_fragment>\n#ifdef USE_SHEEN\nmaterial.sheenColor *= mix(0.3, 1.0, clothM) * (1.0 - 0.6 * hairM);\n#endif\n#ifdef USE_CLEARCOAT\nmaterial.clearcoat *= (1.0 - clothM) * (1.0 - hairM);\n#endif")
         // Cavity occlusion (armpits, crotch, creases) on ambient light and softly on direct light.
         .replace("#include <aomap_fragment>", `#include <aomap_fragment>
           {
@@ -2001,10 +2166,12 @@ function createViewer3D(container, mode, opts = {}) {
     return mat;
   }
   const mats = {
-    // Matte dark-charcoal skin, not rubber or plastic: soft broad specular, a light sheen at grazing angles.
-    skin: patchSkin(new THREE.MeshPhysicalMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.62, metalness: 0,
-      specularIntensity: 0.36, sheen: 0.12, sheenColor: new THREE.Color(0x8a929d), sheenRoughness: 0.7, clearcoat: 0,
-      envMapIntensity: 0.32 })),
+    // Charcoal skin, physically based: a dielectric with a skin-like reflectance (IOR 1.4), satin
+    // roughness varied in the shader, a very thin clear coat for small crisp highlights on the
+    // forms (skin only), and sheen that the shader gives mostly to the fabric. Not rubber, not plastic.
+    skin: patchSkin(new THREE.MeshPhysicalMaterial({ color: 0xffffff, vertexColors: true, roughness: 0.57, metalness: 0,
+      ior: 1.4, specularIntensity: 0.55, sheen: 1, sheenColor: new THREE.Color(0x474c55), sheenRoughness: 0.45,
+      clearcoat: 0.06, clearcoatRoughness: 0.42, envMapIntensity: 0.4 })),
   };
 
 
@@ -2022,7 +2189,7 @@ function createViewer3D(container, mode, opts = {}) {
   scene.onBeforeRender = () => {
     const u = fiberUniforms, now = performance.now(), dt = Math.min(0.05, Math.max(0, (now - (hairAt || now)) / 1000)); hairAt = now;
     u.uMap.value += (display.map - u.uMap.value) * (reduce ? 1 : 0.08);
-    const turn = cam.yaw - VIEW3D.yaw;
+    const turn = cam.yaw; // GYM3D.lights are placed for a camera on +z (yaw 0)
     RIG.forEach(([l, p0]) => { l.position.copy(p0).applyAxisAngle(Y_AXIS, turn); });
     if (body.updateHair) body.updateHair(dt, reduce, floor.position.y);
   };
@@ -2741,10 +2908,14 @@ function createViewer3D(container, mode, opts = {}) {
     const k = sc && sc.k != null ? sc.k : 1;
     const d = new THREE.Vector3(0, 1, 0).applyQuaternion(cur.parts["upperArm" + s].quaternion).applyQuaternion(torsoQ.clone().invert());
     const e = (Math.acos(Math.min(1, Math.max(-1, -d.y))) * 180) / Math.PI;
-    const lift = k * 2.4 * smoothStep(75, 170, e) + ((sc && sc.lift) || 0) + (p.lift || 0);
-    const prot = k * (2.4 * Math.max(0, d.x) * smoothStep(35, 85, e) - 2.2 * smoothStep(0.12, 0.55, -d.x)) + ((sc && sc.prot) || 0) + (p.prot || 0);
-    if (Math.abs(lift) + Math.abs(prot) < 0.01) return null;
-    return new THREE.Vector3(prot, lift, 0).applyQuaternion(torsoQ);
+    // Round 6: with the elbow drawn back and low (the end of a row or pull-up) the blades also set
+    // down (depression); overhead, upward rotation carries the joint a little out as well as up.
+    const ret = smoothStep(0.12, 0.55, -d.x), low = 1 - smoothStep(50, 95, e);
+    const lift = k * (2.4 * smoothStep(75, 170, e) - 1.1 * ret * low) + ((sc && sc.lift) || 0) + (p.lift || 0);
+    const prot = k * (2.4 * Math.max(0, d.x) * smoothStep(35, 85, e) - 2.2 * ret) + ((sc && sc.prot) || 0) + (p.prot || 0);
+    const out = k * (0.9 * smoothStep(100, 170, e) - 0.5 * ret) * (s === "R" ? 1 : -1);
+    if (Math.abs(lift) + Math.abs(prot) + Math.abs(out) < 0.01) return null;
+    return new THREE.Vector3(prot, lift, out).applyQuaternion(torsoQ);
   }
   function pose(p, t, target = body, ends = reachEnds) {
     cur = target; curEnds = ends; supNow = p.sup || 0;
@@ -3455,6 +3626,59 @@ function createViewer3D(container, mode, opts = {}) {
     renderer.toneMappingExposure = want;
   }
 
+  // ----- Skin correctives (MOTION): per-frame drivers of MOTION_VERT -----
+  const mv = { a: new THREE.Vector3(), b: new THREE.Vector3(), d: new THREE.Vector3(), inv: new THREE.Matrix4(), ex: null, conFirst: true, iso: false };
+  const motionLevel = (id) => (ex.primary.includes(id) ? 1 : ex.secondary.includes(id) ? 0.5 : 0);
+  // Is pose a -> b the effort (concentric) half of the rep? The tempo's own ease says so when it
+  // has one ("con" / "ecc"), otherwise the default phase wording does.
+  function concentricFirst() {
+    const seg = tempo.find((s) => s[1] === 0 && s[2] === 1);
+    if (seg && (seg[3] === "con" || seg[3] === "ecc")) return seg[3] === "con";
+    try { const p = patternOf(ex); return defaultPhases()[1].label === (WORDS[p] || WORDS.isolation)[0]; } catch (e) { return true; }
+  }
+  function updateMotionUniforms(t, now) {
+    const P = body.parts, U = motionUniforms, skin = body.skin;
+    if (!skin || !body.jointHelpers) return;
+    if (mv.off) { U.uJV.value.forEach((v) => v.set(0, 0, 0, 0)); U.uTen.value.fill(0); U.uBreath.value = 0; return; } // (tests: before/after)
+    if (mv.ex !== ex) {
+      mv.ex = ex; mv.conFirst = concentricFirst();
+      // Barely moving (planks, holds, carries): breathe at rest instead of with the rep.
+      const A = solveSide(poseA), B = solveSide(poseB), far = (k) => (A[k] && B[k] ? Math.hypot(A[k][0] - B[k][0], A[k][1] - B[k][1]) : 0);
+      mv.iso = Math.max(far("hand"), far("hip"), far("ankle"), far("shoulder")) < 6;
+    }
+    mv.inv.copy(skin.matrixWorld).invert();
+    const yOf = (g, out) => out.set(0, 1, 0).applyQuaternion(g.quaternion);
+    // Joint contact: the plane halfway between the two bones, the inside of the bend, how far bent.
+    body.jointHelpers.forEach((g, h) => {
+      const J = g.userData.joint;
+      if (h < 2) { U.uJV.value[h].set(0, 0, 0, 0); return; }
+      const pd = yOf(P[J.pa], mv.a), cd = yOf(P[J.ch], mv.b);
+      if (h < 4) pd.negate(); // the trunk points away from the hip
+      mv.d.subVectors(cd, pd);
+      const half = mv.d.length() / 2;
+      U.uJN.value[h].addVectors(cd, pd).transformDirection(mv.inv);
+      mv.d.transformDirection(mv.inv);
+      U.uJV.value[h].set(mv.d.x, mv.d.y, mv.d.z, smoothStep(0.3, 0.7, half));
+      U.uJC.value[h].copy(P[J.ch].position).applyMatrix4(mv.inv);
+    });
+    // Muscle tension (cm along the normal at the belly): biceps shorten and rise as the elbow bends,
+    // triceps firm at lockout, quads under load deep in the bend, calves as the heel rises. Scaled by
+    // how much the exercise works the muscle (estimated involvement), a little even when it does not.
+    const ang = (g1, g2) => (yOf(g1, mv.a).angleTo(yOf(g2, mv.b)) * 180) / Math.PI;
+    const lb = motionLevel("biceps"), lt = motionLevel("triceps"), lq = motionLevel("quads"), lc = motionLevel("calves"), T = U.uTen.value;
+    ["R", "L"].forEach((s, k) => {
+      const e = ang(P["upperArm" + s], P["forearm" + s]), kn = ang(P["thigh" + s], P["shin" + s]), an = ang(P["shin" + s], P["foot" + s]), o = k * 4;
+      T[o] = 0.32 * smoothStep(25, 130, e) * (0.3 + 0.7 * lb);
+      T[o + 1] = 0.26 * (1 - smoothStep(15, 60, e)) * lt;
+      T[o + 2] = 0.22 * smoothStep(45, 115, kn) * lq;
+      T[o + 3] = 0.28 * smoothStep(2, 28, 90 - an) * (0.35 + 0.65 * lc);
+    });
+    // Breathing: in on the lowering (eccentric) half, out through the effort (concentric) half,
+    // with a slow resting breath underneath (and alone when the exercise is a hold).
+    const rest = 0.5 + 0.5 * Math.sin(now / 1100), rep = mv.conFirst ? 1 - t : t;
+    U.uBreath.value = reduce ? 0.12 : 0.3 * (mv.iso ? rest : 0.8 * rep + 0.2 * rest);
+  }
+
   function tick(now) {
     if (disposed) return;
     raf = requestAnimationFrame(tick);
@@ -3497,9 +3721,8 @@ function createViewer3D(container, mode, opts = {}) {
     u.uActScale.value = smooth((k - 350) / 700);
     u.uRim.value = mode === "good" ? 0.05 + 0.18 * Math.exp(-Math.pow((k - 1100) / 450, 2)) * smooth(k / 900) : 0;
     u.uFiber.value += ((fibersOn ? 1 : 0) - u.uFiber.value) * 0.08;
-    // Breathing: the ribcage swells a little.
-    const breath = 1 + 0.018 * Math.sin(now / 650);
-    body.parts.upperTorso.scale.x = breath; body.parts.upperTorso.scale.z = 1 + 0.009 * Math.sin(now / 650);
+    // Breathing, muscle tension and soft joint contact on the skin (MOTION, vertex shader).
+    updateMotionUniforms(t, now);
     // The camera glides to each new framing instead of jumping (and follows a drag at once).
     const aim = (closeUp ? closeUp.at : target).clone().add(pan), d = (closeUp ? dist / closeUp.zoom : dist) / zoomU;
     const dt = Math.min(0.1, Math.max(0, (now - (cam.at || now)) / 1000)); cam.at = now;
@@ -3698,7 +3921,7 @@ function createViewer3D(container, mode, opts = {}) {
       return { THREE, body, equipment, scene, get floorY() { return floorY; }, get fig() { return fig3; }, get ex() { return ex; },
         shapeT, gripPoint, gripAxis, jointsOf: () => jointsOf(body), skinWorld, dominantBones, materials: GYM3D.materials(),
         poseAt(t) { pose(lerp3(poseA, poseB, t), fig3.ik ? t : null); },
-        focus(at, zoom) { closeUp = { zoom, at: at.clone() }; } };
+        focus(at, zoom) { closeUp = { zoom, at: at.clone() }; }, motion: motionUniforms, motionOff(on) { mv.off = !!on; }, motionUpdate(t) { updateMotionUniforms(t, 0); } };
     },
     // Contact report (for automated checks): how the body meets the floor and the equipment.
     inspect() {

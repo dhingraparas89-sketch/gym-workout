@@ -515,13 +515,18 @@ const GYM3D = (() => {
   }
 
   // ---------- Studio: environment, lights and cyclorama ----------
-  // A clean photo studio, so the dark charcoal athletes and the black equipment read against a
-  // light neutral background. One soft environment (PMREM of a small procedural studio room:
-  // light grey walls, a big softbox key, an overhead strip, a dimmer fill and two rim strips) gives
-  // every material soft, physically plausible reflections and ambient light without any assets.
+  // A premium training-studio look: a deep graphite cyclorama with a soft pool of light on the
+  // floor under the athlete, so the mid-charcoal body, its lit edges and the black equipment all
+  // separate from the background. One soft environment (PMREM of a small procedural studio: dark
+  // graphite walls, a large overhead softbox and a ring of tall strip boxes) gives every material
+  // soft, physically plausible reflections. It is symmetric about the vertical axis, so the
+  // reflections look the same from every camera angle; the direct lights turn with the camera.
   const STUDIO = {
-    floor: 0xa2a5aa,   // matte light grey cyclorama (sRGB)
-    exposure: 1.25
+    floor: 0x212327,    // the cyclorama's base tone (sRGB); vertex colors shade it into a pool of light
+    pool: 260,          // radius (cm) of the brighter floor pool around the athlete
+    exposure: 1.0,
+    tone: "aces",       // ACES filmic (contrast, deep fabric blacks); "agx" lifts and greys the black fabric
+    bg: ["#2f3237", "#1c1e22"] // the stage's CSS tone while loading (matches the rendered wall)
   };
   function environment(renderer) {
     const THREE = T(), env = new THREE.Scene(), geos = [], mats = [];
@@ -531,58 +536,67 @@ const GYM3D = (() => {
       geos.push(g); mats.push(m);
       const o = new THREE.Mesh(g, m); o.position.set(x, y, z); if (look) o.lookAt(0, 1, 0); env.add(o); return o;
     };
-    const room = box(40, 16, 40, 0x7d8085, 1, 0, 6, 0); room.material.side = THREE.BackSide;
-    box(40, 0.1, 40, 0xb4b7bc, 1, 0, -1.95, 0);                 // light floor: bounce from below
-    box(12, 0.2, 12, 0xffffff, 5.5, 4, 13.8, 6, true);          // large overhead-front softbox (key)
-    box(3, 0.2, 20, 0xffffff, 2.2, -6, 13.8, -2, true);         // overhead strip
-    box(0.2, 8, 10, 0xf2f4f8, 1.6, -19.8, 5, 6);                // fill panel, front left
-    box(0.2, 10, 2.5, 0xffffff, 3.2, 19.8, 5, -12);             // rim strips behind
-    box(0.2, 10, 2.5, 0xffffff, 3.2, -19.8, 5, -12);
+    const room = box(40, 16, 40, 0x3a3d43, 1, 0, 6, 0); room.material.side = THREE.BackSide;
+    box(40, 0.1, 40, 0x6a6e74, 1, 0, -1.95, 0);                 // floor: a little bounce from below
+    box(14, 0.2, 14, 0xffffff, 4.2, 0, 13.8, 0);                // large overhead softbox
+    for (let i = 0; i < 6; i++) {                                // a ring of tall strip boxes
+      const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
+      box(2.4, 9, 0.2, 0xf4f6fa, 2.4, Math.sin(a) * 18, 6, Math.cos(a) * 18, true);
+    }
     const pm = new THREE.PMREMGenerator(renderer), rt = pm.fromScene(env, 0.035);
     pm.dispose(); geos.forEach((g) => g.dispose()); mats.forEach((m) => m.dispose());
     return rt.texture;
   }
-  // Studio lighting, turned with the camera (figure3d.js) so every side of the body is modelled the
-  // same way: a large soft key from the upper front that reveals the muscle forms and casts the
-  // only shadow, a broad neutral fill from the other front side that keeps the shadow side open,
-  // two rims from behind that separate the silhouette from the background, and a sky/ground fill.
+  // Studio lighting. Positions are given for a camera on +z looking at the athlete (x to the
+  // camera's right); figure3d.js turns the rig with the camera, so every side of the body (front,
+  // side, back) is modelled the same way:
+  // - key: a large soft source from the upper front, a little to the right; the only shadow caster;
+  // - fill: broad and cool from the lower left front, keeps the shadow side open without flattening;
+  // - two rims from behind left and right that draw a bright edge along shoulders, arms, back,
+  //   waist, thighs and calves against the dark background;
+  // - a top light for the shoulders and traps, and a faint sky/ground fill.
   function lights(scene) {
     const THREE = T();
-    const hemi = new THREE.HemisphereLight(0xf4f6fa, 0x8e9196, 0.3); scene.add(hemi);
-    const key = new THREE.DirectionalLight(0xfff6ee, 3.4);
-    key.position.set(200, 220, 170); key.castShadow = true;
-    key.shadow.mapSize.set(2048, 2048); key.shadow.bias = -0.0002; key.shadow.normalBias = 0.6; key.shadow.radius = 8;
-    Object.assign(key.shadow.camera, { left: -170, right: 170, top: 170, bottom: -170, near: 50, far: 800 });
+    const hemi = new THREE.HemisphereLight(0xe8eef6, 0x3a3c40, 0.35); scene.add(hemi);
+    const key = new THREE.DirectionalLight(0xfff3e8, 3.0);
+    key.position.set(150, 250, 250); key.castShadow = true;
+    key.shadow.mapSize.set(2048, 2048); key.shadow.bias = -0.00015; key.shadow.normalBias = 0.35;
+    Object.assign(key.shadow.camera, { left: -170, right: 170, top: 170, bottom: -170, near: 50, far: 900 });
     scene.add(key); scene.add(key.target);
-    const fill = new THREE.DirectionalLight(0xeef2f8, 0.65); fill.position.set(-220, 100, 170); scene.add(fill);
-    const rim = new THREE.DirectionalLight(0xffffff, 1.3); rim.position.set(-170, 170, -210); scene.add(rim);
-    const rim2 = new THREE.DirectionalLight(0xffffff, 1.0); rim2.position.set(180, 120, -190); scene.add(rim2);
-    const top = new THREE.DirectionalLight(0xffffff, 0.25); top.position.set(0, 400, 0); scene.add(top);
+    const fill = new THREE.DirectionalLight(0xdfe8f4, 0.7); fill.position.set(-280, 60, 200); scene.add(fill);
+    const rim = new THREE.DirectionalLight(0xf1f6ff, 4.2); rim.position.set(-260, 150, -220); scene.add(rim);
+    const rim2 = new THREE.DirectionalLight(0xfff4ea, 3.6); rim2.position.set(260, 130, -220); scene.add(rim2);
+    const top = new THREE.DirectionalLight(0xffffff, 0.45); top.position.set(0, 400, -60); scene.add(top);
     return { hemi, key, fill, rim, rim2, top };
   }
   // Seamless cyclorama: a flat floor that curves up into a distant wall all the way round, so the
   // studio looks the same from every camera angle (no seams, tiles or horizon line). Faces point
-  // inward only, so a camera pulled back past the wall still sees the scene. A slight falloff
-  // toward the wall (vertex color) gives depth; the floor receives the key light's shadow.
+  // inward only, so a camera pulled back past the wall still sees the scene. Vertex colors shade
+  // it: a soft pool of light on the floor around the athlete, falling off to a deep graphite at
+  // the foot of the wall, and the wall darkening further as it rises. The floor receives the key
+  // light's shadow.
   function floor() {
     const THREE = T();
     const R0 = 900, C = 420, H = 1500, pts = [];
-    for (let i = 0; i <= 12; i++) pts.push(new THREE.Vector2((R0 * i) / 12, 0));
+    for (let i = 0; i <= 18; i++) pts.push(new THREE.Vector2((R0 * i) / 18, 0));
     for (let i = 1; i <= 16; i++) { const a = (i / 16) * Math.PI / 2; pts.push(new THREE.Vector2(R0 + C * Math.sin(a), C - C * Math.cos(a))); }
     for (let i = 1; i <= 4; i++) pts.push(new THREE.Vector2(R0 + C, C + ((H - C) * i) / 4));
     pts[0].x = 0.001;
-    const geo = new THREE.LatheGeometry(pts, 72);
+    const geo = new THREE.LatheGeometry(pts, 96);
     // Lathe faces point outward for a profile going out then up: flip them to face the inside.
     const idx = geo.index.array; for (let i = 0; i < idx.length; i += 3) { const t = idx[i + 1]; idx[i + 1] = idx[i + 2]; idx[i + 2] = t; }
     const n = geo.attributes.normal; for (let i = 0; i < n.count; i++) n.setXYZ(i, -n.getX(i), -n.getY(i), -n.getZ(i));
     const pos = geo.attributes.position, col = new Float32Array(pos.count * 3);
+    const sm = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
     for (let i = 0; i < pos.count; i++) {
       const r = Math.hypot(pos.getX(i), pos.getZ(i)), y = pos.getY(i);
-      const k = 1 - 0.1 * Math.min(1, Math.max(0, (r - 150) / 750)) - 0.1 * Math.min(1, y / 900);
-      col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = k;
+      // Linear-light factors: 1 in the pool, about 0.2 at the wall's foot, 0.12 high on the wall.
+      const pool = 1 - sm(STUDIO.pool * 0.35, STUDIO.pool * 2.2, r);
+      const k = (0.32 + 0.68 * pool) * (1 - 0.5 * sm(0, 900, y));
+      col[i * 3] = k * 0.97; col[i * 3 + 1] = k * 0.985; col[i * 3 + 2] = k;
     }
     geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
-    const mat = new THREE.MeshStandardMaterial({ color: STUDIO.floor, roughness: 0.92, metalness: 0, vertexColors: true, envMapIntensity: 0.6 });
+    const mat = new THREE.MeshStandardMaterial({ color: STUDIO.floor, roughness: 0.85, metalness: 0, vertexColors: true, envMapIntensity: 0.35 });
     const m = new THREE.Mesh(geo, mat); m.receiveShadow = true; m.renderOrder = -1;
     m.userData.studio = true;
     return m;
