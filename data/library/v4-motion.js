@@ -506,19 +506,43 @@
     // Cable kickback: the working foot hovers just off the floor behind the standing foot at the
     // start (it never scuffs along the floor) and the heel drives back until the thigh lines up.
     "Cable kickback": {
-      a: { x: 100, y: 186, shin: 6, thigh: -8, torso: 35, neck: 30, ua: 100, fa: 95, t2: 178, s2: 212, f2: 104 },
+      a: { x: 100, y: 186, shin: 6, thigh: -8, torso: 35, neck: 30, ua: 100, fa: 95, t2: 178, s2: 216, f2: 98 },
       b: { x: 100, y: 186, shin: 6, thigh: -8, torso: 35, neck: 30, ua: 100, fa: 95, t2: 218, s2: 226, f2: 150 } },
     // Standing calf raise: the body pivots about the tip of the foot on the step edge (the rig has
-    // no toe joint), so the forefoot stays put while the heels drop below the step and rise.
+    // no toe joint), so the forefoot stays put while the heels drop below the step and rise. The
+    // body leans just enough to keep the shoulders (and the machine's pads) straight above the
+    // forefoot, so they rise vertically with the carriage.
     "Standing calf raise": {
-      a: { x: 115.1, y: 188.4, anchor: "ball", shin: 0, thigh: 0, torso: 0, neck: 0, foot: 108, ua: 165, fa: 95 },
-      b: { x: 115.1, y: 188.4, anchor: "ball", shin: 0, thigh: 0, torso: 0, neck: 0, foot: 145, ua: 165, fa: 95 } },
+      a: { x: 115.1, y: 188.4, anchor: "ball", shin: 6.9, thigh: 6.9, torso: 6.9, neck: 0, foot: 108, ua: 165, fa: 95 },
+      b: { x: 115.1, y: 188.4, anchor: "ball", shin: 2.3, thigh: 2.3, torso: 2.3, neck: 0, foot: 145, ua: 165, fa: 95 } },
     // Face pull: the hands travel from the rope at arm's length straight in toward the forehead
     // (reach IK around the shoulder) while the elbows open out to the sides at shoulder height;
     // the elbows never drop through a row-like path.
     "Face pull": { ik: { grip: 5, reach: 1.22, pole: [-0.3, 0.25, 1] },
       a: { ...S0, x: 86, torso: -6, neck: -2, ua: 82, fa: 84, gz: 5 },
       b: { ...S0, x: 86, torso: -6, neck: -2, ua: 109, fa: -17.4, gz: 13 } },
+    // Incline push-up: hands planted on the bench; the straight body pivots about the feet until
+    // the chest is a few centimetres above the bench edge (it previously stopped ~30 cm short).
+    "Incline push-up": {
+      a: { x: 30, y: 182, foot: 144, shin: 46.5, thigh: 46.5, torso: 46.5, neck: 51, ua: 172.5, fa: 157.2 },
+      b: { x: 30, y: 182, foot: 147, shin: 65.2, thigh: 65.2, torso: 65.2, neck: 70, ua: 235, fa: 140 } },
+    // Mountain climber: a lower, straighter plank so the toes and the palms both reach the floor
+    // (at 70 degrees the toes sat ~8 cm below the palms and the hands hovered).
+    "Mountain climber": { keysEase: "spline",
+      // Toe targets (foot IK): the driving foot travels forward a few cm above the floor instead
+      // of swinging down through it.
+      a: { anchor: "hand", x: 130, y: 187, foot: 165, shin: 74, thigh: 74, torso: 74, neck: 78, ua: 180, fa: 180, t2: 254, s2: 254, f2: 165, toeR: [-2.4, 187.1], toeL: [-2.4, 187.1] },
+      keys: [{ at: 0.33, thigh: -45, shin: 95, foot: 150, toeR: [71.6, 181], toeL: [-2.4, 187.1] }, { at: 0.66, toeR: [-2.4, 187.1], toeL: [-2.4, 187.1] }],
+      b: { anchor: "hand", x: 130, y: 187, foot: 165, shin: 74, thigh: 74, torso: 74, neck: 78, ua: 180, fa: 180, t2: 135, s2: 275, f2: 150, toeR: [-2.4, 187.1], toeL: [71.6, 181] } },
+    // Burpee: one floor for every phase (the palms reach it in the squat, the toes in the plank
+    // and at the bottom); the feet hop back and forward on toe targets (foot IK) instead of the
+    // legs swinging through the floor, which had dropped the floor 40 cm below the hands.
+    "Burpee": { keysEase: "spline", kneeFK: true,
+      a: { ...S0, flat: 0, toeR: [119.5, 193], toeL: [119.5, 193] },
+      keys: [{ at: 0.3, fix: "ankle", shin: 46, thigh: -86, torso: 66.4, neck: 80, ua: 176, fa: 168, flat: 1, toeR: [119.5, 193], toeL: [119.5, 193] },
+        { at: 0.46, fix: "hand", foot: 140, shin: 75, thigh: 40, torso: 82, neck: 88, ua: 179, fa: 176, flat: 1, toeR: [58, 175], toeL: [58, 175] },
+        { at: 0.62, fix: "hand", foot: 165, shin: 72.9, thigh: 72.9, torso: 72.9, neck: 77, ua: 180, fa: 180, flat: 1, toeR: [12.2, 193], toeL: [12.2, 193] }],
+      b: { anchor: "hand", x: 143.9, y: 190.4, fix: "hand", foot: 165, shin: 86.7, thigh: 86.7, torso: 86.7, neck: 90, ua: 245, fa: 118, flat: 1, toeR: [8.9, 193], toeL: [8.9, 193] } },
     // Push-up: hands stay planted; the whole body lowers as one line until the chest is a few
     // centimetres off the floor (elbows about 40 degrees from the trunk via the elbow pole).
     "Push-up": { b: { x: 30, y: 166, foot: 160, shin: 90, thigh: 90, torso: 90, neck: 93, ua: 235, fa: 126 } },
@@ -536,15 +560,53 @@
   const LOWER_FIRST = /lower|descend|hinge|open wide|roll out|slide down|step back|knees forward|step and/i;
   // Honest demonstration status after the round-5 review (contact + biomechanics audits and
   // front/side/three-quarter contact sheets of both athletes). demoNote names the known defect.
+  // Upholstery overlaps up to ~3 cm read as foam giving under the body and are not listed.
   const DEMO = {
+    "Battle rope": ["hidden", "The rope does not follow the hands: the hands sit up to 17 cm off the rope ends and the rope slides about 45 cm through the grip."],
+    "Walking lunge": ["beta", "Shown stepping in place: the stepping foot returns to the start each rep instead of travelling forward."],
+    "Jump squat": ["beta", "Take-off and landing are approximate: the body jumps about 14 cm in one frame at take-off and the feet slide about 6 cm on landing."],
+    "Box jump": ["beta", "Abrupt take-off (about 13 cm in one frame) and the hands flip about 26 degrees during the arm swing."],
+    "Burpee": ["beta", "The hop back lands abruptly at the plank (about 7 cm in one frame) and the hands snap flat as they reach the floor."],
+    "Mountain climber": ["beta", "The fast knee drive reverses abruptly at the chest (about 5-7 cm in one frame)."],
+    "Farmer's carry": ["beta", "Walking is shown in place: the feet slide about 17 cm and each step jumps about 4 cm."],
+    "Sled push": ["beta", "Steps are shown in place: the feet slide about 9 cm and each step jumps about 6 cm."],
+    "Sled pull": ["beta", "Steps are shown in place: the feet slide about 15 cm and each step jumps about 9 cm."],
+    "Bird dog": ["beta", "The supporting hand slides about 6 cm on the floor as the opposite arm reaches."],
+    "Seated calf raise": ["beta", "The hands sit about 10 cm off the machine handles and the forearm passes about 5 cm into the knee pad."],
+    "Standing calf raise": ["beta", "The hands sit about 4 cm off the handle bar with the fist turned across it; the foot pivots on the toe tip (the rig has no toe joint)."],
+    "Cable crunch": ["beta", "The rope handle jumps about 10 cm at one point and the neck passes about 4 cm into the cable tower frame."],
+    "Reverse pec deck": ["beta", "The machine arms jump about 17 cm at one point in the rep."],
+    "Overhead triceps extension": ["beta", "The hands slide about 5 cm along the handle with the fists turned across it, and the weight touches the upper back."],
+    "Upright row": ["beta", "The fists turn about 60 degrees across the bar and flip about 20 degrees near the top."],
+    "Pallof press": ["beta", "The handle tilts about 9 cm between the two hands."],
+    "Russian twist": ["beta", "The held weight tilts about 10 cm between the hands."],
+    "Back extension": ["beta", "The head passes about 4 cm into the machine's steel frame near the bottom."],
+    "Preacher curl": ["beta", "The thigh passes about 3.5 cm into the pad's steel frame."],
+    "Leg curl": ["beta", "The upper arm passes about 4 cm into the pad at the start."],
+    "Chest-supported row": ["beta", "The head passes about 4 cm into the chest pad."],
+    "Wrist curl": ["beta", "The thigh passes about 4 cm into the bench pad."],
+    "Incline dumbbell curl": ["beta", "The dumbbell grazes the side of the torso (about 3 cm) at the bottom."],
+    "Sumo squat": ["beta", "The hanging dumbbell overlaps the front of the hips by about 3 cm."],
+    "Pec deck fly": ["beta", "The foot overlaps the machine frame by about 2.5 cm."],
+    "Cable curl": ["beta", "The hands slide about 3.5 cm along the straight bar."],
+    "Seated leg curl": ["beta", "The hands sit about 3 cm off the seat handles."],
+    "Leg press": ["beta", "The hands are turned about 75 degrees across the side handles."],
+    "Leg press calf raise": ["beta", "The hands are turned about 75 degrees across the side handles."],
+    "Sissy squat": ["beta", "The supporting hand is turned about 30 degrees across the upright and the feet slide about 4 cm."]
   };
   EXERCISES.forEach((ex) => {
     const d = DEMO[ex.name];
     if (d) { ex.demo = d[0]; ex.demoNote = d[1]; } else ex.demo = "ready";
   });
+  // Mistake examples rebuilt on the round-5 poses (same fault, matched to the new keys and depth).
+  const BAD5 = {
+    "Burpee": { keys: [{}, {}, { thigh: 76, shin: 76, torso: 64 }] },
+    "Incline push-up": { a: { shin: 49, thigh: 52, torso: 40, neck: 45 }, b: { shin: 68, thigh: 71, torso: 58, neck: 63 } }
+  };
   EXERCISES.forEach((ex) => {
     const m = MOTION5[ex.name];
     if (m) ex.figure3d = { ...(ex.figure3d || {}), ...m };
+    if (BAD5[ex.name]) ex.bad3d = { ...(ex.bad3d || {}), ...BAD5[ex.name] };
     if (KEEP.test(ex.name)) return;
     const tl = ex.phaseTimeline || [], labels = tl.map((p) => p.label);
     const iso = /^(Plank|Side plank)$/.test(ex.name);

@@ -440,17 +440,44 @@ function buildSkinData(segs, mesh) {
     if (!mesh.noHelpers) JH.forEach(([pa, ch], h) => {
       const a = names.indexOf(pa), c = names.indexOf(ch);
       for (let v = 0; v < nv; v++) {
-        const wa = wb[v * B + a], wc = wb[v * B + c], m = Math.min(wa, wc);
-        if (m < 1e-3) continue;
+        let wa = wb[v * B + a]; const wc = wb[v * B + c], m0 = Math.min(wa, wc);
+        if (h < 2 && wa > 0.05) {
+          // Around the shoulder the chest, the blade and both folds of the armpit go part of the way
+          // with the arm (the arm's own weights from the base mesh barely reach them), so a raised
+          // arm stretches them instead of leaving a web of skin behind.
+          local(segs[c], pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2], L);
+          const x = wa * 0.6 * (1 - skinSmooth(7, 15, Math.hypot(L[0], L[1], L[2])));
+          wb[v * B + a] -= x; wb[v * B + B0 + h] += x; wa -= x;
+        }
+        const m = Math.min(wa, wc);
+        if (m < 1e-3 || m0 < 1e-3) continue;
         // The helper takes the shared weight (most of it in the middle of the band).
         // (Only where these two segments carry the vertex: in the crotch, where both thighs and
         // the pelvis share it, a helper would push it past the four bones a vertex can follow.)
         // and only near the joint itself (the base weights spread far from the hips).
         local(segs[c], pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2], L);
-        const t = Math.min(1, 2.2 * m) * skinSmooth(0.75, 0.92, wa + wc) * (1 - skinSmooth(5, 11, Math.hypot(L[0], L[1], L[2])));
+        // (The shoulder's band is wider: the blade and the back of the armpit go with the arm.)
+        const R = h < 2 ? 18 : 11;
+        const t = Math.min(1, 2.2 * m) * skinSmooth(0.75, 0.92, wa + wc) * (1 - skinSmooth(R - 6, R, Math.hypot(L[0], L[1], L[2])));
         wb[v * B + a] -= m * t; wb[v * B + c] -= m * t; wb[v * B + B0 + h] += 2 * m * t;
       }
     });
+    // Even the weights out over the surface a little (they come from a coarser mesh and step
+    // from vertex to vertex in deep folds: armpits, groin, the backs of the knees), except on the
+    // hands, whose fingers must stay apart.
+    {
+      const handB = mesh.bones.map((n, k) => (/^(hand|[ft][RL]\d)/.test(n) ? map[k] : -1)).filter((k) => k >= 0);
+      const free = new Uint8Array(nv);
+      for (let v = 0; v < nv; v++) { let hw = 0; handB.forEach((k) => { hw += wb[v * B + k]; }); free[v] = hw < 0.02 ? 1 : 0; }
+      const tmp = new Float32Array(B);
+      for (let it = 0; it < 2; it++) for (let v = 0; v < nv; v++) {
+        if (!free[v]) continue;
+        const n = nb[v]; let c = 1; tmp.fill(0);
+        for (let k = 0; k < B; k++) tmp[k] = wb[v * B + k];
+        n.forEach((u) => { if (!free[u]) return; c++; for (let k = 0; k < B; k++) tmp[k] += wb[u * B + k]; });
+        for (let k = 0; k < B; k++) wb[v * B + k] = tmp[k] / c;
+      }
+    }
   } else {
     // Smooth the skin weights over the surface so joints bend in a soft band.
     const bw2 = new Float32Array(bw.length);
@@ -2370,7 +2397,12 @@ function createViewer3D(container, mode, opts = {}) {
   // Upper arm and forearm from shoulder S to hand H, elbow bending toward the pole.
   function solveArm(ua, fa, S, H, pole, L2) {
     const L1 = 30, toH = H.clone().sub(S);
-    const d = Math.min(Math.max(toH.length(), Math.abs(L1 - L2) + 0.5), L1 + L2 - 0.05);
+    // Soft reach: within the last SOFT cm of full extension the reach eases toward straight
+    // instead of hitting it, so the elbow never snaps from locked to bent (the bend rate of
+    // two-bone IK is unbounded at full extension).
+    const SOFT = 1.8, Lmax = L1 + L2, raw = toH.length();
+    const soft = raw > Lmax - SOFT ? Lmax - SOFT * Math.exp(-(raw - (Lmax - SOFT)) / SOFT) : raw;
+    const d = Math.min(Math.max(soft, Math.abs(L1 - L2) + 0.5), Lmax - 0.05);
     const u = toH.normalize();
     const w = pole.clone().sub(u.clone().multiplyScalar(pole.dot(u))).normalize();
     const cosA = (L1 * L1 + d * d - L2 * L2) / (2 * L1 * d), sinA = Math.sqrt(Math.max(0, 1 - cosA * cosA));
@@ -2556,7 +2588,12 @@ function createViewer3D(container, mode, opts = {}) {
     ["x", "y", "bend", "abd", "gz", "legAbd", "kneeOut", "twist", "roll", "shrug", "wrist", "flat", "sup", "prot", "lift"].forEach((k) => {
       if (P.some((p) => p[k] != null)) out[k] = num((p) => p[k]); });
     if (base.arm2) out.arm2 = { ua: num((p) => (p.arm2 || p).ua), fa: num((p) => (p.arm2 || p).fa), abd: num((p) => (p.arm2 || p).abd) };
-    ["ankR", "ankL", "toeR", "toeL", "pole"].forEach((k) => { if (P.every((p) => p[k])) out[k] = P[1][k].map((_, i) => num((p) => p[k][i])); });
+    // A foot target never dips below the lower of the two keys it travels between (2D y points
+    // down): the spline would otherwise overshoot and push a toe through the floor.
+    ["ankR", "ankL", "toeR", "toeL", "pole"].forEach((k) => { if (P.every((p) => p[k])) out[k] = P[1][k].map((_, i) => {
+      const v = num((p) => p[k][i]);
+      return k === "pole" || i !== 1 ? v : Math.min(v, Math.max(P[1][k][i], P[2][k][i]));
+    }); });
     return out;
   }
   // Key poses for a multi-key rep, built like poseA/poseB (`over` = the mistake's overrides).
@@ -2581,11 +2618,21 @@ function createViewer3D(container, mode, opts = {}) {
     // otherwise drift a foot that is not the anchor (a rear foot on a bench) mid-rep.
     const A = to3(pl.a2 || ank2(j, s, p)).add(pl.delta);
     const kneeFK = endOf(th, 42), toA = A.clone().sub(hip3);
-    const d = Math.min(Math.max(toA.length(), 8), 83.9), u = toA.normalize();
+    // Soft reach near full extension (see solveArm): the knee never snaps straight-to-bent.
+    const rawL = toA.length(), softL = rawL > 82.8 ? 84 - 1.2 * Math.exp(-(rawL - 82.8) / 1.2) : rawL;
+    const d = Math.min(Math.max(softL, 8), 83.9), u = toA.normalize();
     // With a set stance the knee bends toward the toes (knee tracks over the foot); otherwise it
     // keeps the side the 2D pose bends it to.
-    let w = pl.track ? new THREE.Vector3(Math.cos(pl.yaw), 0.15, -Math.sin(pl.yaw)) : kneeFK.clone().sub(hip3);
+    const wTrack = new THREE.Vector3(Math.cos(pl.yaw), 0.15, -Math.sin(pl.yaw));
+    let w = pl.track ? wTrack : kneeFK.clone().sub(hip3);
     w.sub(u.clone().multiplyScalar(w.dot(u)));
+    // A nearly straight 2D leg gives no bend direction: hand over to the toe-ward pole smoothly
+    // instead of letting the knee flip.
+    if (!pl.track) {
+      const m = w.length(), k = smoothStep(0.5, 6, m);
+      const wt = wTrack.clone().sub(u.clone().multiplyScalar(wTrack.dot(u))).normalize();
+      w = w.normalize().multiplyScalar(k).add(wt.multiplyScalar(1 - k));
+    }
     if (w.lengthSq() < 1e-4) w = new THREE.Vector3(1, 0, 0).sub(u.clone().multiplyScalar(u.x));
     w.normalize();
     const h = Math.sqrt(Math.max(0, 42 * 42 - (d / 2) * (d / 2)));
@@ -2837,9 +2884,10 @@ function createViewer3D(container, mode, opts = {}) {
         // rises (toe target).
         const toeT = side > 0 ? p.toeR : p.toeL, ankT = side > 0 ? p.ankR : p.ankL;
         if (toeT || ankT) {
-          // toe target = the tip of the toes on the sole (j.ball in solveSide).
+          // toe target = the tip of the toes on the sole (j.ball in solveSide). fig3.kneeFK: the
+          // knee bends the way the 2D pose bends it (legs kicking back) instead of toward the toes.
           const r = (footDir * Math.PI) / 180, A2 = toeT ? [toeT[0] - Math.sin(r) * 19.5 - Math.cos(r) * 7, toeT[1] + Math.cos(r) * 19.5 - Math.sin(r) * 7] : ankT;
-          plantLeg(s, side, hip3, { ankle: A2, ankle2: A2 }, p, { delta: new THREE.Vector3(0, 0, side * VIEW3D.hipHalf), yaw: 0, track: true }, footDir);
+          plantLeg(s, side, hip3, { ankle: A2, ankle2: A2 }, p, { delta: new THREE.Vector3(0, 0, side * VIEW3D.hipHalf), yaw: 0, track: !fig3.kneeFK }, footDir);
         }
       }
     });

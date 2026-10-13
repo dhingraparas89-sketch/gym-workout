@@ -541,7 +541,10 @@ Object.entries(bodies).forEach(([sex, b]) => {
   for (let v = 0; v < NV; v++) {
     const p = P[v], tr = W[v * G + GI.trunk];
     const up = smooth(midY - 0.45, midY + 0.45, p[1]);
-    const nk = smooth(neckY - 0.25, neckY + 0.25, p[1] + 0.25 * Math.max(0, Math.abs(p[0]) - 0.5));
+    // The neck bone carries the neck column only: the tops of the shoulders and the outer
+    // trapezius stay with the chest (and the arms), so nodding never drags the shoulders and a
+    // raised arm never leaves the top of the shoulder behind with the neck.
+    const nk = smooth(neckY - 0.25, neckY + 0.25, p[1] + 0.25 * Math.max(0, Math.abs(p[0]) - 0.5)) * (1 - smooth(0.62, 0.95, Math.abs(p[0])));
     // The head turns on the neck in a band about 4 cm wide (under the jaw, at the skull base),
     // so a nod stretches the skin there instead of creasing it along one edge loop.
     const hh = smooth(-0.22, 0.22, headSide(p));
