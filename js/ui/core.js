@@ -44,6 +44,9 @@ const ICON = {
   toEnd: svgIcon("M6 6l8 6-8 6M18 5v14"),
   plus: svgIcon("M12 5v14M5 12h14"),
   minus: svgIcon("M5 12h14"),
+  loop: svgIcon("M17 4l3 3-3 3M20 7H8a4 4 0 0 0-4 4v1M7 20l-3-3 3-3M4 17h12a4 4 0 0 0 4-4v-1"),
+  turnL: svgIcon("M9 7H5V3M5.6 7A8 8 0 1 1 4 12"),
+  turnR: svgIcon("M15 7h4V3M18.4 7A8 8 0 1 0 20 12"),
   cube: svgIcon("M12 3l8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12L4 7.5")
 };
 const ERROR_TYPES = { posture: "Posture", alignment: "Joint alignment", range: "Range of motion", tempo: "Tempo", activation: "Muscle engagement" };

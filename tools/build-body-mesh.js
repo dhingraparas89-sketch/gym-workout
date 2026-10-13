@@ -11,8 +11,9 @@
 //
 // What it does:
 //   1. MakeHuman base mesh + targets: a young adult male (more muscle, low fat) and female.
-//   2. Makes the head faceless: removes the mouth and eye pockets, fills them, and smooths away
-//      eyes, nose, lips and ears (the skull, jaw, chin and cheekbones stay).
+//   2. A calm sculpted head: removes the mouth and eye pockets and nostrils, closes the openings
+//      (soft closed lids, closed lips), softens the face and ears a little. Also a faceless
+//      variant (eyes, nose, lips and ears faired away), stored as offsets.
 //   3. Skin weights for this site's skeleton (js/figure3d.js skinDefs), from MakeHuman's joint helpers.
 //   4. Moves the mesh from MakeHuman's A-pose and proportions onto the site's rest skeleton.
 //   5. Packs topology, both bodies and the weights into one small script (quantized, base64).
@@ -101,7 +102,7 @@ Object.keys(BODIES).forEach((k) => { const { V, J } = makeBody(BODIES[k]); bodie
 let NV = used.length;
 
 // ---------- 2. Faceless head ----------
-let FILLED = [];
+let FILLED = [], PATCHES = [], EARS = [];
 // Mouth and eye pockets: vertices in the face that cannot see out (rays from them nearly all hit
 // the head). Found on the male; both bodies share the topology.
 function facesTris(Fc) { const t = []; Fc.forEach((f) => { for (let i = 1; i + 1 < f.length; i++) t.push([f[0], f[i], f[i + 1]]); }); return t; }
@@ -122,26 +123,31 @@ function rayHit(o, d, P, tris, skip) {
   const headTris = facesTris(F).filter((t) => t.some((v) => P[v][1] > headY - 1.3));
   const dirs = []; const ND = 40;
   for (let i = 0; i < ND; i++) { const y = 1 - (2 * (i + 0.5)) / ND, r = Math.sqrt(1 - y * y), a = i * 2.399963; dirs.push([r * Math.cos(a), y, r * Math.sin(a)]); }
-  const inner = new Uint8Array(NV);
+  let inner = new Uint8Array(NV);
   let cnt = 0;
-  for (let v = 0; v < NV; v++) {
-    if (!inFace(P[v])) continue;
-    let esc = 0;
-    for (const d of dirs) if (!rayHit(P[v], d, P, headTris, v)) esc++;
-    if (esc / ND < 0.25) { inner[v] = 1; cnt++; }
+  // (The ray test takes most of a minute; RAYCACHE=<file> keeps its result between dev runs.)
+  const cache = process.env.RAYCACHE && fs.existsSync(process.env.RAYCACHE) ? JSON.parse(fs.readFileSync(process.env.RAYCACHE, "utf8")) : null;
+  if (cache) { cache.forEach((v) => { inner[v] = 1; }); cnt = cache.length; }
+  else {
+    for (let v = 0; v < NV; v++) {
+      if (!inFace(P[v])) continue;
+      let esc = 0;
+      for (const d of dirs) if (!rayHit(P[v], d, P, headTris, v)) esc++;
+      if (esc / ND < 0.25) { inner[v] = 1; cnt++; }
+    }
+    if (process.env.RAYCACHE) fs.writeFileSync(process.env.RAYCACHE, JSON.stringify([...inner.keys()].filter((v) => inner[v])));
   }
-  // Ears: removed whole (the hole is closed and faired below).
-  for (let v = 0; v < NV; v++) {
-    const p = P[v];
-    if (Math.abs(p[0]) > 0.665 && p[1] > headY - 0.24 && p[1] < headY + 0.56 && p[2] > J.head[2] - 0.75 && p[2] < J.head[2] + 0.35) { inner[v] = 1; cnt++; }
-  }
-  // Eyes, nose and mouth: everything on the face inside these outlines goes too, so each hole
-  // has a clean rim on the facial surface (no eyelid or nostril tubes left to fold).
+  // The ears stay (the sculpted face keeps them at low relief); the faceless variant fairs them
+  // away below. Their concha is no pocket to cut: keep it.
+  for (let v = 0; v < NV; v++) { const p = P[v]; if (Math.abs(p[0]) > 0.62 && p[1] > headY - 0.3 && p[1] < headY + 0.62 && p[2] > J.head[2] - 0.8 && p[2] < J.head[2] + 0.4 && inner[v]) { inner[v] = 0; cnt--; } }
+  // Eyes, nose and mouth: the openings (lid margins, lip margins, nostrils) go too, so each hole
+  // has a clean rim on the facial surface; the eyes close as soft lids, the lips meet in a line.
   const hz = J.head[2], el = (p, cx, cy, rx, ry) => ((p[0] - cx) / rx) ** 2 + ((p[1] - cy) / ry) ** 2 < 1;
+  const EYE = (process.env.EYE || "0.2,0.075").split(",").map(Number), MOUTH = (process.env.MOUTH || "0.2,0.035").split(",").map(Number);
   for (let v = 0; v < NV; v++) {
     const p = P[v];
     if (p[2] < hz + 0.5 || p[1] < headY - 1.2) continue;
-    if (el(p, 0.33, headY + 0.41, 0.27, 0.14) || el(p, -0.33, headY + 0.41, 0.27, 0.14) || el(p, 0, headY - 0.3, 0.24, 0.07) || el(p, 0.1, headY - 0.1, 0.09, 0.07) || el(p, -0.1, headY - 0.1, 0.09, 0.07)) { if (!inner[v]) cnt++; inner[v] = 1; }
+    if (el(p, 0.33, headY + 0.41, EYE[0], EYE[1]) || el(p, -0.33, headY + 0.41, EYE[0], EYE[1]) || el(p, 0, headY - 0.3, MOUTH[0], MOUTH[1]) || el(p, 0.1, headY - 0.1, 0.07, 0.05) || el(p, -0.1, headY - 0.1, 0.07, 0.05)) { if (!inner[v]) cnt++; inner[v] = 1; }
   }
   // Drop faces touching removed vertices, keep the body's main piece, then close every hole.
   let keep = F.filter((f) => !f.some((v) => inner[v]));
@@ -169,9 +175,13 @@ function rayHit(o, d, P, tris, skip) {
   F = keep;
   // Each hole is closed with concentric rings of quads around a centre fan (no long slivers);
   // fairing later gives the patch its shape.
-  FILLED = [];
+  FILLED = []; PATCHES = [];
   loops.forEach((loop) => {
     const n = loop.length, rings = Math.max(1, Math.min(4, Math.round(n / 10)));
+    // What this hole was (on the male): an eye, the mouth, a nostril or an ear's pocket.
+    const lc = mul(loop.reduce((a, v) => add(a, P[v]), [0, 0, 0]), 1 / n);
+    const kind = Math.abs(lc[0]) > 0.55 ? "ear" : lc[1] > headY + 0.2 ? "eye" : lc[1] < headY - 0.2 ? "mouth" : "nostril";
+    const patch = { kind, t: new Map() };
     let prev = loop;
     for (let r = 1; r <= rings; r++) {
       const t = r / (rings + 1), ring = prev.map(() => NV++);
@@ -180,12 +190,30 @@ function rayHit(o, d, P, tris, skip) {
         loop.forEach((v, i) => { b.P[ring[i]] = lerp(b.P[v], c, t); });
       });
       prev.forEach((a, i) => F.push([a, prev[(i + 1) % n], ring[(i + 1) % n], ring[i]]));
-      FILLED.push(...ring); prev = ring;
+      FILLED.push(...ring); ring.forEach((v) => patch.t.set(v, t)); prev = ring;
     }
-    const c = NV++;
-    Object.values(bodies).forEach((b) => b.P.push(mul(loop.reduce((a, v) => add(a, b.P[v]), [0, 0, 0]), 1 / n)));
-    prev.forEach((a, i) => F.push([a, prev[(i + 1) % n], c]));
-    FILLED.push(c, ...loop);
+    // The innermost ring is closed by a ladder of quads across its narrow way (no fan: a vertex
+    // shared by dozens of triangles pinches once the surface is subdivided).
+    {
+      const m = prev.length, cc = mul(prev.reduce((a, v) => add(a, P[v]), [0, 0, 0]), 1 / m);
+      let s0 = 0; prev.forEach((v, i) => { if (len(sub(P[v], cc)) > len(sub(P[prev[s0]], cc))) s0 = i; });
+      const R = prev.map((_, i) => prev[(i + s0) % m]), u = (j) => R[j % m], w = (j) => R[(m - j) % m];
+      for (let j = 0; 2 * (j + 1) <= m; j++) {
+        const a = u(j), b = u(j + 1), c = w(j + 1), d = w(j);
+        if (b === c) F.push([a, b, d]); else if (a === d) F.push([a, b, c]); else F.push([a, b, c, d]);
+      }
+    }
+    FILLED.push(...loop); patch.loop = loop;
+    PATCHES.push(patch);
+  });
+  // The ears' vertices (with the scalp around them), for the faceless variant.
+  [1, -1].forEach((sd) => {
+    const fl = []; for (let v = 0; v < P.length; v++) { const p = P[v]; if (p[0] * sd > 0.68 && p[1] > headY - 0.5 && p[1] < headY + 0.9 && p[2] < J.head[2] + 0.5) fl.push(v); }
+    const ec = mul(fl.reduce((a, v) => add(a, P[v]), [0, 0, 0]), 1 / fl.length);
+    let rmax = 0; fl.forEach((v) => { rmax = Math.max(rmax, len(sub(P[v], ec))); });
+    const R = rmax + 0.12;
+    for (let v = 0; v < P.length; v++) if (len(sub(P[v], ec)) < R) EARS.push(v);
+    console.log("ear", sd, "flap verts", fl.length, "centre", ec.map((x) => x.toFixed(2)).join(","), "radius", R.toFixed(2));
   });
   console.log("pocket vertices", cnt, "holes filled", loops.length, loops.map((l) => l.length).join(","));
 }
@@ -204,6 +232,8 @@ buildNB();
   for (let v = 0; v < NV; v++) if (live[v]) map[v] = n++;
   F = F.map((f) => f.map((v) => map[v]));
   FILLED = FILLED.map((v) => map[v]).filter((v) => v >= 0);
+  EARS = EARS.map((v) => map[v]).filter((v) => v >= 0);
+  PATCHES.forEach((pt) => { pt.t = new Map([...pt.t].map(([v, t]) => [map[v], t]).filter(([v]) => v >= 0)); pt.loop = pt.loop.map((v) => map[v]).filter((v) => v >= 0); });
   Object.values(bodies).forEach((b) => { b.P = b.P.filter((_, v) => live[v]); });
   NV = n; buildNB();
   const EC = new Map(); F.forEach((f) => f.forEach((a, i) => { const b = f[(i + 1) % f.length], k = Math.min(a, b) + "," + Math.max(a, b); EC.set(k, (EC.get(k) || 0) + 1); }));
@@ -264,17 +294,39 @@ Object.entries(bodies).forEach(([sex, b]) => {
   // pockets, ears) with two rings around them. Brow, cheekbones, jaw and chin keep their shape.
   const ell = (p, c, rx, ry) => 1 - smooth(1, 1.45, Math.hypot((p[0] - c[0]) / rx, (p[1] - c[1]) / ry));
   const mask = P.map((p) => {
-    if (p[2] < Zf(0.45)) return 0;
+    if (p[2] < Zf(0.25)) return 0; // (deep enough to take in the eye sockets and nostrils)
     const eyes = Math.max(ell(p, [0.34 * f, Y(0.41)], 0.4 * f, 0.25 * f), ell(p, [-0.34 * f, Y(0.41)], 0.4 * f, 0.25 * f));
     // Nose and mouth as one region from the brow to above the chin, so the profile becomes one
     // smooth curve instead of a muzzle.
-    const mid = ell(p, [0, Y(0.02)], 0.3 * f, 0.52 * f) * smooth(Zf(0.6), Zf(0.8), p[2]);
+    const mid = ell(p, [0, Y(0.02)], 0.3 * f, 0.52 * f) * smooth(Zf(0.3), Zf(0.5), p[2]);
     const nose = mid, lips = 0;
     return Math.min(1, eyes + nose + lips);
   });
   const near = new Set(FILLED); for (let r = 0; r < 4; r++) [...near].forEach((v) => NB[v].forEach((u) => near.add(u)));
   near.forEach((v) => { if (P[v][1] > hy - 1.2) mask[v] = 1; });
-  fair(P, mask);
+  // Sculpted face (the default): only the closing patches are faired, so the lids close softly
+  // over the eyes, the lips meet in a line and the nostrils become shallow; then the lids are
+  // lifted into a gentle curve over the eyeballs, and the whole face and the ears are softened a
+  // little, like a carved head rather than a portrait.
+  {
+    const pm = new Float32Array(NV); PATCHES.forEach((pt) => pt.t.forEach((t, v) => { pm[v] = 1; }));
+    fair(P, pm);
+    const LID = +(process.env.LID || 0.07);
+    PATCHES.forEach((pt) => {
+      if (pt.kind !== "eye") return;
+      // Outward: the loop's plane normal, turned to face forward.
+      const lc = mul(pt.loop.reduce((a, v) => add(a, P[v]), [0, 0, 0]), 1 / pt.loop.length);
+      let nrm = [0, 0, 0]; pt.loop.forEach((v, i) => { const w = pt.loop[(i + 1) % pt.loop.length]; nrm = add(nrm, cross(sub(P[v], lc), sub(P[w], lc))); });
+      nrm = norm(nrm); if (nrm[2] < 0) nrm = mul(nrm, -1);
+      pt.t.forEach((t, v) => { P[v] = add(P[v], mul(nrm, LID * f * Math.sin((t * Math.PI) / 2))); });
+    });
+    const soft = P.map((p, v) => {
+      if (p[1] < hy - 1.0) return 0;
+      const face = p[2] > Zf(0.3) ? 0.35 : 0, ear = EARS.includes(v) ? +(process.env.EARSOFT || 0.6) : 0;
+      return Math.max(face, ear) * (pm[v] ? 0.3 : 1);
+    });
+    taubin(P, soft, +(process.env.SOFT || 3));
+  }
   // Nipples: the most forward point of each side of the chest, smoothed away in a small disc
   // (the breast's shape stays; the female wears a sports bra over it).
   const sh = J["r-shoulder"][1];
@@ -294,6 +346,26 @@ Object.entries(bodies).forEach(([sex, b]) => {
   // Groin: a smooth mannequin form (it is always under the shorts).
   const pv = J.pelvis, gr = P.map((p) => (1 - smooth(pv[1] - 0.75, pv[1] - 0.45, p[1])) * smooth(pv[1] - 1.9, pv[1] - 1.6, p[1]) * (1 - smooth(0.42, 0.6, Math.abs(p[0]))) * smooth(pv[2] + 0.05, pv[2] + 0.35, p[2]));
   fair(P, gr);
+  // Faceless variant (FACE_STYLE "faceless" in js/figure3d.js): the same mesh with eyes, nose,
+  // lips and ears faired into one smooth surface; stored as offsets from the sculpted head.
+  const PF = P.map((p) => p.slice());
+  // Features and ears are replaced by a smooth surface spanning them, built in directions and
+  // distances from the skull's centre: the directions are interpolated harmonically (which
+  // cannot fold the mesh over itself), the distances by least bending (bi-Laplacian).
+  {
+    const cran = []; P.forEach((p) => { if (p[1] > hy + 0.3 * f) cran.push(p); });
+    const C = mul(cran.reduce((a, p) => add(a, p), [0, 0, 0]), 1 / cran.length);
+    const R = new Set(EARS); mask.forEach((m, v) => { if (m > 0.35) R.add(v); });
+    const RL = [...R], dir = PF.map((p) => norm(sub(p, C)));
+    for (let it = 0; it < 4000; it++) RL.forEach((v) => { let d = [0, 0, 0]; NB[v].forEach((u) => { d = add(d, dir[u]); }); dir[v] = norm(d); });
+    const rad = PF.map((p) => [len(sub(p, C)), 0, 0]), rm = new Float32Array(NV); RL.forEach((v) => { rm[v] = 1; });
+    fair(rad, rm);
+    RL.forEach((v) => { PF[v] = add(C, mul(dir[v], rad[v][0])); });
+    if (process.env.DEBUG) console.log(sex, "faceless region", RL.length);
+  }
+  const ring = new Set(EARS); mask.forEach((m, v) => { if (m > 0.35) ring.add(v); }); [...ring].forEach((v) => NB[v].forEach((u) => ring.add(u)));
+  taubin(PF, PF.map((_, v) => (ring.has(v) ? 0.5 : 0)), 3);
+  b.PF = PF;
 });
 
 // ---------- 3. Site skeleton (rest pose, js/figure3d.js skinDefs) ----------
@@ -463,10 +535,26 @@ Object.entries(bodies).forEach(([sex, b]) => {
     const p = P[v], tr = W[v * G + GI.trunk];
     const up = smooth(midY - 0.45, midY + 0.45, p[1]);
     const nk = smooth(neckY - 0.25, neckY + 0.25, p[1] + 0.25 * Math.max(0, Math.abs(p[0]) - 0.5));
-    const hh = smooth(-0.12, 0.12, headSide(p));
+    // The head turns on the neck in a band about 4 cm wide (under the jaw, at the skull base),
+    // so a nod stretches the skin there instead of creasing it along one edge loop.
+    const hh = smooth(-0.22, 0.22, headSide(p));
     const parts = { lowerTorso: (1 - up) * (1 - nk), upperTorso: up * (1 - nk), neck: nk * (1 - hh), head: nk * hh };
     Object.entries(parts).forEach(([n, w]) => { bw[v * BONES.length + BI[n]] = tr * w; });
     groups.forEach((g, gi) => { if (g !== "trunk") bw[v * BONES.length + BI[g]] = W[v * G + gi]; });
+  }
+  // Even the trunk's splits out over the surface a little (they are planes cut through the body).
+  {
+    const TB = ["lowerTorso", "upperTorso", "neck", "head"].map((n) => BI[n]), NBn = BONES.length, tmp = new Float32Array(NV * 4);
+    for (let it = 0; it < 4; it++) {
+      for (let v = 0; v < NV; v++) {
+        const tot = TB.reduce((a, k) => a + bw[v * NBn + k], 0);
+        if (tot < 1e-4) { TB.forEach((k, j) => { tmp[v * 4 + j] = 0; }); continue; }
+        const acc = [0, 0, 0, 0]; let c = 0;
+        NB[v].forEach((u) => { const tu = TB.reduce((a, k) => a + bw[u * NBn + k], 0); if (tu < 1e-4) return; TB.forEach((k, j) => { acc[j] += bw[u * NBn + k] / tu; }); c++; });
+        TB.forEach((k, j) => { tmp[v * 4 + j] = tot * (c ? 0.5 * (bw[v * NBn + k] / tot) + 0.5 * (acc[j] / c) : bw[v * NBn + k] / tot); });
+      }
+      for (let v = 0; v < NV; v++) TB.forEach((k, j) => { bw[v * NBn + k] = tmp[v * 4 + j]; });
+    }
   }
   // Retarget every vertex: blend the bones' maps by weight (the same weights the skin uses).
   const NB_ = BONES.length, Q = new Float32Array(NV * 3);
@@ -475,6 +563,18 @@ Object.entries(bodies).forEach(([sex, b]) => {
     for (let k = 0; k < NB_; k++) { const w = bw[v * NB_ + k]; if (w < 1e-4) continue; acc = add(acc, mul(T[BONES[k]](P[v]), w)); ws += w; }
     acc = mul(acc, 1 / ws);
     Q[v * 3] = acc[0]; Q[v * 3 + 1] = acc[1]; Q[v * 3 + 2] = acc[2];
+  }
+  // The faceless head: the same bones' maps applied to the faired positions, kept as offsets
+  // (hundredths of a cm) for the vertices that move.
+  const fv = [], fd = [];
+  for (let v = 0; v < NV; v++) {
+    if (len(sub(b.PF[v], P[v])) < 1e-4) continue;
+    let acc = [0, 0, 0], ws = 0;
+    for (let k = 0; k < NB_; k++) { const w = bw[v * NB_ + k]; if (w < 1e-4) continue; acc = add(acc, mul(T[BONES[k]](b.PF[v]), w)); ws += w; }
+    acc = mul(acc, 1 / ws);
+    const d = [0, 1, 2].map((k) => Math.round((acc[k] - Q[v * 3 + k]) * 100));
+    if (Math.max(...d.map(Math.abs)) < 2) continue;
+    fv.push(v); fd.push(...d.map((x) => Math.max(-32767, Math.min(32767, x))));
   }
   // Top four bones per vertex.
   const si = new Uint8Array(NV * 4), sw = new Uint8Array(NV * 4);
@@ -495,7 +595,8 @@ Object.entries(bodies).forEach(([sex, b]) => {
       fingers[n] = { q: quatOf(relM).map((x) => +x.toFixed(5)), p: relP.map((x) => +x.toFixed(3)), len: +fb.len.toFixed(3) };
     });
   });
-  out[sex] = { Q, si, sw, fingers };
+  out[sex] = { Q, si, sw, fingers, faceless: { v: new Uint16Array(fv), d: new Int16Array(fd) } };
+  console.log(sex, "faceless offsets", fv.length);
   const ys = []; for (let v = 0; v < NV; v++) ys.push(Q[v * 3 + 1]);
   console.log(sex, "verts", NV, "y range", Math.min(...ys).toFixed(1), Math.max(...ys).toFixed(1));
 });
@@ -513,10 +614,10 @@ const pack = (Q) => {
   return { lo: lo.map((x) => +x.toFixed(4)), hi: hi.map((x) => +x.toFixed(4)), pos: b64(q) };
 };
 const data = { version: 1, bones: BONES, nv: NV, quads: b64(quads), skel: SKEL, bodies: {} };
-Object.entries(out).forEach(([sex, o]) => { data.bodies[sex] = { ...pack(o.Q), si: b64(o.si), sw: b64(o.sw), fingers: o.fingers }; });
+Object.entries(out).forEach(([sex, o]) => { data.bodies[sex] = { ...pack(o.Q), si: b64(o.si), sw: b64(o.sw), fingers: o.fingers, faceless: { v: b64(o.faceless.v), d: b64(o.faceless.d) } }; });
 const header = `// Generated by tools/build-body-mesh.js from the MakeHuman 1.1 base mesh and macro targets
-// (CC0 1.0, MakeHuman project; see assets/LICENSE-body-mesh.txt). Faceless, retargeted to the
-// site's skeleton. Do not edit by hand.
+// (CC0 1.0, MakeHuman project; see assets/LICENSE-body-mesh.txt). A softly sculpted head (plus
+// offsets for a faceless one), retargeted to the site's skeleton. Do not edit by hand.
 `;
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(OUT, header + "window.BODY_MESH = " + JSON.stringify(data) + ";\n");

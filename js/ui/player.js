@@ -6,11 +6,15 @@
 //   opts.camera: list of camera presets to show (default front, back, side, threeQuarter)
 //   opts.playback: false to show only the camera bar
 //   opts.keys: element that takes keyboard shortcuts while focus is inside it
+//
+// Keyboard (focus inside opts.keys): space or k play/pause, , and . step, Home / End start and end
+// position, l loop on/off. With the 3D stage itself focused: arrow left/right step, shift+arrows
+// turn the athlete, + and - zoom, 0 resets the camera.
 
 const CAMERA_PRESETS = {
   front: "Front", back: "Back", right: "Side", left: "Left", threeQuarter: "3/4"
 };
-const SPEEDS = [0.5, 1, 1.5];
+const SPEEDS = [0.5, 0.75, 1, 1.5];
 
 function playerMarkup(opts) {
   const cams = opts.camera || ["front", "back", "right", "threeQuarter"];
@@ -30,9 +34,10 @@ function playerMarkup(opts) {
             <div class="pb-phases" aria-hidden="true"></div>
             <input type="range" class="pb-scrub" min="0" max="1000" step="1" value="0" aria-label="Position in the rep">
           </div>
-          <div class="pb-read"><span class="pb-phase" aria-live="off">—</span><span class="pb-rep">Rep <b>1</b></span></div>
+          <div class="pb-read"><span class="pb-phase" aria-live="off">—</span><span class="pb-rep" aria-live="polite">Rep <b>1</b><i class="pb-done" hidden> · complete</i></span></div>
         </div>
         <div class="pb-rate">
+          <button type="button" class="pb-loop" data-pb="loop" aria-pressed="true" title="Loop the demonstration (off: play one rep and stop)">${ICON.loop}<span>Loop</span></button>
           <button type="button" class="pb-slow" data-pb="slow" aria-pressed="false" title="Slow motion (quarter speed)">${ICON.tempo}<span>Slow motion</span></button>
           <div class="seg pb-speed" role="radiogroup" aria-label="Playback speed">
             ${SPEEDS.map((s) => `<button type="button" role="radio" data-speed="${s}" aria-checked="false">${s}×</button>`).join("")}
@@ -46,10 +51,13 @@ function playerMarkup(opts) {
       ${cams.map((c) => `<button type="button" class="cam-btn" data-cam="${c}">${CAMERA_PRESETS[c] || c}</button>`).join("")}
       <button type="button" class="cam-btn" data-cam="reset" title="Back to the default view">${ICON.rotate}Reset camera</button>
       <span class="cam-zoom">
-        <button type="button" class="cam-btn cam-ico" data-zoom="0.85" aria-label="Zoom out">${ICON.minus}</button>
-        <button type="button" class="cam-btn cam-ico" data-zoom="1.18" aria-label="Zoom in">${ICON.plus}</button>
+        <button type="button" class="cam-btn cam-ico" data-turn="-1" aria-label="Turn the athlete left" title="Turn left">${ICON.turnL}</button>
+        <button type="button" class="cam-btn cam-ico" data-turn="1" aria-label="Turn the athlete right" title="Turn right">${ICON.turnR}</button>
+        <button type="button" class="cam-btn cam-ico" data-zoom="0.85" aria-label="Zoom out" title="Zoom out">${ICON.minus}</button>
+        <button type="button" class="cam-btn cam-ico" data-zoom="1.18" aria-label="Zoom in" title="Zoom in">${ICON.plus}</button>
       </span>
       <span class="cam-hint">${ICON.rotate}<span>Drag to rotate · right-drag or two fingers to pan · scroll to zoom</span></span>
+      <span class="cam-keys">Keys (model focused): ${opts.playback === false ? "← → turn" : "space play · ← → step · shift ← → turn"} · + − zoom · 0 reset</span>
     </div>`;
 }
 
@@ -61,7 +69,10 @@ function mountPlayer(host, viewers, opts = {}) {
   const all = (fn) => list.forEach((v) => { try { fn(v); } catch (e) {} });
   const scrub = host.querySelector(".pb-scrub"), phasesEl = host.querySelector(".pb-phases");
   const playBtn = host.querySelector(".pb-play");
-  const phaseEl = host.querySelector(".pb-phase"), repEl = host.querySelector(".pb-rep b");
+  const phaseEl = host.querySelector(".pb-phase"), repEl = host.querySelector(".pb-rep b"), doneEl = host.querySelector(".pb-done");
+  const loopBtn = host.querySelector(".pb-loop");
+  let loopOn = opts.loop !== false, lastDone = false;
+  const setLoopUI = (on) => { if (loopBtn) loopBtn.setAttribute("aria-pressed", String(on)); };
 
   function drawPhases(v) {
     if (!phasesEl || !v || !v.phases) return;
@@ -95,6 +106,7 @@ function mountPlayer(host, viewers, opts = {}) {
     drawPhases(v);
     setPlayIcon(v.isPlaying);
     setSpeedUI(v.speed);
+    all((x) => x.setLoop && x.setLoop(loopOn)); setLoopUI(loopOn);
     off = v.onFrame((f) => {
       drawPhases(v);
       if (scrub && !scrubbing) scrub.value = Math.round(f.t * 1000);
@@ -104,6 +116,12 @@ function mountPlayer(host, viewers, opts = {}) {
         phasesEl.querySelectorAll("[data-ph]").forEach((s) => s.classList.toggle("is-on", +s.dataset.ph === f.phaseIndex));
       }
       if (f.rep !== lastRep && repEl) { lastRep = f.rep; repEl.textContent = f.rep + 1 + repBase; }
+      if (!!f.done !== lastDone) {
+        lastDone = !!f.done;
+        if (doneEl) doneEl.hidden = !lastDone;
+        if (lastDone && phaseEl) phaseEl.textContent = "Rep complete";
+        lastPhase = -2;
+      }
       if (playBtn && playBtn.classList.contains("is-paused") === f.playing) setPlayIcon(f.playing);
     });
   }
@@ -115,6 +133,7 @@ function mountPlayer(host, viewers, opts = {}) {
     back: () => all((v) => v.step(-1)),
     fwd: () => all((v) => v.step(1)),
     restart: () => { repBase = 0; lastRep = -1; all((v) => { v.restart(); v.play(); }); setPlayIcon(true); },
+    loop: () => { loopOn = !loopOn; all((v) => v.setLoop && v.setLoop(loopOn)); setLoopUI(loopOn); },
     slow: () => {
       const cur = lead().speed;
       const x = cur === SLOW ? beforeSlow || 1 : SLOW;
@@ -130,6 +149,8 @@ function mountPlayer(host, viewers, opts = {}) {
     if (s) { const x = +s.dataset.speed; all((v) => v.setSpeed(x)); setSpeedUI(x); return; }
     const c = e.target.closest("[data-cam]");
     if (c) { all((v) => v.setView(c.dataset.cam)); return; }
+    const tn = e.target.closest("[data-turn]");
+    if (tn) { all((v) => v.rotateBy && v.rotateBy(+tn.dataset.turn * Math.PI / 8)); return; }
     const z = e.target.closest("[data-zoom]");
     if (z) all((v) => v.zoomBy && v.zoomBy(+z.dataset.zoom));
   });
@@ -144,11 +165,22 @@ function mountPlayer(host, viewers, opts = {}) {
   // Keyboard: space / k play-pause, , and . step, Home / End jump (only while focus is inside).
   const keyRoot = opts.keys || host;
   const onKey = (e) => {
-    if (!lead() || opts.playback === false) return;
+    if (!lead()) return;
     const tag = (e.target.tagName || "").toLowerCase();
     if (tag === "input" && e.target !== scrub) return;
     if (tag === "select" || tag === "textarea") return;
     const k = e.key;
+    // The 3D stage itself (focusable): arrows step, shift+arrows turn, + / - zoom, 0 resets.
+    if (e.target.closest && e.target.closest(".fig-slot.fig-3d")) {
+      if (e.shiftKey && (k === "ArrowLeft" || k === "ArrowRight")) { e.preventDefault(); all((v) => v.rotateBy && v.rotateBy((k === "ArrowLeft" ? -1 : 1) * Math.PI / 12)); return; }
+      if (k === "+" || k === "=") { e.preventDefault(); all((v) => v.zoomBy && v.zoomBy(1.18)); return; }
+      if (k === "-" || k === "_") { e.preventDefault(); all((v) => v.zoomBy && v.zoomBy(0.85)); return; }
+      if (k === "0") { e.preventDefault(); all((v) => v.setView("reset")); return; }
+      if (opts.playback !== false && (k === "ArrowLeft" || k === "ArrowRight")) { e.preventDefault(); act[k === "ArrowLeft" ? "back" : "fwd"](); return; }
+      if (opts.playback === false && (k === "ArrowLeft" || k === "ArrowRight")) { e.preventDefault(); all((v) => v.rotateBy && v.rotateBy((k === "ArrowLeft" ? -1 : 1) * Math.PI / 12)); return; }
+    }
+    if (opts.playback === false) return;
+    if (k === "l" && !e.target.closest("button, a")) { e.preventDefault(); act.loop(); return; }
     if ((k === " " || k === "k") && !e.target.closest("button, a")) { e.preventDefault(); act.toggle(); }
     else if (k === "," ) { e.preventDefault(); act.back(); }
     else if (k === ".") { e.preventDefault(); act.fwd(); }
@@ -170,7 +202,7 @@ function mountPlayer(host, viewers, opts = {}) {
     state() {
       const v = lead();
       if (!v) return null;
-      return { t: v.time, rep: (v.rep || 0) + repBase, playing: v.isPlaying, speed: v.speed, camera: v.getCamera ? v.getCamera() : null };
+      return { t: v.time, rep: (v.rep || 0) + repBase, playing: v.isPlaying, speed: v.speed, loop: loopOn, camera: v.getCamera ? v.getCamera() : null };
     },
     destroy() { if (off) off(); keyRoot.removeEventListener("keydown", onKey); }
   };
@@ -181,6 +213,7 @@ function restoreViewer(v, st) {
   if (!v || !st) return;
   try {
     v.setSpeed(st.speed);
+    if (v.setLoop && st.loop != null) v.setLoop(st.loop);
     v.seek(st.t, st.rep);
     if (st.playing) v.play(); else v.pause();
     if (st.camera && v.setCamera) v.setCamera(st.camera);

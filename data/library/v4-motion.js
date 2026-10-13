@@ -422,3 +422,91 @@
     };
   });
 })();
+
+// ---------- Round 5: exercise-specific mechanics, tempo and honest demo flags ----------
+// MOTION5[name] overrides the 3D demonstration only (figure3d: a / b / keys, stance, scapula, IK);
+// the 2D figure keeps its own poses. Pose angles are side-view bone directions (js/figure.js).
+// Checked with the contact audit and a biomechanics audit (centre of mass over the feet, bar over
+// mid-foot, knee over toes, body line, joint ranges, acceleration) plus contact sheets.
+// animation.tempo: { ms, segs: [[end of segment (cycle 0..1), from, to, ease]] } where from/to are
+// the blend between pose a (0) and pose b (1); ease "ecc" = controlled lowering, "con" = drive.
+(() => {
+  const S0 = { x: 100, y: 186, shin: 0, thigh: 0, torso: 0, neck: 0, ua: 180, fa: 180 };
+  // Floor under the flat (planted) foot: the rear foot's rigid toes would otherwise set it.
+  const LUNGE_FLOOR = (bone) => (ctx) => ctx.lowest({}, (n) => n === bone);
+  const MOTION5 = {
+    // Squats: feet planted shoulder-width with the toes turned out; the knees bend toward the toes
+    // (stance IK); the trunk leans so the bar stays over the mid-foot all the way down.
+    "Back squat": { stance: { w: 17, toe: 22 }, keysEase: "spline",
+      a: { ...S0, x: 94, shin: 4, thigh: -2, torso: 10, neck: 5, ua: 195, fa: -12 },
+      keys: [{ at: 0.5, shin: 26, thigh: -55, torso: 38, neck: 22 }],
+      b: { ...S0, x: 94, shin: 35, thigh: -82, torso: 45, neck: 26, ua: 235, fa: 28 } },
+    "Front squat": { stance: { w: 16, toe: 18 } },
+    "Goblet squat": { stance: { w: 18, toe: 22 } },
+    "Bodyweight squat": { stance: { w: 15, toe: 16 } },
+    // Hinges: the bar travels straight up and down over the mid-foot, touching the legs; knees and
+    // hips extend together off the floor (trunk angle nearly constant), then the hips come through.
+    "Deadlift": { keysEase: "spline",
+      a: { ...S0, x: 96, ua: 180, fa: 180 },
+      keys: [{ at: 0.34, shin: 2, thigh: -34, torso: 34, neck: 30, ua: 181, fa: 181 },
+        { at: 0.64, shin: 3, thigh: -50.7, torso: 50, neck: 42, ua: 183, fa: 182 }],
+      b: { ...S0, x: 96, shin: 10, thigh: -74.6, torso: 57.3, neck: 46, ua: 184, fa: 183 } },
+    "Romanian deadlift": { keysEase: "spline",
+      a: { ...S0, x: 104, ua: 180, fa: 180 },
+      keys: [{ at: 0.5, shin: 5, thigh: -33, torso: 30.3, neck: 27, ua: 181, fa: 181 }],
+      b: { ...S0, x: 104, shin: 7, thigh: -54.1, torso: 51.1, neck: 44, ua: 183, fa: 182 } },
+    "Stiff-leg deadlift": { keysEase: "spline",
+      a: { ...S0, x: 104, ua: 180, fa: 180 },
+      keys: [{ at: 0.5, shin: 2, thigh: -30, torso: 34, neck: 30, ua: 182, fa: 182 }],
+      b: { ...S0, x: 104, shin: 3, thigh: -59.8, torso: 61.5, neck: 52, ua: 184, fa: 183 } },
+    // Overhead press: the bar leaves the front of the shoulders, the head moves back as it passes
+    // the face, and the bar finishes over the shoulders and mid-foot with the head through.
+    "Overhead press": { keysEase: "spline", ik: { direct: true, grip: 25, pole: [0.45, -1, 0.75] },
+      a: { ...S0, torso: -3, neck: -3, ua: 131.9, fa: -21.7 },
+      keys: [{ at: 0.3, torso: -3, neck: -14, ua: 99.6, fa: -47.3 }, { at: 0.56, torso: -2, neck: -10, ua: 69.1, fa: -51.9 },
+        { at: 0.8, torso: -1, neck: 0, ua: 45.7, fa: -41.3 }],
+      b: { ...S0, torso: 0, neck: 4, ua: 7.8, fa: -7.3 } },
+    // Lunges step: the stepping foot leaves the floor, lands and stays put (foot IK targets); the
+    // other foot keeps its toes down while its heel rises.
+    "Walking lunge": { keysEase: "spline", ground: LUNGE_FLOOR("footR"),
+      a: { ...S0, x: 139.5, y: 193, anchor: "ball2", t2: 180, s2: 180, f2: 90, ankR: [120, 186] },
+      keys: [{ at: 0.24, torso: 3, neck: 3, thigh: -41.1, shin: 16.1, foot: 80, t2: 190.9, s2: 207, f2: 97, ankR: [164, 177] },
+        { at: 0.5, torso: 4, neck: 4, shin: -21.6, thigh: -41.5, foot: 72, t2: 196.1, s2: 234.2, f2: 117, ankR: [214.3, 183.5] },
+        { at: 0.72, torso: 5, neck: 5, shin: 0.9, thigh: -64.6, foot: 90, t2: 185.2, s2: 261.8, f2: 138, ankR: [214.3, 186] }],
+      b: { ...S0, x: 139.5, y: 193, anchor: "ball2", torso: 6, neck: 6, shin: 10, thigh: -82.3, foot: 90, t2: 182.2, s2: 281.8, f2: 154, ankR: [214.3, 186] } },
+    "Reverse lunge": { keysEase: "spline", ground: LUNGE_FLOOR("footR"),
+      a: { ...S0, x: 120, t2: 180, s2: 180, f2: 90, toeL: [139.5, 193] },
+      keys: [{ at: 0.26, shin: 13.9, thigh: -16.7, torso: 8, neck: 6, t2: 190.5, s2: 233.6, f2: 112, toeL: [92, 185] },
+        { at: 0.45, shin: 24.5, thigh: -40.8, torso: 16, neck: 12, t2: 210.4, s2: 240.9, f2: 118, toeL: [66, 188] },
+        { at: 0.6, shin: 25.9, thigh: -54.8, torso: 17, neck: 13, t2: 211.3, s2: 247.6, f2: 126, toeL: [55, 193] }],
+      b: { ...S0, x: 120, shin: 18.6, thigh: -80.1, torso: 10, neck: 8, t2: 177.5, s2: 281.8, f2: 154, toeL: [55, 193] } },
+    // Curls: the forearm turns from palm-in at the bottom to palm-up at the top.
+    "Dumbbell curl": { grip: "neutral", a: { ...S0, ua: 178, fa: 175, sup: 0 }, b: { ...S0, ua: 172, fa: 28, sup: 80 } },
+    // Bench pressing keeps the shoulder blades pinned back and down.
+    "Barbell bench press": { scap: { k: 0, prot: -1.6 } }, "Incline bench press": { scap: { k: 0, prot: -1.6 } },
+    "Decline bench press": { scap: { k: 0, prot: -1.6 } }, "Close-grip bench press": { scap: { k: 0, prot: -1.6 } },
+    "Dumbbell bench press": { scap: { k: 0, prot: -1.6 } }, "Incline dumbbell press": { scap: { k: 0, prot: -1.6 } },
+    "Dumbbell fly": { scap: { k: 0, prot: -1.6 } }
+  };
+  // Rep tempo: lowering first (a -> b is the eccentric half) or lifting first.
+  const ECC = { ms: 4200, segs: [[0.06, 0, 0], [0.46, 0, 1, "ecc"], [0.53, 1, 1], [0.84, 1, 0, "con"], [1, 0, 0]] };
+  const CON = { ms: 3800, segs: [[0.06, 0, 0], [0.38, 0, 1, "con"], [0.47, 1, 1], [0.88, 1, 0, "ecc"], [1, 0, 0]] };
+  const ISO = { ms: 4400, segs: [[0.5, 0, 1, "ecc"], [1, 1, 0, "ecc"]] }; // a held position, breathing
+  const KEEP = /^(Jump squat|Burpee|Mountain climber|Farmer's carry|Battle rope|Box jump|Sled push|Sled pull|Alternating curl|Bicycle crunch|Kettlebell swing|Bird dog|Dead bug|Russian twist)$/;
+  const LOWER_FIRST = /lower|descend|hinge|open wide|roll out|slide down|step back|knees forward|step and/i;
+  EXERCISES.forEach((ex) => {
+    const m = MOTION5[ex.name];
+    if (m) ex.figure3d = { ...(ex.figure3d || {}), ...m };
+    if (KEEP.test(ex.name)) return;
+    const tl = ex.phaseTimeline || [], labels = tl.map((p) => p.label);
+    const iso = /^(Plank|Side plank)$/.test(ex.name);
+    const ecc = !iso && labels.length > 1 && LOWER_FIRST.test(labels[1]);
+    const tp = iso ? ISO : ecc ? ECC : CON;
+    ex.animation = { ...(ex.animation || {}), tempo: tp };
+    if (iso || labels.length < 4) return;
+    // Phase labels on the tempo's five segments: start, first half, transition, second half, finish.
+    const L5 = labels.length >= 5 ? labels.slice(0, 5) : [...labels.slice(0, 4), labels[0]];
+    let s = 0;
+    ex.phaseTimeline = tp.segs.map(([end], i) => { const ph = { label: L5[i], t0: s, t1: end }; s = end; return ph; });
+  });
+})();

@@ -27,18 +27,36 @@ function muscleRows(ex) {
 }
 
 // Mount a 3D viewer (or the 2D figure when 3D is unavailable) with a small loading state.
+// An exercise whose demonstration is hidden (ex.demo === "hidden") or whose 3D data fails shows a
+// clear message (and the 2D figure when there is one) instead of a broken scene.
 function mountStageViewer(ctx, slot, mode, ex, athlete) {
-  slot.querySelectorAll(".figure, .fig-fallback, .v3-loading, .v3-failed").forEach((n) => n.remove());
-  let v = null;
+  slot.querySelectorAll(".figure, .fig-fallback, .v3-loading, .v3-failed, .v3-unavailable").forEach((n) => n.remove());
+  if (ex.demo === "hidden") {
+    slot.classList.remove("fig-3d");
+    const n = mk("v3-unavailable", `${ICON.info}<b>Demonstration not available yet</b><p>The animation for ${esc(ex.name.toLowerCase())} is still being checked, so it is not shown. The instructions, cues and muscles on this page still apply.</p>`);
+    n.setAttribute("role", "status");
+    slot.appendChild(n);
+    return null;
+  }
+  let v = null, why = "3D view unavailable on this device";
   if (window.THREE && typeof createViewer3D === "function") {
     slot.classList.add("fig-3d");
     v = ctx.makeViewer(slot, mode, { athlete });
-    if (v) { try { v.setExercise(ex); } catch (e) { console.error(e); ctx.dropViewer(v); v = null; } }
+    if (v) { try { v.setExercise(ex); } catch (e) { console.error(e); ctx.dropViewer(v); v = null; why = "The 3D demonstration could not be loaded"; } }
   }
   if (!v) {
     slot.classList.remove("fig-3d");
-    slot.appendChild(figureNode(ex, mode, { animate: true }));
-    slot.appendChild(mk("v3-failed", `${ICON.info}3D view unavailable on this device, showing the 2D figure.`));
+    slot.removeAttribute("tabindex"); slot.removeAttribute("role"); slot.removeAttribute("aria-label"); slot.removeAttribute("aria-roledescription");
+    let fig = null;
+    try { if (ex.figure) fig = figureNode(ex, mode, { animate: true }); } catch (e) { fig = null; }
+    if (fig) {
+      slot.appendChild(fig);
+      slot.appendChild(mk("v3-failed", `${ICON.info}${why}, showing the 2D figure.`));
+    } else {
+      const n = mk("v3-unavailable", `${ICON.info}<b>Demonstration not available</b><p>${why}. The instructions and cues on this page still apply.</p>`);
+      n.setAttribute("role", "status");
+      slot.appendChild(n);
+    }
     return null;
   }
   const load = mk("v3-loading", `<span class="spin" aria-hidden="true"></span><span>Loading 3D model…</span>`);

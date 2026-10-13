@@ -119,6 +119,9 @@ function solveSide(p) {
   const j = {};
   j.ankle = [0, 0];
   j.toe = add(j.ankle, vec(p.foot ?? 90, BONES.foot));
+  // Tip of the toes on the sole (19.5 along the foot, 7 below the ankle-toe line): it stays on the
+  // floor while the heel rises (anchor "ball" / "ball2"; the 3D foot has no toe joint).
+  j.ball = add(add(j.ankle, vec(p.foot ?? 90, 19.5)), vec((p.foot ?? 90) + 90, 7));
   j.knee = add(j.ankle, vec(p.shin, BONES.shin));
   j.hip = add(j.knee, vec(p.thigh, BONES.thigh));
   j.shoulder = add(j.hip, vec(p.torso, BONES.torso));
@@ -132,6 +135,7 @@ function solveSide(p) {
     j.knee2 = add(j.hip, vec(p.t2, BONES.thigh));
     j.ankle2 = add(j.knee2, vec(p.s2, BONES.shin));
     j.toe2 = add(j.ankle2, vec(p.f2 ?? 90, BONES.foot));
+    j.ball2 = add(add(j.ankle2, vec(p.f2 ?? 90, 19.5)), vec((p.f2 ?? 90) + 90, 7));
   }
   const a = j[p.anchor || "ankle"];
   const dx = p.x - a[0], dy = p.y - a[1];

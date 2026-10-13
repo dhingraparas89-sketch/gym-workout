@@ -221,7 +221,7 @@ function renderMuscles(params, ctx) {
   });
   const start = () => {
     viewer = mountStageViewer(ctx, slot, "good", standingExercise(state.muscle), Store.athlete() || "male");
-    const player = mountPlayer(wrap.querySelector(".player-host"), [viewer], { playback: false, camera: ["front", "back", "right", "threeQuarter"] });
+    const player = mountPlayer(wrap.querySelector(".player-host"), [viewer], { playback: false, camera: ["front", "back", "right", "threeQuarter"], keys: wrap });
     ctx.onCleanup(() => player.destroy());
     if (viewer) {
       show3d(state.region, state.muscle);

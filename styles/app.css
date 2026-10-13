@@ -450,10 +450,10 @@ body[data-level="beginner"] .cam-hint span { display: none; }
 
 /* ---------- Player additions ---------- */
 .pb-rate { display: flex; align-items: center; gap: 6px; }
-.pb-slow { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px; border-radius: 9px; border: 1px solid var(--hairline); background: transparent; color: var(--fg-2); font-size: 12.5px; white-space: nowrap; }
-.pb-slow .icon { width: 15px; height: 15px; }
-.pb-slow:hover { background: var(--surface-2); color: var(--fg); }
-.pb-slow[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-2); border-color: var(--accent-line); }
+.pb-slow, .pb-loop { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 10px; border-radius: 9px; border: 1px solid var(--hairline); background: transparent; color: var(--fg-2); font-size: 12.5px; white-space: nowrap; }
+.pb-slow .icon, .pb-loop .icon { width: 15px; height: 15px; }
+.pb-slow:hover, .pb-loop:hover { background: var(--surface-2); color: var(--fg); }
+.pb-slow[aria-pressed="true"], .pb-loop[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-2); border-color: var(--accent-line); }
 .cam-btn { display: inline-flex; align-items: center; gap: 5px; }
 .cam-btn .icon { width: 13px; height: 13px; }
 
@@ -606,3 +606,39 @@ body[data-level="beginner"] .cam-hint span { display: none; }
 /* Side-by-side captions stay one line so both stages line up. */
 .an-stages[data-layout="side"] .an-cap { flex-wrap: nowrap; white-space: nowrap; overflow: hidden; }
 .an-stages[data-layout="side"] .an-cap span { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+/* ======================================================================
+   Round 5: light studio stage, loop / turn controls, keyboard focus.
+   ====================================================================== */
+/* The 3D stage is a light photo studio inside the dark UI: a clean lightbox with a soft inner
+   edge, the same tone as the rendered cyclorama so loading and resizing never flash. The 2D
+   fallback figure keeps the dark stage it was drawn for. */
+:root { --studio-bg: #c9cbce; --studio-bg-2: #bfc1c4; }
+.fig-slot.fig-3d { background: linear-gradient(180deg, var(--studio-bg), var(--studio-bg-2)); color-scheme: light; }
+.stage:has(> .fig-slot.fig-3d), .mx-3d .fig-slot.fig-3d, .hero-visual:has(.fig-3d) { border-color: rgba(255, 255, 255, .14); box-shadow: 0 1px 0 rgba(255, 255, 255, .04) inset, 0 24px 60px rgba(0, 0, 0, .45); }
+.fig-slot.fig-3d::after { content: ""; position: absolute; inset: 0; pointer-events: none; border-radius: inherit; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .06), inset 0 -40px 60px -50px rgba(0, 0, 0, .18); z-index: 1; }
+.fig-slot.fig-3d { position: relative; }
+.fig-slot.fig-3d:focus { outline: none; }
+.fig-slot.fig-3d:focus-visible::after { box-shadow: inset 0 0 0 3px var(--accent); }
+/* Overlays on the light stage: dark chips with light text keep their contrast. */
+.fig-3d .v3-loading { color: #e7eaed; background: rgba(20, 22, 25, .86); border-color: rgba(255, 255, 255, .08); }
+.fig-3d .v3-failed { color: #e7eaed; }
+.v3-unavailable { position: absolute; inset: 0; display: grid; place-content: center; gap: 8px; padding: 24px; text-align: center; color: var(--muted); background: var(--stage-bg); z-index: 2; }
+.v3-unavailable b { color: var(--fg); font: 600 15px var(--font-body); }
+.v3-unavailable .icon { width: 22px; height: 22px; margin: 0 auto; color: var(--amber-text, var(--fg-2)); }
+.v3-unavailable p { margin: 0; max-width: 340px; font-size: 13.5px; }
+/* Programmatic focus on a page heading (after navigation) needs no ring. */
+h1[tabindex="-1"]:focus { outline: none; }
+/* Rep counter: completion in one-rep mode. */
+.pb-done { font-style: normal; color: var(--accent-2, var(--fg)); font-weight: 600; }
+/* Keyboard shortcuts, shown while the 3D model has keyboard focus. */
+.cam-keys { display: none; width: 100%; font-size: 12px; color: var(--faint); margin-top: 2px; }
+body:has(.fig-slot.fig-3d:focus-visible) .cam-keys { display: block; }
+@media (max-width: 760px) {
+  .pb-rate { flex-wrap: wrap; }
+  .pb-rate .pb-loop, .pb-rate .pb-slow { flex: 1; justify-content: center; }
+  .pb-rate .pb-speed { flex-basis: 100%; }
+  .cam-zoom { margin-left: 0; }
+  .cam-btn, .cam-ico { min-height: 40px; }
+  .cam-ico { width: 40px; }
+}

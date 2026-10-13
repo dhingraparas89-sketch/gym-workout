@@ -11,7 +11,9 @@ const GYM3D = (() => {
   const T = () => window.THREE;
   let MAT = null;
   const geoCache = new Map();
-  const cached = (key, make) => { if (!geoCache.has(key)) geoCache.set(key, make()); return geoCache.get(key); };
+  // Geometry and materials made once and shared by every viewer (never disposed with a scene).
+  const SHARED = new WeakSet();
+  const cached = (key, make) => { if (!geoCache.has(key)) { const v = make(); geoCache.set(key, v); if (v && typeof v === "object") SHARED.add(v); } return geoCache.get(key); };
 
   // ---------- Textures (drawn once, shared by every viewer) ----------
   function rng(seed) { let s = seed >>> 0; return () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296); }
@@ -77,43 +79,13 @@ const GYM3D = (() => {
       }
     });
   }
-  // Commercial rubber flooring: 1 m tiles of black rubber with grey flecks, slightly varied per
-  // tile, with fine seams. 1024 px covers 2 x 2 tiles.
-  function floorCanvases() {
-    const size = 1024, tile = size / 2, r = rng(7);
-    const color = canvas(size, (g) => {
-      for (let ty = 0; ty < 2; ty++) for (let tx = 0; tx < 2; tx++) {
-        const base = 30 + r() * 5;
-        g.fillStyle = `rgb(${base},${base + 1},${base + 3})`; g.fillRect(tx * tile, ty * tile, tile, tile);
-      }
-      const n = noiseCanvas(size, 3, [[64, 0.5], [256, 0.35]], 90, 166);
-      g.globalCompositeOperation = "overlay"; g.globalAlpha = 0.35; g.drawImage(n, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = "source-over";
-      for (let i = 0; i < 26000; i++) {
-        const x = r() * size, y = r() * size, v = 58 + r() * 50 | 0, s = 0.6 + r() * 1.3;
-        g.fillStyle = `rgba(${v},${v + 2},${v + 5},${0.5 + r() * 0.5})`; g.fillRect(x, y, s, s);
-      }
-      g.fillStyle = "rgba(0,0,0,0.85)";
-      [0, tile].forEach((o) => { g.fillRect(o, 0, 2, size); g.fillRect(0, o, size, 2); });
-      g.fillStyle = "rgba(255,255,255,0.05)";
-      [0, tile].forEach((o) => { g.fillRect(o + 2, 0, 1, size); g.fillRect(0, o + 2, size, 1); });
-    });
-    const rough = canvas(size, (g) => {
-      g.drawImage(noiseCanvas(size, 11, [[32, 0.6], [128, 0.4]], 200, 240), 0, 0);
-      g.fillStyle = "rgb(255,255,255)";
-      [0, tile].forEach((o) => { g.fillRect(o, 0, 3, size); g.fillRect(0, o, size, 3); });
-    });
-    const bump = canvas(size, (g) => {
-      g.drawImage(noiseCanvas(size, 5, [[256, 0.5], [512, 0.5]], 100, 156), 0, 0);
-      g.fillStyle = "rgb(20,20,20)";
-      [0, tile].forEach((o) => { g.fillRect(o, 0, 2, size); g.fillRect(0, o, size, 2); });
-    });
-    return { color, rough, bump };
-  }
   // Soft contact shadow: a dark blob that fades to nothing at its edge.
   function blobCanvas() {
     return canvas(128, (g) => {
+      // An alpha map is read from the green channel: white where the shadow is dark, on black.
+      g.fillStyle = "#000"; g.fillRect(0, 0, 128, 128);
       const grad = g.createRadialGradient(64, 64, 0, 64, 64, 64);
-      grad.addColorStop(0, "rgba(0,0,0,1)"); grad.addColorStop(0.45, "rgba(0,0,0,0.55)"); grad.addColorStop(1, "rgba(0,0,0,0)");
+      grad.addColorStop(0, "rgba(255,255,255,1)"); grad.addColorStop(0.35, "rgba(255,255,255,0.6)"); grad.addColorStop(0.7, "rgba(255,255,255,0.18)"); grad.addColorStop(1, "rgba(255,255,255,0)");
       g.fillStyle = grad; g.fillRect(0, 0, 128, 128);
     });
   }
@@ -141,7 +113,6 @@ const GYM3D = (() => {
     const knurl = tex(knurlCanvas(128, 8), 1);
     const braid = tex(braidCanvas(64, 2), 1);
     const grain = tex(grainCanvas(256, 4), 1);
-    const fl = floorCanvases();
     const Std = (o) => new THREE.MeshStandardMaterial(o), Phys = (o) => new THREE.MeshPhysicalMaterial(o);
     MAT = {
       // Black powder-coated steel: a fine orange-peel texture under a satin clear coat.
@@ -166,9 +137,9 @@ const GYM3D = (() => {
       rope: Std({ color: 0x1e1f21, roughness: 0.95, bumpMap: braid, bumpScale: 0.9 }),
       wood: Phys({ specularIntensity: 0.3, envMapIntensity: 0.25, map: tex(woodCanvas(), 1, true), color: 0x8c8378, roughness: 0.72 }),
       mat: Std({ color: 0x1d1e21, roughness: 0.92, bumpMap: fine, bumpScale: 0.3 }),
-      floor: Phys({ specularIntensity: 0.22, map: tex(fl.color, 4.5, true), roughnessMap: tex(fl.rough, 4.5), bumpMap: tex(fl.bump, 4.5), bumpScale: 0.6, roughness: 1, metalness: 0, envMapIntensity: 0.12 }),
-      shadow: new THREE.MeshBasicMaterial({ color: 0x000000, alphaMap: tex(blobCanvas()), transparent: true, depthWrite: false, opacity: 0.55, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })
+      shadow: new THREE.MeshBasicMaterial({ color: 0x1a1c20, toneMapped: false, alphaMap: tex(blobCanvas()), transparent: true, depthWrite: false, opacity: 0.55, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })
     };
+    Object.values(MAT).forEach((m) => SHARED.add(m));
     MAT.shadow.alphaMap.wrapS = MAT.shadow.alphaMap.wrapT = THREE.ClampToEdgeWrapping;
     return MAT;
   }
@@ -543,57 +514,84 @@ const GYM3D = (() => {
     };
   }
 
-  // ---------- Environment and floor ----------
-  // Soft reflections for metal: a dark gym hall with rows of long overhead light panels and
-  // a large softbox, baked into an environment map.
+  // ---------- Studio: environment, lights and cyclorama ----------
+  // A clean photo studio, so the dark charcoal athletes and the black equipment read against a
+  // light neutral background. One soft environment (PMREM of a small procedural studio room:
+  // light grey walls, a big softbox key, an overhead strip, a dimmer fill and two rim strips) gives
+  // every material soft, physically plausible reflections and ambient light without any assets.
+  const STUDIO = {
+    floor: 0xa2a5aa,   // matte light grey cyclorama (sRGB)
+    exposure: 1.25
+  };
   function environment(renderer) {
-    const THREE = T(), env = new THREE.Scene();
-    env.add(new THREE.Mesh(new THREE.BoxGeometry(40, 14, 40), new THREE.MeshBasicMaterial({ color: 0x17181b, side: THREE.BackSide })));
-    const panel = new THREE.MeshBasicMaterial({ color: 0xffffff });
-    for (let i = -2; i <= 2; i++) {
-      const p = new THREE.Mesh(new THREE.BoxGeometry(14, 0.1, 1.4), panel); p.position.set(0, 6.9, i * 6); env.add(p);
-    }
-    const soft = new THREE.Mesh(new THREE.PlaneGeometry(10, 6), new THREE.MeshBasicMaterial({ color: 0xbfc4cc })); soft.position.set(12, 2, 14); soft.lookAt(0, 0, 0); env.add(soft);
-    const fl = new THREE.Mesh(new THREE.PlaneGeometry(40, 40), new THREE.MeshBasicMaterial({ color: 0x0c0c0d })); fl.rotation.x = -Math.PI / 2; fl.position.y = -6.9; env.add(fl);
-    const pm = new THREE.PMREMGenerator(renderer), rt = pm.fromScene(env, 0.02);
-    pm.dispose();
+    const THREE = T(), env = new THREE.Scene(), geos = [], mats = [];
+    const box = (w, h, d, color, k, x, y, z, look) => {
+      const g = new THREE.BoxGeometry(w, h, d), m = new THREE.MeshBasicMaterial({ color });
+      if (k !== 1) m.color.multiplyScalar(k);
+      geos.push(g); mats.push(m);
+      const o = new THREE.Mesh(g, m); o.position.set(x, y, z); if (look) o.lookAt(0, 1, 0); env.add(o); return o;
+    };
+    const room = box(40, 16, 40, 0x7d8085, 1, 0, 6, 0); room.material.side = THREE.BackSide;
+    box(40, 0.1, 40, 0xb4b7bc, 1, 0, -1.95, 0);                 // light floor: bounce from below
+    box(12, 0.2, 12, 0xffffff, 5.5, 4, 13.8, 6, true);          // large overhead-front softbox (key)
+    box(3, 0.2, 20, 0xffffff, 2.2, -6, 13.8, -2, true);         // overhead strip
+    box(0.2, 8, 10, 0xf2f4f8, 1.6, -19.8, 5, 6);                // fill panel, front left
+    box(0.2, 10, 2.5, 0xffffff, 3.2, 19.8, 5, -12);             // rim strips behind
+    box(0.2, 10, 2.5, 0xffffff, 3.2, -19.8, 5, -12);
+    const pm = new THREE.PMREMGenerator(renderer), rt = pm.fromScene(env, 0.035);
+    pm.dispose(); geos.forEach((g) => g.dispose()); mats.forEach((m) => m.dispose());
     return rt.texture;
   }
-  // Gym lighting: a large soft key from above the front (casts the shadows), a cool fill, a
-  // rim from behind, and the overhead panels' sky light.
+  // Studio lighting, turned with the camera (figure3d.js) so every side of the body is modelled the
+  // same way: a large soft key from the upper front that reveals the muscle forms and casts the
+  // only shadow, a broad neutral fill from the other front side that keeps the shadow side open,
+  // two rims from behind that separate the silhouette from the background, and a sky/ground fill.
   function lights(scene) {
     const THREE = T();
-    // Studio balance for a dark matte body: one warm-neutral key (soft shadows), a weaker cool
-    // fill from the other front side, a low sky/ground ambient, and two neutral rims from behind
-    // that trace the silhouette without turning the back blue.
-    const hemi = new THREE.HemisphereLight(0xdfe4ea, 0x1a1a1c, 0.3); scene.add(hemi);
-    const key = new THREE.DirectionalLight(0xfff2e6, 2.5);
-    key.position.set(110, 240, 190); key.castShadow = true;
-    key.shadow.mapSize.set(2048, 2048); key.shadow.bias = -0.0002; key.shadow.normalBias = 0.6; key.shadow.radius = 6; key.shadow.blurSamples = 16;
+    const hemi = new THREE.HemisphereLight(0xf4f6fa, 0x8e9196, 0.3); scene.add(hemi);
+    const key = new THREE.DirectionalLight(0xfff6ee, 3.4);
+    key.position.set(200, 220, 170); key.castShadow = true;
+    key.shadow.mapSize.set(2048, 2048); key.shadow.bias = -0.0002; key.shadow.normalBias = 0.6; key.shadow.radius = 8;
     Object.assign(key.shadow.camera, { left: -170, right: 170, top: 170, bottom: -170, near: 50, far: 800 });
     scene.add(key); scene.add(key.target);
-    const fill = new THREE.DirectionalLight(0xd4dceb, 0.7); fill.position.set(-200, 110, 150); scene.add(fill);
-    const rim = new THREE.DirectionalLight(0xdfe6f5, 1.25); rim.position.set(-170, 170, -210); scene.add(rim);
-    // A second, softer rim from the other side, so both edges of the body read.
-    const rim2 = new THREE.DirectionalLight(0xd6dded, 0.8); rim2.position.set(180, 120, -190); scene.add(rim2);
-    const top = new THREE.DirectionalLight(0xffffff, 0.1); top.position.set(0, 400, 0); scene.add(top);
+    const fill = new THREE.DirectionalLight(0xeef2f8, 0.65); fill.position.set(-220, 100, 170); scene.add(fill);
+    const rim = new THREE.DirectionalLight(0xffffff, 1.3); rim.position.set(-170, 170, -210); scene.add(rim);
+    const rim2 = new THREE.DirectionalLight(0xffffff, 1.0); rim2.position.set(180, 120, -190); scene.add(rim2);
+    const top = new THREE.DirectionalLight(0xffffff, 0.25); top.position.set(0, 400, 0); scene.add(top);
     return { hemi, key, fill, rim, rim2, top };
   }
-  // Rubber floor that fades into the dark of the stage at its far edge.
+  // Seamless cyclorama: a flat floor that curves up into a distant wall all the way round, so the
+  // studio looks the same from every camera angle (no seams, tiles or horizon line). Faces point
+  // inward only, so a camera pulled back past the wall still sees the scene. A slight falloff
+  // toward the wall (vertex color) gives depth; the floor receives the key light's shadow.
   function floor() {
-    const THREE = T(), M = materials();
-    const geo = new THREE.PlaneGeometry(900, 900, 1, 1); geo.rotateX(-Math.PI / 2);
-    const fade = cached("floorFade", () => {
-      const c = canvas(256, (g) => { const grad = g.createRadialGradient(128, 128, 30, 128, 128, 128); grad.addColorStop(0, "#fff"); grad.addColorStop(0.5, "#ddd"); grad.addColorStop(1, "#000"); g.fillStyle = grad; g.fillRect(0, 0, 256, 256); });
-      const t = new THREE.CanvasTexture(c); return t;
-    });
-    // The fade has its own UV transform (no repeat), so it covers the floor once while the tiles repeat.
-    const mat = M.floor.clone(); mat.alphaMap = fade; mat.transparent = true;
+    const THREE = T();
+    const R0 = 900, C = 420, H = 1500, pts = [];
+    for (let i = 0; i <= 12; i++) pts.push(new THREE.Vector2((R0 * i) / 12, 0));
+    for (let i = 1; i <= 16; i++) { const a = (i / 16) * Math.PI / 2; pts.push(new THREE.Vector2(R0 + C * Math.sin(a), C - C * Math.cos(a))); }
+    for (let i = 1; i <= 4; i++) pts.push(new THREE.Vector2(R0 + C, C + ((H - C) * i) / 4));
+    pts[0].x = 0.001;
+    const geo = new THREE.LatheGeometry(pts, 72);
+    // Lathe faces point outward for a profile going out then up: flip them to face the inside.
+    const idx = geo.index.array; for (let i = 0; i < idx.length; i += 3) { const t = idx[i + 1]; idx[i + 1] = idx[i + 2]; idx[i + 2] = t; }
+    const n = geo.attributes.normal; for (let i = 0; i < n.count; i++) n.setXYZ(i, -n.getX(i), -n.getY(i), -n.getZ(i));
+    const pos = geo.attributes.position, col = new Float32Array(pos.count * 3);
+    for (let i = 0; i < pos.count; i++) {
+      const r = Math.hypot(pos.getX(i), pos.getZ(i)), y = pos.getY(i);
+      const k = 1 - 0.1 * Math.min(1, Math.max(0, (r - 150) / 750)) - 0.1 * Math.min(1, y / 900);
+      col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = k;
+    }
+    geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    const mat = new THREE.MeshStandardMaterial({ color: STUDIO.floor, roughness: 0.92, metalness: 0, vertexColors: true, envMapIntensity: 0.6 });
     const m = new THREE.Mesh(geo, mat); m.receiveShadow = true; m.renderOrder = -1;
+    m.userData.studio = true;
     return m;
   }
+  // Shared geometry/materials must outlive one scene; everything else a kit made is disposed.
+  function isShared(o) { return !!o && typeof o === "object" && SHARED.has(o); }
 
-  return { materials, Parts, olympicBar, ezBar, dumbbell, dHandle, carabiner, CableRun, environment, lights, floor, between, worldUV, mesh, tubeGeo, padGeo, roundRect };
+
+  return { STUDIO, isShared, materials, Parts, olympicBar, ezBar, dumbbell, dHandle, carabiner, CableRun, environment, lights, floor, between, worldUV, mesh, tubeGeo, padGeo, roundRect };
 })();
 
 

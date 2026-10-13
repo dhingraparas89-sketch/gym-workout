@@ -393,6 +393,8 @@ function buildSkinData(segs, mesh) {
       occ += AO_W[i] * Math.max(0, d - f) / d;
     }
     aux[v * 4] = Math.max(0.3, 1 - 1.15 * occ);
+    // The procedural field's head and neck differ from the base mesh's: no cavity darkening from it there.
+    if (mesh) aux[v * 4] = Math.max(aux[v * 4], skinSmooth(55, 60, y) * 0.9);
     if (MM) { liftC[v] = clothOut[4]; liftH[v] = clothOut[5]; continue; }
     if (top && top.spec) {
       local(segs[topSeg], x, y, z, L);
@@ -533,39 +535,48 @@ function skinNormals(pos, index, out) {
 // it reads as a mannequin skull rather than a smoothed-over face. Each head vertex moves along
 // the ray from the skull's centre to that surface, as far as it belongs to the head bone.
 function skinMeshHead(pos, W, mesh, index, nor, nb) {
-  const NB = mesh.bones.length, H = mesh.bones.indexOf("head"), F = mesh.sex === "female";
-  if (H < 0) return;
+  const NB = mesh.bones.length, H = mesh.bones.indexOf("head"), NK = mesh.bones.indexOf("neck"), F = mesh.sex === "female";
+  if (H < 0 || mesh.face !== "faceless" || mesh.noReshape) return; // the sculpted head keeps the base mesh's own form
   const k = F ? 0.93 : 1, o = [3.2, 72, 0];
   const E = (c, r) => ({ c: [o[0] + (c[0] - o[0]) * k, o[1] + (c[1] - o[1]) * k, c[2] * k], r: r.map((x) => x * k) });
+  // One smooth surface: broad skull planes blended with a soft union (no bands or seams), and the
+  // upper neck as an elliptical column the skull base and the jaw flow into.
   const parts = [
     E([3, 74.4, 0], [10, 10.2, 7.8]),     // cranial vault
-    E([-1.4, 71.2, 0], [4.6, 6.6, 5.6]),  // occiput, sloping into the back of the neck
-    E([11.6, 73.8, 0], [2.2, 1.6, 5.2]),  // forehead and brow
-    E([8.5, 68.5, 0], [6.2, 5.2, 5.9]),   // face
-    E([9, 70, 4.9], [2.6, 1.8, 2]), E([9, 70, -4.9], [2.6, 1.8, 2]), // cheekbones
-    E([7.5, 63.8, 0], [5.6, 3.4, 5.8]),   // mandible
-    E([3, 63.4, 4.8], [2.6, 2.6, 1.7]), E([3, 63.4, -4.8], [2.6, 2.6, 1.7]), // jaw angles
-    E([12, 62.3, 0], [2.2, 2.0, 2.8])     // chin
+    E([-0.8, 71.6, 0], [4.4, 5.6, 5.4]),  // occiput
+    E([9.4, 75.4, 0], [3.4, 4.2, 6.4]),   // forehead
+    E([11.6, 72.6, 0], [1.5, 1.1, 4.6]),  // a soft brow ridge
+    E([8.4, 68.6, 0], [6.2, 5.6, 5.6]),   // face
+    E([9.2, 69.6, 4.8], [2.4, 1.8, 2]), E([9.2, 69.6, -4.8], [2.4, 1.8, 2]), // cheekbones
+    E([7.2, 63.9, 0], [5.6, 3.2, 5.4]),   // mandible
+    E([2.8, 63.6, 4.7], [2.4, 2.6, 1.6]), E([2.8, 63.6, -4.7], [2.4, 2.6, 1.6]), // jaw angles
+    E([12.1, 62.4, 0], [1.9, 1.8, 2.6])   // chin
   ];
+  const NA = [0.8, 48, 0], NBt = [2.0, 67, 0], nrx = (F ? 4.9 : 5.4), nrz = (F ? 5.4 : 6.0);
   const ell = (e, x, y, z) => { const ax = (x - e.c[0]) / e.r[0], ay = (y - e.c[1]) / e.r[1], az = (z - e.c[2]) / e.r[2], k0 = Math.hypot(ax, ay, az), k1 = Math.hypot(ax / e.r[0], ay / e.r[1], az / e.r[2]); return k1 > 1e-9 ? (k0 * (k0 - 1)) / k1 : -Math.min(...e.r); };
-  const sdf = (x, y, z) => { let d = 1e9; parts.forEach((e) => { const b = ell(e, x, y, z); d = d > 1e8 ? b : skinSmin(d, b, 3); }); return d; };
+  const neck = (x, y, z) => {
+    const t = Math.min(1, Math.max(0, (y - NA[1]) / (NBt[1] - NA[1]))), cx = NA[0] + (NBt[0] - NA[0]) * t;
+    const dy = y < NA[1] ? NA[1] - y : y > NBt[1] ? y - NBt[1] : 0;
+    const r = (Math.hypot((x - cx) / nrx, z / nrz) - 1) * Math.min(nrx, nrz);
+    return Math.hypot(Math.max(r, 0), dy) + Math.min(r, 0);
+  };
+  const sdf = (x, y, z) => { let d = neck(x, y, z); parts.forEach((e, i) => { d = skinSmin(d, ell(e, x, y, z), i === 0 ? 5 : 4.5); }); return d; };
   const c = [o[0] + 0.3, o[1] - 1.5 * k, 0], n = pos.length / 3, D = new Float32Array(n * 3), mv = new Uint8Array(n);
   for (let v = 0; v < n; v++) {
-    const wh = W[v * NB + H]; if (wh < 0.05) continue;
-    let dx = pos[v * 3] - c[0], dy = pos[v * 3 + 1] - c[1], dz = pos[v * 3 + 2] - c[2];
+    const wh = W[v * NB + H], wn = NK >= 0 ? W[v * NB + NK] : 0, y = pos[v * 3 + 1];
+    // The head, and the upper neck from just under the jaw (blending in from y 57).
+    const b = Math.max(skinSmooth(0.05, 0.5, wh), skinSmooth(0.3, 0.8, wn) * skinSmooth(56, 61, y));
+    if (b <= 0) continue;
+    let dx = pos[v * 3] - c[0], dy = y - c[1], dz = pos[v * 3 + 2] - c[2];
     const l = Math.hypot(dx, dy, dz) || 1; dx /= l; dy /= l; dz /= l;
-    let lo = 0.5, hi = 26;
+    let lo = 0.5, hi = 30;
     for (let i = 0; i < 30; i++) { const m = (lo + hi) / 2; if (sdf(c[0] + dx * m, c[1] + dy * m, c[2] + dz * m) < 0) lo = m; else hi = m; }
-    // Less under the jaw, where the head meets the neck.
-    // (and at the back of the skull base, so the occiput flows into the neck without a ledge).
-    const b = skinSmooth(0.3, 0.95, wh) * (1 - skinSmooth(0.45, 0.85, -dy)) * (1 - skinSmooth(0.3, 0.8, -dy) * (1 - skinSmooth(0.2, 0.7, dx)));
-    // Below the skull's equator at the back, never pull in (that would fold the skin at the skull base).
-    const t = l + (lo - l) * (lo < l ? b * (1 - skinSmooth(-0.15, 0.3, -dy) * (1 - skinSmooth(0.3, 0.7, dx))) : b);
-    D[v * 3] = dx * (t - l); D[v * 3 + 1] = dy * (t - l); D[v * 3 + 2] = dz * (t - l); mv[v] = 1;
+    const t = (lo - l) * b;
+    D[v * 3] = dx * t; D[v * 3 + 1] = dy * t; D[v * 3 + 2] = dz * t; mv[v] = 1;
   }
-  // The move is evened out over the surface, so the reshaped skull flows into the neck.
+  // The move is evened out over the surface, so the reshaped head flows into the neck.
   const T2 = new Float32Array(n * 3);
-  for (let it = 0; it < 12; it++) {
+  for (let it = 0; it < 10; it++) {
     T2.set(D);
     for (let v = 0; v < n; v++) {
       if (!mv[v] && !nb[v].some((u) => mv[u])) continue;
@@ -575,13 +586,18 @@ function skinMeshHead(pos, W, mesh, index, nor, nb) {
     }
   }
   for (let i = 0; i < n * 3; i++) pos[i] += D[i];
-  // A fuller neck under the skull: the muscles round it out (sternocleidomastoids, splenius, traps).
-  const NK = mesh.bones.indexOf("neck");
-  for (let v = 0, n = pos.length / 3; v < n; v++) {
-    const wn = NK >= 0 ? W[v * NB + NK] : 0, y = pos[v * 3 + 1];
-    if (wn < 0.2 || y < 53 || y > 66) continue;
-    const dx = pos[v * 3] - 0.8, dz = pos[v * 3 + 2], l = Math.hypot(dx, dz) || 1, g = 0.9 * k * skinSmooth(0.2, 0.7, wn) * skinSmooth(53, 57, y) * (1 - skinSmooth(58, 62.5, y)) * (1 - skinSmooth(0.3, 0.9, W[v * NB + H] * 3));
-    pos[v * 3] += (dx / l) * g * (dx < 0 ? 1.2 : 0.6); pos[v * 3 + 2] += (dz / l) * g;
+  // Fair the head and neck (Taubin smoothing: no shrinking), so nothing of the old face survives.
+  const P2 = new Float32Array(n * 3), wgt = new Float32Array(n);
+  for (let v = 0; v < n; v++) wgt[v] = skinSmooth(57, 62, pos[v * 3 + 1]) * Math.max(W[v * NB + H], NK >= 0 ? W[v * NB + NK] : 0);
+  for (let it = 0; it < 16; it++) {
+    const lam = it % 2 ? -0.53 : 0.5;
+    P2.set(pos);
+    for (let v = 0; v < n; v++) {
+      const w = wgt[v] * lam; if (!w) continue;
+      let x = 0, y = 0, z = 0; nb[v].forEach((u) => { x += P2[u * 3]; y += P2[u * 3 + 1]; z += P2[u * 3 + 2]; });
+      const c2 = nb[v].length;
+      pos[v * 3] += (x / c2 - P2[v * 3]) * w; pos[v * 3 + 1] += (y / c2 - P2[v * 3 + 1]) * w; pos[v * 3 + 2] += (z / c2 - P2[v * 3 + 2]) * w;
+    }
   }
   skinNormals(pos, index, nor);
 }
@@ -634,7 +650,7 @@ function skinRegionTable() {
     ["none", null, 0, 1],
     ["head", null, 0, 1],
     ["neck-front", null, 0.1, 1.5],
-    ["scm", "neck", 0.5, 1.1, T([[21, 64], [20, 63]], [[2.5, 53.5], [4.5, 53.6]])],
+    ["scm", "neck", 0.35, 1.8, T([[21, 64], [20, 63]], [[2.5, 53.5], [4.5, 53.6]])],
     ["trap-upper", "traps", 0.5, 2.4, T([[37.8, 63], [37.8, 50]], [[13, 53.5], [22, 51]])],
     ["trap-mid", "traps", 0.35, 2.0, T([[37.8, 50], [37.8, 25]], [[27, 49], [31, 43]])],
     ["rhomboid", "rhomboids", 0.3, 1.4, T([[37.8, 48], [37.8, 38]], [[30.2, 44], [30.2, 34]])],
@@ -954,7 +970,8 @@ function skinMeshMuscles(pos, nb, W, mesh, segs, sex) {
     // Belly relief, and a shallow groove right at the edge where it meets another muscle, so
     // neighbouring muscles read apart (not against the head, hands, feet or bone).
     const groove = R[2] >= 0.3 && TAB[across[v]][2] >= 0.3 ? 0.16 * K * Math.exp(-((d / 0.6) ** 2)) : 0;
-    disp[v] = R[2] * K * rise * along - groove;
+    // Under the jaw and at the skull base the neck flows into the head without a step.
+    disp[v] = (R[2] * K * rise * along - groove) * (TAB[across[v]][0] === "head" ? ss(0, 4, d) : 1);
     fib[v * 4] = u; fib[v * 4 + 1] = (w * WID[lab[v]]) / SP; fib[v * 4 + 2] = ss(0, 1.4, d) * (0.55 + 0.45 * along);
     if (R[1]) weights[R[1]][v] = 0.45 + 0.55 * ss(0, 1.2, d);
   }
@@ -1001,6 +1018,11 @@ const BODY_MESH_SRC = (() => {
   try { const s = document.currentScript && document.currentScript.src; return s ? new URL("../assets/body-mesh.js", s).href : "assets/body-mesh.js"; }
   catch (e) { return "assets/body-mesh.js"; }
 })();
+// The head: "sculpted" (default) is a calm carved face from the base mesh (brow, closed lids,
+// nose, closed lips, chin, ears at low relief, no painted eyes); "faceless" fairs the features
+// away into a smooth mannequin head. One switch for both athletes; test pages may override it
+// with window.FACE_STYLE before this script loads.
+const FACE_STYLE = (typeof window !== "undefined" && window.FACE_STYLE === "faceless") ? "faceless" : "sculpted";
 let bodyMeshWait = null;
 function loadBodyMesh(cb) {
   if (typeof window === "undefined" || window.BODY_MESH || window.BODY_MESH === false) { cb((typeof window !== "undefined" && window.BODY_MESH) || null); return; }
@@ -1025,8 +1047,14 @@ function bodyMeshFor(sex) {
   const u8 = (b) => { const t = atob(b), a = new Uint8Array(t.length); for (let i = 0; i < t.length; i++) a[i] = t.charCodeAt(i); return a; };
   const B = D.bodies[sex], q = new Uint16Array(u8(B.pos).buffer), pos = new Float32Array(D.nv * 3);
   for (let v = 0; v < D.nv; v++) for (let k = 0; k < 3; k++) pos[v * 3 + k] = B.lo[k] + ((B.hi[k] - B.lo[k]) * q[v * 3 + k]) / 65535;
+  // The faceless head is the same mesh with its features faired away (offsets in 1/100 cm).
+  const face = FACE_STYLE === "faceless" && B.faceless ? "faceless" : "sculpted";
+  if (face === "faceless") {
+    const fv = new Uint16Array(u8(B.faceless.v).buffer), fd = new Int16Array(u8(B.faceless.d).buffer);
+    for (let i = 0; i < fv.length; i++) for (let k = 0; k < 3; k++) pos[fv[i] * 3 + k] += fd[i * 3 + k] / 100;
+  }
   return (BODY_MESH_CACHE[sex] = { nv: D.nv, pos, quads: new Uint16Array(u8(D.quads).buffer), si: u8(B.si), sw: u8(B.sw), bones: D.bones,
-    fingers: B.fingers, SH: D.skel[sex].SH, sex, levels: 1 });
+    fingers: B.fingers, SH: D.skel[sex].SH, sex, levels: 1, face, noReshape: typeof window !== "undefined" && window.NO_RESHAPE });
 }
 function requestSkin(segs, done, athlete) {
   const SKIN = SKINS[athlete] || SKINS.male;
@@ -1768,12 +1796,19 @@ function createViewer3D(container, mode, opts = {}) {
   renderer.shadowMap.type = THREE.PCFShadowMap;
   if ("outputColorSpace" in renderer) renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.05;
+  renderer.toneMappingExposure = GYM3D.STUDIO ? GYM3D.STUDIO.exposure : 1;
   renderer.domElement.className = "figure3d";
   container.appendChild(renderer.domElement);
+  // The stage takes keyboard focus (space plays or pauses, arrows step; see js/ui/player.js).
+  if (!container.hasAttribute("tabindex")) container.tabIndex = 0;
+  if (!container.hasAttribute("aria-label")) {
+    container.setAttribute("role", "group");
+    container.setAttribute("aria-roledescription", "3D viewer");
+    container.setAttribute("aria-label", "3D model. Drag to rotate, scroll or pinch to zoom. Keyboard: arrow keys, plus and minus; space plays or pauses.");
+  }
 
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(28, 1, 1, 2000);
+  const camera = new THREE.PerspectiveCamera(28, 1, 2, 5000);
   // A commercial gym: reflections of overhead light panels on the metal, a soft key light from
   // above that casts the shadows, a cool fill, a rim light from behind.
   scene.environment = GYM3D.environment(renderer);
@@ -1955,7 +1990,7 @@ function createViewer3D(container, mode, opts = {}) {
 
   const GOOD = new THREE.Color(VIEW3D.good), BAD = new THREE.Color(VIEW3D.bad);
   let ex = null, poseA = null, poseB = null, load = {}, focusId = null, form = null;
-  let ghostA = null, ghostB = null, ghostEnds = null, period = 4600, shownAt = 0, ghostOn = true;
+  let ghostA = null, ghostB = null, ghostEnds = null, period = 4600, basePeriod = 4600, shownAt = 0, ghostOn = true;
   let lastT = 0, lastNow = 0, effort = 0.7;
   let yaw = VIEW3D.yaw, pitch = VIEW3D.pitch, target = new THREE.Vector3(0, 90, 0), dist = 400;
   let raf = 0, disposed = false, fig3 = {}, fibersOn = false;
@@ -2035,8 +2070,25 @@ function createViewer3D(container, mode, opts = {}) {
   // every frame it moves with the body: hand -> handle -> cable -> pulleys -> weight stack.
   let rig = null, floorY = 0, holdAt = null, fitted = false;
   function clearEquipment() {
-    while (equipment.children.length) equipment.remove(equipment.children[0]);
+    while (equipment.children.length) disposeTree(equipment.children[0], true);
     rig = null; paths = [];
+  }
+  // Free the GPU memory of what an exercise built (kit parts, contact shadows, paths, guides), but
+  // never the geometry and materials shared by every viewer (GYM3D.isShared) or this viewer's own
+  // reusable pieces (KEEP). Without this, switching exercises leaked buffers and shader programs.
+  const KEEP = new Set();
+  function disposeTree(root, detach) {
+    if (detach && root.parent) root.parent.remove(root);
+    root.traverse((o) => {
+      if (o.geometry && !KEEP.has(o.geometry) && !GYM3D.isShared(o.geometry)) o.geometry.dispose();
+      const ms = Array.isArray(o.material) ? o.material : o.material ? [o.material] : [];
+      ms.forEach((m) => {
+        if (KEEP.has(m) || GYM3D.isShared(m)) return;
+        // Textures a material made for itself (not the shared canvases) go with it.
+        ["map", "alphaMap"].forEach((k) => { const t = m[k]; if (t && t.userData && t.userData.own) t.dispose(); });
+        m.dispose();
+      });
+    });
   }
   const to3 = (p) => new THREE.Vector3(p[0] - 100, 189 - p[1], 0);
 
@@ -2121,6 +2173,7 @@ function createViewer3D(container, mode, opts = {}) {
   // Soft contact shadows (ambient occlusion) where things meet the floor: equipment feet are
   // fixed; the body's feet (and flat hands) are followed every frame, darker the closer they are.
   const shadowGeo = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+  KEEP.add(shadowGeo);
   const liveShadows = [];
   function shadowBlob(x, z, w, d, o) {
     const mat = GYM3D.materials().shadow.clone(); mat.opacity = o;
@@ -2133,7 +2186,7 @@ function createViewer3D(container, mode, opts = {}) {
     liveShadows.length = 0;
     ["R", "L"].forEach((s) => {
       const ft = body.parts["foot" + s];
-      liveShadows.push({ m: shadowBlob(0, 0, 32, 15, 0), at: () => endOf(ft, 7), dir: () => endOf(ft, 12).sub(ft.position), base: 0.7, r: 3.5, len: 32, wid: 15 });
+      liveShadows.push({ m: shadowBlob(0, 0, 32, 15, 0), at: () => endOf(ft, 7), dir: () => endOf(ft, 12).sub(ft.position), base: 0.85, r: 3.5, len: 32, wid: 15 });
       if (fig3.hand === "flat") liveShadows.push({ m: shadowBlob(0, 0, 18, 14, 0), at: () => gripPoint(s), base: 0.55, r: 1.5, len: 18, wid: 14 });
     });
     liveShadows.forEach((l) => { l.m.visible = l.at().y - floorY < 30; });
@@ -2372,7 +2425,11 @@ function createViewer3D(container, mode, opts = {}) {
     }
     return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
   }
+  // Forearm rotation (pose field `sup`, degrees, + = toward supination / palm up) on top of the grip:
+  // a dumbbell curl turns from a neutral grip at the bottom to palm-up at the top.
+  let supNow = 0;
   function setHandQ(h, fa, side, q, wrist) {
+    if (supNow) q.premultiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0).applyQuaternion(fa.quaternion), (side * supNow * Math.PI) / 180));
     // p.wrist: wrist flexion (+) / extension (-) in degrees, about the knuckle line (wrist curls).
     if (wrist) q.multiply(new THREE.Quaternion().setFromAxisAngle(Z, (wrist * Math.PI) / 180));
     handQOf()[side > 0 ? "R" : "L"].copy(q);
@@ -2433,6 +2490,20 @@ function createViewer3D(container, mode, opts = {}) {
       let i = 1;
       while (i < ks.length - 1 && t > ks[i].at) i++;
       const k0 = ks[i - 1], k1 = ks[i], u = Math.min(1, Math.max(0, (t - k0.at) / Math.max(1e-6, k1.at - k0.at)));
+      // keysEase "spline": a smooth (Catmull-Rom) path through the keys, so the body keeps moving
+      // through each key instead of stopping at it; the rep tempo eases the start and the end.
+      if (fig3.keysEase === "spline") {
+        const km = ks[Math.max(0, i - 2)], kp = ks[Math.min(ks.length - 1, i + 1)];
+        const t1 = k0.at, t2 = k1.at, t0 = i >= 2 ? km.at : t1 - (t2 - t1), t3 = i + 1 < ks.length ? kp.at : t2 + (t2 - t1);
+        const f = (a, b, x) => (x - a) / Math.max(1e-6, b - a), tt = t1 + u * (t2 - t1);
+        // Barry-Goldman pyramid on scalars gives each key's weight; the pose is the weighted sum of
+        // the keys' joint angles (unwrapped around k0), so nothing wraps mid-blend.
+        const L = (x, y, k) => x + (y - x) * k;
+        const wt = [0, 1, 2, 3].map((n) => { const v = [0, 0, 0, 0]; v[n] = 1;
+          const A1 = L(v[0], v[1], f(t0, t1, tt)), A2 = L(v[1], v[2], u), A3 = L(v[2], v[3], f(t2, t3, tt));
+          return L(L(A1, A2, f(t0, t2, tt)), L(A2, A3, f(t1, t3, tt)), u); });
+        return pin(blendKeys([km, k0, k1, kp], wt, lerp2(k0, k1, u)), k0, k1, u);
+      }
       return pin(lerp2(k0, k1, fig3.keysEase === "linear" ? u : u * u * (3 - 2 * u)), k0, k1, u);
     }
     return pin(lerp2(a, b, t), a, b, t);
@@ -2449,12 +2520,30 @@ function createViewer3D(container, mode, opts = {}) {
   }
   function lerp2(a, b, t) {
     const p = lerpPose(a, b, t);
-    ["twist", "roll", "shrug", "wrist", "flat"].forEach((k) => { if (a[k] != null || b[k] != null) p[k] = (a[k] || 0) + ((b[k] || 0) - (a[k] || 0)) * t; });
+    ["twist", "roll", "shrug", "wrist", "flat", "sup", "prot", "lift"].forEach((k) => { if (a[k] != null || b[k] != null) p[k] = (a[k] || 0) + ((b[k] || 0) - (a[k] || 0)) * t; });
+    // 2D foot targets (see pose): only when both ends give one.
+    ["ankR", "ankL", "toeR", "toeL"].forEach((k) => { if (a[k] && b[k]) p[k] = [a[k][0] + (b[k][0] - a[k][0]) * t, a[k][1] + (b[k][1] - a[k][1]) * t]; else delete p[k]; });
     if (a.arm2 || b.arm2) {
       const m = (k) => { const x = (a.arm2 || a)[k] ?? 0, y = (b.arm2 || b)[k] ?? 0; return x + (y - x) * t; };
       p.arm2 = { ua: m("ua"), fa: m("fa"), abd: m("abd") };
     }
     return p;
+  }
+  // Weighted blend of side-view poses (weights sum to 1): joint angles (relative to the second
+  // pose, unwrapped), position and the 3D-only fields; `base` supplies everything else.
+  function blendKeys(P, w, base) {
+    const J = P.map((q) => (q.view === "front" ? null : toJoints(q)));
+    if (J.some((x) => !x)) return base;
+    const ref = J[1], q = {};
+    const unwrap = (v, r) => r + ((((v - r) % 360) + 540) % 360) - 180;
+    Object.keys(ref).forEach((k) => { q[k] = P.reduce((sum, _, i) => sum + w[i] * (J[i][k] == null ? ref[k] : unwrap(J[i][k], ref[k])), 0); });
+    const out = fromJoints(q, base);
+    const num = (get) => P.reduce((sum, p, i) => sum + w[i] * (get(p) ?? get(P[1]) ?? 0), 0);
+    ["x", "y", "bend", "abd", "gz", "legAbd", "kneeOut", "twist", "roll", "shrug", "wrist", "flat", "sup", "prot", "lift"].forEach((k) => {
+      if (P.some((p) => p[k] != null)) out[k] = num((p) => p[k]); });
+    if (base.arm2) out.arm2 = { ua: num((p) => (p.arm2 || p).ua), fa: num((p) => (p.arm2 || p).fa), abd: num((p) => (p.arm2 || p).abd) };
+    ["ankR", "ankL", "toeR", "toeL"].forEach((k) => { if (P.every((p) => p[k])) out[k] = [num((p) => p[k][0]), num((p) => p[k][1])]; });
+    return out;
   }
   // Key poses for a multi-key rep, built like poseA/poseB (`over` = the mistake's overrides).
   function withKeys(A, B, keys, over) {
@@ -2477,7 +2566,10 @@ function createViewer3D(container, mode, opts = {}) {
     const A = to3(ank2(j, s, p)).add(pl.delta);
     const kneeFK = endOf(th, 42), toA = A.clone().sub(hip3);
     const d = Math.min(Math.max(toA.length(), 8), 83.9), u = toA.normalize();
-    let w = kneeFK.clone().sub(hip3); w.sub(u.clone().multiplyScalar(w.dot(u)));
+    // With a set stance the knee bends toward the toes (knee tracks over the foot); otherwise it
+    // keeps the side the 2D pose bends it to.
+    let w = pl.track ? new THREE.Vector3(Math.cos(pl.yaw), 0.15, -Math.sin(pl.yaw)) : kneeFK.clone().sub(hip3);
+    w.sub(u.clone().multiplyScalar(w.dot(u)));
     if (w.lengthSq() < 1e-4) w = new THREE.Vector3(1, 0, 0).sub(u.clone().multiplyScalar(u.x));
     w.normalize();
     const h = Math.sqrt(Math.max(0, 42 * 42 - (d / 2) * (d / 2)));
@@ -2508,6 +2600,14 @@ function createViewer3D(container, mode, opts = {}) {
       const q = list[0], fd = s === "L" && q.t2 != null ? (q.f2 ?? 90) : (q.foot ?? 90);
       const bx = Math.sin((fd * Math.PI) / 180), flat = Math.abs(toe.x) + Math.abs(toe.z);
       plant[s].yaw = flat > 0.5 && Math.abs(bx) > 0.1 ? Math.atan2(-toe.z, toe.x) - (bx < 0 ? Math.PI : 0) : 0;
+      // fig3.stance { w: ankle half-width (cm), toe: toe-out (deg) }: set the stance directly; the
+      // knee then bends toward the toes (plantLeg), so it tracks over the foot.
+      const st = fig3.stance, side = s === "R" ? 1 : -1;
+      if (st) {
+        if (st.w != null) plant[s].delta.z = side * st.w;
+        if (st.toe != null) plant[s].yaw = (-side * st.toe * Math.PI) / 180;
+        plant[s].track = true;
+      }
     });
     target.plant = plant;
   }
@@ -2566,9 +2666,37 @@ function createViewer3D(container, mode, opts = {}) {
     const g = GYM3D.kits.groundOf(fig3.kit || "none", fig3);
     return g === "body" ? floorY + (fig3.mat || fig3.kit === "mat" ? 1.5 : 0) : null;
   }
+  // Shoulder-blade motion (the rig has no scapula bone, so the shoulder joint itself moves on the
+  // ribcage): upward rotation/elevation as the arm goes overhead, protraction as it reaches forward,
+  // retraction as the elbow goes behind the trunk. In the torso frame (x forward, y up the spine).
+  // fig3.scap: false (off) or { k: scale of the automatic rhythm, prot, lift: fixed cm (bench
+  // pressing keeps the blades pinned back: { k: 0, prot: -1.6 }) }; pose fields prot / lift add cm.
+  function scapOffset(s, torsoQ, p) {
+    const sc = fig3.scap;
+    if (sc === false) return null;
+    const k = sc && sc.k != null ? sc.k : 1;
+    const d = new THREE.Vector3(0, 1, 0).applyQuaternion(cur.parts["upperArm" + s].quaternion).applyQuaternion(torsoQ.clone().invert());
+    const e = (Math.acos(Math.min(1, Math.max(-1, -d.y))) * 180) / Math.PI;
+    const lift = k * 2.4 * smoothStep(75, 170, e) + ((sc && sc.lift) || 0) + (p.lift || 0);
+    const prot = k * (2.4 * Math.max(0, d.x) * smoothStep(35, 85, e) - 2.2 * smoothStep(0.12, 0.55, -d.x)) + ((sc && sc.prot) || 0) + (p.prot || 0);
+    if (Math.abs(lift) + Math.abs(prot) < 0.01) return null;
+    return new THREE.Vector3(prot, lift, 0).applyQuaternion(torsoQ);
+  }
   function pose(p, t, target = body, ends = reachEnds) {
-    cur = target; curEnds = ends;
+    cur = target; curEnds = ends; supNow = p.sup || 0;
     const j = solveSide(p);
+    // A set stance (fig3.stance) wider than the hips makes the 3D leg longer than its side-view
+    // projection: lower the body just enough that both planted feet stay on the floor.
+    if (cur.plant && fig3.stance) {
+      let drop = 0;
+      ["R", "L"].forEach((s) => {
+        const pl = cur.plant[s]; if (!pl) return;
+        const side = s === "R" ? 1 : -1, h = to3(j.hip).add(new THREE.Vector3(0, 0, side * VIEW3D.hipHalf)), A = to3(ank2(j, s, p)).add(pl.delta);
+        const dx = h.x - A.x, dz = h.z - A.z, r2 = 83.4 * 83.4 - dx * dx - dz * dz;
+        if (r2 > 0) drop = Math.max(drop, h.y - A.y - Math.sqrt(r2));
+      });
+      if (drop > 0) Object.keys(j).forEach((k) => { if (Array.isArray(j[k]) && !/^(ankle|toe)/.test(k)) j[k] = [j[k][0], j[k][1] + drop]; });
+    }
     const hip = to3(j.hip), shoulderC = to3(j.shoulder), mid = to3(j.spineMid);
     const lowerA = Math.atan2(mid.x - hip.x, mid.y - hip.y) * 180 / Math.PI;
     const upperA = Math.atan2(shoulderC.x - mid.x, shoulderC.y - mid.y) * 180 / Math.PI;
@@ -2635,6 +2763,9 @@ function createViewer3D(container, mode, opts = {}) {
         // the 3D one, so a hanging arm would otherwise stay bent).
         if (ik.reach) H.sub(sh).multiplyScalar(ik.reach).add(sh);
         solveArm(cur.parts["upperArm" + s], cur.parts["forearm" + s], sh, H, pole, handMode === "flat" ? 27 : 33);
+        // Shoulder blade follows the arm (see scapOffset); the hand stays on its target.
+        const so = scapOffset(s, torsoQ, p);
+        if (so) { sh.add(so); solveArm(cur.parts["upperArm" + s], cur.parts["forearm" + s], sh, H, pole, handMode === "flat" ? 27 : 33); }
         if (handMode === "grip") reach.push({ s, side, sh, H, pole });
       } else {
         // A far (left) arm with its own angles (p.arm2: { ua, fa, abd? }), e.g. a hand braced on a bench.
@@ -2650,6 +2781,8 @@ function createViewer3D(container, mode, opts = {}) {
         placeAngle(cur.parts["upperArm" + s], sh, a2 ? a2.ua : p.ua, ex2);
         const elbow = endOf(cur.parts["upperArm" + s], uaLen);
         placeAngle(cur.parts["forearm" + s], elbow, a2 ? a2.fa : p.fa, ex2);
+        const so = scapOffset(s, torsoQ, p);
+        if (so) { sh.add(so); cur.parts["upperArm" + s].position.add(so); cur.parts["forearm" + s].position.add(so); }
       }
       orientHand(cur.hands[s], cur.parts["forearm" + s], side, torsoQ, p.wrist, p.flat);
       const hip3 = hip.clone().add(lateral.clone().multiplyScalar(side * VIEW3D.hipHalf));
@@ -2680,6 +2813,18 @@ function createViewer3D(container, mode, opts = {}) {
       // never slide or twist the foot on the floor.
       const pl = cur.plant && cur.plant[s];
       if (pl) plantLeg(s, side, hip3, j, p, pl, footDir);
+      else {
+        // Stepping foot (pose fields ankR/ankL or toeR/toeL: a 2D [x, y] point, interpolated over
+        // the keys): the leg reaches it by two-bone IK, knee forward, so a foot stays put where the
+        // keys hold it (walking lunge, step-up) and the ball of the foot can stay down as the heel
+        // rises (toe target).
+        const toeT = side > 0 ? p.toeR : p.toeL, ankT = side > 0 ? p.ankR : p.ankL;
+        if (toeT || ankT) {
+          // toe target = the tip of the toes on the sole (j.ball in solveSide).
+          const r = (footDir * Math.PI) / 180, A2 = toeT ? [toeT[0] - Math.sin(r) * 19.5 - Math.cos(r) * 7, toeT[1] + Math.cos(r) * 19.5 - Math.sin(r) * 7] : ankT;
+          plantLeg(s, side, hip3, { ankle: A2, ankle2: A2 }, p, { delta: new THREE.Vector3(0, 0, side * VIEW3D.hipHalf), yaw: 0, track: true }, footDir);
+        }
+      }
     });
 
     // Both hands on one bar (or a pair held in line): each fist closes around the line from one
@@ -2717,7 +2862,9 @@ function createViewer3D(container, mode, opts = {}) {
       const d = holdAt.clone().sub(gripPoint("R").add(gripPoint("L")).multiplyScalar(0.5));
       Object.values(cur.parts).forEach((g) => { if (g.parent === scene || !g.parent) g.position.add(d); });
     }
-    if (target !== body || !rig || !fitted) return;
+    if (target !== body || !fitted) return;
+    // Contact shadows follow the feet and hands even when there is no equipment.
+    if (!rig) { updateShadows(); return; }
     // Equipment that moves with the body.
     rig.update({ t, grip: { R: gripPoint("R"), L: gripPoint("L") }, axis: { R: gripAxis("R"), L: gripAxis("L") }, handQ: body.handQ, J: jointsOf(body) });
     paths.forEach((p) => p.bead.position.copy(p.at()));
@@ -2762,6 +2909,7 @@ function createViewer3D(container, mode, opts = {}) {
   const guideCyl = new THREE.CylinderGeometry(1, 1, 1, 12, 1, true).translate(0, 0.5, 0);
   const dotGeo = new THREE.SphereGeometry(1, 16, 12);
   const coneGeo = new THREE.ConeGeometry(1, 1, 18).translate(0, 0.5, 0);
+  KEEP.add(guideCyl); KEEP.add(dotGeo); KEEP.add(coneGeo);
   const guideMat = (color, opacity) => new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthTest: false, depthWrite: false, toneMapped: false });
   function segTo(m, a, b, r) {
     const d = b.clone().sub(a), len = d.length();
@@ -2846,7 +2994,7 @@ function createViewer3D(container, mode, opts = {}) {
 
   let fb = null; // the guides built for the current exercise
   function clearFeedback() {
-    while (guides.children.length) guides.remove(guides.children[0]);
+    while (guides.children.length) disposeTree(guides.children[0], true);
     hud.querySelectorAll(".v3-tag, .v3-tempo").forEach((n) => n.remove());
     fb = null;
   }
@@ -2907,7 +3055,7 @@ function createViewer3D(container, mode, opts = {}) {
     const trace = cands.reduce((a, c) => (pathLen(idealPath[c]) > pathLen(idealPath[a]) ? c : a), cands[0]);
     fb.trace = trace;
     viewer.analysis = err.type === "tempo"
-      ? { label: "Time for one rep", your: (period / 1000).toFixed(1) + " s", optimal: "4.6 s" }
+      ? { label: "Time for one rep", your: (period / 1000).toFixed(1) + " s", optimal: (basePeriod / 1000).toFixed(1) + " s" }
       : best && { label: best.label + " at the point of biggest difference", your: best.your + "°", optimal: best.optimal + "°" };
 
     if (err.type === "posture" || err.type === "alignment" || err.type === "activation") {
@@ -3139,22 +3287,35 @@ function createViewer3D(container, mode, opts = {}) {
   const TEMPO = [[0.1, 0, 0], [0.42, 0, 1], [0.54, 1, 1], [1, 1, 0]]; // [end of phase, from, to]
   const smoother = (x) => x * x * x * (x * (x * 6 - 15) + 10);
   // raw: position in one rep cycle (0..1) -> blend between pose a (0) and pose b (1).
+  // Per-exercise tempo (MOTION data, ex.animation.tempo = { ms, segs: [[end, from, to, ease?]] }):
+  // ease "ecc" = even controlled lowering (cubic in/out), "con" = quick drive that settles into the
+  // lockout, default = the original quintic in/out.
+  const EASE = { ecc: (x) => x * x * (3 - 2 * x), con: (x) => { const y = Math.pow(x, 0.8); return y * y * (3 - 2 * y); } };
+  let tempo = TEMPO;
   function shapeT(raw) {
     let start = 0;
-    for (const [end, from, to] of TEMPO) {
-      if (raw <= end) return from + (to - from) * smoother((raw - start) / (end - start));
+    for (const [end, from, to, ease] of tempo) {
+      if (raw <= end) return from + (to - from) * (EASE[ease] || smoother)((raw - start) / Math.max(1e-6, end - start));
       start = end;
     }
-    return 0;
+    return tempo[tempo.length - 1][2];
   }
   function easeT(now, len = 4600) { return shapeT((now % len) / len); }
   const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const END_AT = (TEMPO[1][0] + TEMPO[2][0]) / 2; // the middle of the hold at pose b
+  // The middle of the hold at pose b (in the current tempo).
+  const endAt = () => { let s0 = 0; for (const [end, from, to] of tempo) { if (from === 1 && to === 1) return (s0 + end) / 2; s0 = end; } return (TEMPO[1][0] + TEMPO[2][0]) / 2; };
 
   // ----- Playback clock -----
   // clockMs advances only while playing (times the speed); the rep position is clockMs / period.
   // With reduced motion the rep starts paused at its end position.
-  const play = { on: !reduce, speed: 1, clockMs: 0, last: 0, rep: 0, cbs: [], phases: [], phaseIndex: -1 };
+  // loop: repeat reps; off = play to the end of the current rep, then stop there (stopAt).
+  const play = { on: !reduce, speed: 1, clockMs: 0, last: 0, rep: 0, cbs: [], phases: [], phaseIndex: -1, loop: true, stopAt: null, done: false };
+  // Start (or resume) playing; with looping off, play on to the end of this rep (or a whole next
+  // rep when stopped at the end of one).
+  function startPlay() {
+    play.on = true; heldAt = null; play.done = false;
+    play.stopAt = play.loop ? null : (Math.floor(play.clockMs / period + 1e-6) + 1) * period;
+  }
   const cycleOf = () => (period > 0 ? (play.clockMs % period) / period : 0);
   // Default phase labels from the tempo schedule and which way the rep goes: is a -> b the
   // working (concentric) half or the lowering (eccentric) half? Wording follows the movement.
@@ -3216,13 +3377,14 @@ function createViewer3D(container, mode, opts = {}) {
 
   // Stage colors follow the page style (a dark lab stage or a light studio).
   let frame = 0, stageDark = null, stageAt = -1e9;
+  // The 3D stage is always the light studio (GYM3D.floor); a page can still ask for a slightly
+  // brighter exposure with --stage-exposure on the stage container.
   function readStage() {
-    const dark = getComputedStyle(container).getPropertyValue("--stage").trim() === "dark";
-    if (dark === stageDark) return;
-    stageDark = dark;
-    floor.material.color.setScalar(dark ? 1.3 : 1.9);
-    rim.intensity = dark ? 1.6 : 1.1;
-    renderer.toneMappingExposure = dark ? 1.15 : 1.05;
+    const x = parseFloat(getComputedStyle(container).getPropertyValue("--stage-exposure"));
+    const want = isFinite(x) && x > 0 ? x : (GYM3D.STUDIO ? GYM3D.STUDIO.exposure : 1);
+    if (want === stageDark) return;
+    stageDark = want;
+    renderer.toneMappingExposure = want;
   }
 
   function tick(now) {
@@ -3236,17 +3398,21 @@ function createViewer3D(container, mode, opts = {}) {
     // Playback: advance the rep clock, count completed reps, report the phase.
     const step = play.last ? Math.min(250, Math.max(0, now - play.last)) : 0;
     play.last = now;
-    if (play.on && heldAt == null) play.clockMs += step * play.speed;
+    if (play.on && heldAt == null) {
+      play.clockMs += step * play.speed;
+      // One-rep mode: stop exactly at the end of the rep (the finished position).
+      if (play.stopAt != null && play.clockMs >= play.stopAt) { play.clockMs = play.stopAt - 1e-3; play.on = false; play.stopAt = null; play.done = true; }
+    }
     play.rep = Math.floor(play.clockMs / period);
     const cyc = cycleOf();
     const t = heldAt ?? shapeT(cyc);
     const pi = phaseAt(cyc);
     if (play.cbs.length) {
-      const info = { t: cyc, phase: pi >= 0 ? play.phases[pi].label : "", phaseIndex: pi, rep: play.rep, playing: play.on, ready: !!body.skin };
+      const info = { t: cyc, phase: pi >= 0 ? play.phases[pi].label : "", phaseIndex: pi, rep: play.rep, playing: play.on, ready: !!body.skin, loop: play.loop, done: play.done, speed: play.speed };
       play.cbs.forEach((cb) => { try { cb(info); } catch (e) {} });
     }
     if (ghost) {
-      const gt = heldAt ?? shapeT(period === 4600 ? cyc : (play.clockMs % 4600) / 4600);
+      const gt = heldAt ?? shapeT(period === basePeriod ? cyc : (play.clockMs % basePeriod) / basePeriod);
       pose(lerp3(ghostA, ghostB, gt), fig3.ik ? gt : null, ghost, ghostEnds);
       ghost.mat.uniforms.opacity.value = (ghostOn ? 0.3 : 0) * smooth((k - 450) / 650);
     }
@@ -3312,7 +3478,10 @@ function createViewer3D(container, mode, opts = {}) {
     calibratePlant(body, poseA._keys || [poseA, poseB], reachEnds);
     if (ghost) calibratePlant(ghost, ghostA._keys || [ghostA, ghostB], ghostEnds);
     const err = form && form.error;
-    period = mode === "bad" && err && err.type === "tempo" ? (err.tempo === "slow" ? 8000 : 2300) : 4600;
+    const tp = ex.animation && ex.animation.tempo;
+    tempo = tp && Array.isArray(tp.segs) && tp.segs.length ? tp.segs : TEMPO;
+    basePeriod = (tp && tp.ms) || 4600;
+    period = mode === "bad" && err && err.type === "tempo" ? (err.tempo === "slow" ? basePeriod * 1.75 : basePeriod * 0.5) : basePeriod;
     const handMode = !fig.hand || fig.hand === "grip" ? true : fig.hand === "relaxed" ? "relaxed" : false;
     body.setHands(handMode);
     if (ghost) ghost.setHands(handMode);
@@ -3328,7 +3497,8 @@ function createViewer3D(container, mode, opts = {}) {
     zoomU = 1; pan.set(0, 0, 0); closeUp = null;
     // The rep starts from the top (paused at the end position with reduced motion).
     play.phases = phasesFor();
-    play.rep = 0; play.clockMs = reduce ? END_AT * period : 0;
+    play.rep = 0; play.clockMs = reduce ? endAt() * period : 0;
+    play.done = false; play.stopAt = null; if (play.on && !play.loop) startPlay();
     frameCamera();
     measureRep();
     viewer.analysis = null;
@@ -3356,33 +3526,38 @@ function createViewer3D(container, mode, opts = {}) {
     analysis: null, // after setExercise on a mistake: { label, your, optimal } for the biggest difference
     resetView() { resetCamera(); },
     // ----- Playback -----
-    play() { play.on = true; heldAt = null; },
-    pause() { play.on = false; },
-    togglePlay() { play.on = !play.on; if (play.on) heldAt = null; return play.on; },
+    play() { startPlay(); },
+    pause() { play.on = false; play.stopAt = null; },
+    togglePlay() { if (play.on) viewer.pause(); else startPlay(); return play.on; },
+    // Looping demonstration (default) or one rep at a time (plays to the end of the rep and stops).
+    setLoop(on) { play.loop = !!on; play.stopAt = null; if (play.on && !play.loop) play.stopAt = (Math.floor(play.clockMs / period + 1e-6) + 1) * period; },
+    get loop() { return play.loop; },
     get isPlaying() { return play.on; },
     setSpeed(x) { x = +x; play.speed = isFinite(x) && x > 0 ? Math.min(3, x) : 1; },
     get speed() { return play.speed; },
     // t in [0, 1] over one rep cycle (keeps the rep count).
     // rep (optional): carry a rep count over to this viewer (a replacement viewer keeps counting).
-    seek(t, rep) { heldAt = null; if (isFinite(rep) && rep >= 0) play.rep = Math.floor(rep); seekCycle(t); },
+    seek(t, rep) { heldAt = null; play.done = false; if (isFinite(rep) && rep >= 0) play.rep = Math.floor(rep); seekCycle(t); if (play.on && !play.loop) startPlay(); },
     get time() { return cycleOf(); },
     get rep() { return play.rep; },
     get phases() { return play.phases.map((p) => ({ ...p })); },
     get phaseIndex() { return phaseAt(cycleOf()); },
     // Pause and move one twenty-fourth of the cycle forward (+1) or back (-1).
     step(dir) {
-      play.on = false; heldAt = null;
+      play.on = false; play.stopAt = null; play.done = false; heldAt = null;
       const n = 24, u = cycleOf(), i = Math.round(u * n) + (dir < 0 ? -1 : 1);
       seekCycle((((i % n) + n) % n) / n);
     },
     // The start position (pose a) or the end position (pose b, middle of its hold).
-    jumpTo(where) { play.on = false; heldAt = null; seekCycle(where === "end" ? END_AT : 0); },
-    restart() { heldAt = null; play.rep = 0; play.clockMs = 0; },
+    jumpTo(where) { play.on = false; play.stopAt = null; play.done = false; heldAt = null; seekCycle(where === "end" ? endAt() : 0); },
+    restart() { heldAt = null; play.rep = 0; play.clockMs = 0; play.done = false; if (play.on) startPlay(); },
     // cb({ t, phase, phaseIndex, rep, playing, ready }) every frame; returns an unsubscribe function.
     onFrame(cb) { if (typeof cb !== "function") return () => {}; play.cbs.push(cb); return () => { play.cbs = play.cbs.filter((f) => f !== cb); }; },
     get ready() { return !!body.skin; },
     // ----- Camera -----
     zoomBy(f) { zoomU = clampZoom(zoomU * (+f || 1)); },
+    // Turn the camera around the athlete (radians; buttons and keyboard, like a drag).
+    rotateBy(a) { yaw += +a || 0; },
     getCamera() { return { yaw, pitch, zoom: zoomU, pan: [pan.x, pan.y, pan.z] }; },
     setCamera(c) {
       if (!c) return;
@@ -3471,8 +3646,21 @@ function createViewer3D(container, mode, opts = {}) {
       pose(lerp3(poseA, poseB, 0), fig3.ik ? 0 : null);
       return out;
     },
+    // GPU memory and draw statistics (renderer.info), for performance and leak checks.
+    get stats() {
+      const i = renderer.info;
+      return { geometries: i.memory.geometries, textures: i.memory.textures, programs: (i.programs || []).length, calls: i.render.calls, triangles: i.render.triangles };
+    },
     dispose() {
+      if (disposed) return;
       disposed = true; cancelAnimationFrame(raf); if (ro) ro.disconnect();
+      play.cbs = [];
+      try {
+        clearFeedback(); clearEquipment();
+        KEEP.clear(); disposeTree(scene, false);
+        if (scene.environment) scene.environment.dispose();
+        if (key.shadow && key.shadow.map) key.shadow.map.dispose();
+      } catch (e) {}
       renderer.dispose(); if (renderer.forceContextLoss) renderer.forceContextLoss();
       el.remove(); hud.remove();
     }

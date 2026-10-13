@@ -133,7 +133,7 @@ function renderAnatomy(r, ctx) {
   lazyViewer(ctx, slot, () => {
     viewer = mountStageViewer(ctx, slot, "good", anatEx, st.athlete);
     if (viewer) applyDisplayMode(viewer, st.display);
-    const player = mountPlayer(page.querySelector(".player-host"), [viewer], { playback: false, camera: ["front", "back", "right", "threeQuarter"] });
+    const player = mountPlayer(page.querySelector(".player-host"), [viewer], { playback: false, camera: ["front", "back", "right", "threeQuarter"], keys: page });
     ctx.onCleanup(() => player.destroy());
     if (!viewer) { page.querySelectorAll(".seg-display, .seg-athlete").forEach((n) => n.hidden = true); return; }
     if (typeof viewer.setDisplayMode !== "function") page.querySelector('[data-display="surface"]').hidden = true;
