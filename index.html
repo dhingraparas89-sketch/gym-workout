@@ -4,50 +4,76 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rep Sheet</title>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@400;600;700&family=Big+Shoulders+Display:wght@700;900&family=Barlow:wght@400;500;600&family=Familjen+Grotesk:wght@500;700&family=Manrope:wght@400;500;700&family=IBM+Plex+Mono:wght@500&display=swap">
+<meta name="theme-color" content="#0e0f11">
+<meta name="description" content="Explore human anatomy, discover exercises, and understand how muscles work through interactive 3D visualization.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Inter+Tight:wght@500;600;700&family=JetBrains+Mono:wght@500&display=swap">
 <link rel="stylesheet" href="styles/base.css">
 <link rel="stylesheet" href="styles/themes.css">
+<link rel="stylesheet" href="styles/app.css">
 </head>
-<body data-style="plate">
+<body data-style="lab">
 <!-- APP START -->
-<div class="page">
-  <header class="topbar">
-    <div class="brand">
+<a class="skip" href="#app">Skip to content</a>
+<header class="topbar">
+  <div class="topbar-in">
+    <a class="brand" href="#/" aria-label="Rep Sheet home">
       <span class="brand-mark" aria-hidden="true"></span>
       <span class="brand-name">Rep Sheet</span>
-    </div>
-    <div class="style-wrap">
-      <span class="style-label">Style</span>
-      <div id="style-switch" class="segmented" role="group" aria-label="Visual style"></div>
-    </div>
-  </header>
-
-  <section class="intro">
-    <h1>What to lift today</h1>
-    <p>Pick a weekly plan and follow the day you're on, or browse exercises by muscle group. Tick off each exercise as you finish it.</p>
-  </section>
-
-  <nav class="view-tabs" role="tablist">
-    <button type="button" class="view-tab" role="tab" data-view="plan">Workout plan</button>
-    <button type="button" class="view-tab" role="tab" data-view="muscles">By muscle group</button>
-  </nav>
-
-  <main>
-    <section id="view-plan">
-      <div id="plan-picker" class="plan-picker"></div>
-      <div id="days" class="days"></div>
-    </section>
-
-    <section id="view-muscles" hidden>
-      <div id="muscle-chips" class="chips"></div>
-      <div id="exercise-groups"></div>
-    </section>
-  </main>
-
-  <footer class="foot">Sets × reps are starting points. Pick a weight you can finish every set with one or two reps left in the tank.</footer>
-</div>
+    </a>
+    <nav class="nav" id="main-nav" aria-label="Main">
+      <a href="#/" data-nav="">Home</a>
+      <a href="#/library" data-nav="library">Exercise Library</a>
+      <a href="#/anatomy" data-nav="anatomy">3D Anatomy</a>
+      <a href="#/studio" data-nav="studio">Exercise Studio</a>
+      <a href="#/muscles" data-nav="muscles">Muscle Explorer</a>
+      <a href="#/form" data-nav="form">Form &amp; Technique</a>
+      <a href="#/compare" data-nav="compare">Compare</a>
+      <a href="#/favorites" data-nav="favorites">Favorites</a>
+    </nav>
+    <label class="level-wrap"><span class="level-label">Guide</span>
+      <select id="level-switch" aria-label="Guide level">
+        <option value="beginner">Beginner</option>
+        <option value="standard">Standard</option>
+        <option value="advanced">Advanced anatomy</option>
+      </select>
+    </label>
+    <button type="button" class="menu-btn" aria-label="Menu" aria-expanded="false" aria-controls="main-nav"><span></span><span></span></button>
+  </div>
+</header>
+<main id="app" class="page" tabindex="-1"></main>
+<footer class="foot"><div class="foot-in"><span class="brand-mini"><span class="brand-mark" aria-hidden="true"></span>Rep Sheet</span><span>Instructional guidance only. Muscle percentages are estimated involvement, not measurements. <a href="#/plans">Sample plans</a> · <a href="#/recent">Recently viewed</a></span></div></footer>
 <!-- APP END -->
-<script src="data.js"></script>
-<script src="app.js"></script>
+<script src="data/exercises.js"></script>
+<script src="data/form.js"></script>
+<script src="data/library/upper.js"></script>
+<script src="data/library/pull-core.js"></script>
+<script src="data/library/lower.js"></script>
+<script src="data/library/v3-upper.js"></script>
+<script src="data/library/v3-lower.js"></script>
+<script src="data/library/v3-core-full.js"></script>
+<script src="data/library/v3-fields.js"></script>
+<script src="data/library/v4-motion.js"></script>
+<script src="data/library/meta.js"></script>
+<script src="data/anatomy.js"></script>
+<script src="data/plans.js"></script>
+<script src="assets/thumbs/manifest.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="js/figure.js"></script>
+<script src="js/gym3d.js"></script>
+<script src="js/kits/upper.js"></script>
+<script src="js/kits/pull-core.js"></script>
+<script src="js/kits/lower.js"></script>
+<script src="js/kits/v3-equipment.js"></script>
+<script src="js/figure3d.js"></script>
+<script src="js/bodymap.js"></script>
+<script src="js/ui/store.js"></script>
+<script src="js/ui/core.js"></script>
+<script src="js/ui/player.js"></script>
+<script src="js/ui/feedback.js"></script>
+<script src="js/ui/detail.js"></script>
+<script src="js/ui/muscles.js"></script>
+<script src="js/ui/anatomy.js"></script>
+<script src="js/ui/pages.js"></script>
+<script src="js/app.js"></script>
 </body>
 </html>
