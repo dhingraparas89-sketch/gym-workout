@@ -17,9 +17,11 @@ const VIEW3D = {
   hipHalf: 8.5,
   yaw: 0.62,      // default camera angle around the figure (radians from a pure side view)
   pitch: 0.12,
-  skin: "#53575e",       // charcoal mannequin body (mid charcoal: the forms read under the studio light)
-  active: "#3cc9ad",     // muscle activation on the optimal form (main movers full, helpers softer)
-  activeBad: "#5a9bd0",  // muscle activation on the mistake
+  skin: "#575654",       // dark mannequin grey with a little warmth (round 7: a modest step toward the reference's grey-bronze, both athletes)
+  active: "#3cc9ad",     // muscle activation on the optimal form: main movers (primary)
+  secondary: "#8fc3d6",  // helpers (secondary): a paler, cooler aqua at lower strength, so the two roles read apart
+  activeBad: "#5a9bd0",  // muscle activation on the mistake (main movers)
+  secondaryBad: "#a9b9d4", // helpers on the mistake
   compensate: "#e0913f", // muscles taking over the work in a mistake
   good: "#2be0a8",       // optimal form: teal-green
   bad: "#ff5a3c"         // corrections: red-orange
@@ -178,7 +180,8 @@ function buildSkinData(segs, mesh) {
       const C = Hc.mc, dx = x - C[0], dy = y - C[1], dz = z - C[2], l = Math.hypot(dx, dy, dz) || 1;
       if (l < 18) {
         const nx = dx / l, ny = dy / l, phi = Math.atan2(Math.hypot(dz / l, 0), nx) * 57.2958;
-        const PTS = [[0, 0.5], [40, 0.4], [62, 0.12], [85, -0.2], [112, -0.3], [150, -0.72], [180, -0.86]];
+        // (round 7: the front of the hairline brought down to the top of the forehead; it sat too high)
+        const PTS = [[0, 0.37], [40, 0.29], [62, 0.05], [85, -0.22], [112, -0.3], [150, -0.72], [180, -0.86]];
         let th0 = PTS[PTS.length - 1][1];
         for (let i = 1; i < PTS.length; i++) if (phi <= PTS[i][0]) { const a = PTS[i - 1], b = PTS[i], t = (phi - a[0]) / (b[0] - a[0]); th0 = a[1] + (b[1] - a[1]) * t; break; }
         const sh = ny - th0, hm = skinSmooth(-0.035, 0.035, sh);
@@ -789,7 +792,7 @@ function skinMeshRegions(pos, dom, frames, sex) {
       } else if (isFA) {
         const [yf, af] = limb("forearm" + S, x, y, z, side);
         if (yf < 1.5 && Math.abs(af) > 140) r = "elbow";
-        else if (af > -5 && af < 75 && yf < 19) r = "brachiorad";
+        else if (af > -5 + Math.max(0, yf - 11) * 2.5 && af < 75 - Math.max(0, yf - 11) * 4.5 && yf < 22) r = "brachiorad"; // tapering into its tendon (no ring across the forearm)
         else if (af >= 75 && af < 172) r = "fa-ext";
         else if (af > -5 && af < 75) r = "fa-ext";
         else r = "fa-flex";
@@ -983,13 +986,15 @@ function skinMeshMuscles(pos, nb, W, mesh, segs, sex) {
       q.length = 0; q.push(...new Set(nq));
     }
   }
-  const neckFade = (v) => ss(0.5, 6, dHead[v]) * (1 - ss(0.02, 0.35, headW(v)));
+  const neckFade = (v) => ss(1.5, 9, dHead[v]) * (1 - ss(0.02, 0.3, headW(v))); // (round 7: a longer fade, no ridge where the jaw meets the neck)
   for (let v = 0; v < nv; v++) {
     const R = TAB[lab[v]], d = dist[v], fb = R[4];
     const named = R[0] !== "none" && R[0] !== "head" && R[0] !== "hand" && R[0] !== "foot";
     // Soft valley where two regions meet (none on the hands, feet and head, and fading out up the
     // neck where it turns into the head).
-    fib[v * 4 + 3] = named && TAB[across[v]][2] > 0 ? Math.exp(-((d / 0.9) ** 2)) * neckFade(v) : 0;
+    // Only between two muscles: a muscle meeting bone or tendon (elbow, knee, tibia) gets no valley,
+    // which used to draw a ring round the limb there (the ring bands at the elbows and forearms).
+    fib[v * 4 + 3] = named && R[2] > 0 && TAB[across[v]][2] > 0 ? Math.exp(-((d / 0.9) ** 2)) * neckFade(v) : 0;
     if (!fb) continue;
     const [u, w, tn] = skinFiberChart(fb, cs[v], ct[v]);
     const rise = 1 - (1 - Math.min(1, d / R[3])) ** 2;
@@ -1059,7 +1064,9 @@ function loadBodyMesh(cb) {
       const el = document.createElement("script");
       el.src = BODY_MESH_SRC; el.async = true; el.onload = flush; el.onerror = flush;
       document.head.appendChild(el);
-      setTimeout(() => { if (bodyMeshWait.length) flush(); }, 20000);
+      // Only a safety net: a slow, busy device can take well over 20 s to parse it, and falling
+      // back early would show the procedural body for good.
+      setTimeout(() => { if (bodyMeshWait.length) flush(); }, 120000);
     } catch (e) { setTimeout(flush, 0); }
   }
   bodyMeshWait.push(cb);
@@ -1135,7 +1142,7 @@ function makeBody3D(THREE, mats, athlete) {
     if (!geo.attributes.color) geo.setAttribute("color", new THREE.Float32BufferAttribute(new Float32Array(n * 3).fill(1), 3));
     if (!geo.attributes.fib) geo.setAttribute("fib", new THREE.Float32BufferAttribute(new Float32Array(n * 4), 4));
     if (!geo.attributes.cloth) geo.setAttribute("cloth", new THREE.Float32BufferAttribute(new Float32Array(n), 1));
-    if (!geo.attributes.act) geo.setAttribute("act", new THREE.Float32BufferAttribute(new Float32Array(n), 1));
+    if (!geo.attributes.act) geo.setAttribute("act", new THREE.Float32BufferAttribute(new Float32Array(n * 2), 2)); // (level, role: 1 primary, 0 helper, -1 taking over)
     if (!geo.attributes.jnt) geo.setAttribute("jnt", new THREE.Float32BufferAttribute(new Float32Array(n * 4), 4)); // MOTION correctives: none
     if (!geo.attributes.tens) geo.setAttribute("tens", new THREE.Float32BufferAttribute(new Float32Array(n * 4), 4));
     if (!geo.attributes.aux) { const a = new Float32Array(n * 4); for (let i = 0; i < n; i++) { a[i * 4] = 1; a[i * 4 + 2] = 1; } geo.setAttribute("aux", new THREE.Float32BufferAttribute(a, 4)); } // ao 1, no seam
@@ -1729,7 +1736,9 @@ function makeBody3D(THREE, mats, athlete) {
     // Clumps: each a tapered tube offset around the guide chain, fanning out after the band and
     // gathering again toward the tips; lengths, thickness and twist vary per clump.
     const rnd = (i) => { const x = Math.sin(i * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
-    const clumps = [...Array(NC)].map((_, j) => ({
+    // The first two clumps are the tail's core (on the axis, thick), so the tail reads as one tidy
+    // gathered ponytail with strands on its surface rather than loose separate cords.
+    const clumps = [...Array(NC)].map((_, j) => (j < 2 ? { a: j * Math.PI, r: 0.05, len: j ? 0.8 : 0.93, th: j ? 1.9 : 2.3, tw: 0, shade: 0.85 } : {
       a: (j / NC) * Math.PI * 2 + rnd(j) * 0.5, r: 0.3 + 0.7 * rnd(j + 7), len: 0.75 + 0.25 * rnd(j + 13),
       th: 1.05 + 0.5 * rnd(j + 21), tw: (rnd(j + 31) - 0.5) * 1.2, shade: 0.8 + 0.4 * rnd(j + 41)
     }));
@@ -1878,7 +1887,7 @@ function makeBody3D(THREE, mats, athlete) {
             // Along this clump's own length the chain is sampled at tc (shorter clumps end earlier).
             const f = tc * K, i0 = Math.min(K - 1, Math.floor(f)), fr = f - i0;
             c0.lerpVectors(P[i0], P[i0 + 1], fr).addScaledVector(swing, 0.6 * Math.pow(tc, 1.3));
-            const spread = (0.6 + 1.9 * Math.sin(Math.min(1, tc * 1.4) * Math.PI * 0.7)) * c.r * (1 - 0.45 * tc * tc);
+            const spread = (0.5 + 1.25 * Math.sin(Math.min(1, tc * 1.4) * Math.PI * 0.7)) * c.r * (1 - 0.45 * tc * tc);
             const ang = c.a + c.tw * tc;
             c0.addScaledVector(n, Math.cos(ang) * spread).addScaledVector(B, Math.sin(ang) * spread);
             const rad = c.th * (0.75 + 0.3 * Math.sin(Math.min(1, tc * 2) * Math.PI * 0.5) - 0.85 * Math.pow(tc, 1.6)) + 0.08;
@@ -1994,6 +2003,7 @@ function createViewer3D(container, mode, opts = {}) {
   const fiberUniforms = {
     uTime: { value: 0 }, uEffort: { value: 1 }, uActScale: { value: 0 }, uFiber: { value: 0 }, uMap: { value: 1 }, uClothOn: { value: 1 },
     uActColor: { value: new THREE.Color(mode === "bad" ? VIEW3D.activeBad : VIEW3D.active) },
+    uSecColor: { value: new THREE.Color(mode === "bad" ? VIEW3D.secondaryBad : VIEW3D.secondary) },
     uCompColor: { value: new THREE.Color(VIEW3D.compensate) },
     uRim: { value: 0 }, uRimColor: { value: new THREE.Color(mode === "bad" ? VIEW3D.bad : VIEW3D.good) },
     uScanY: { value: -999 }, uScanColor: { value: new THREE.Color(mode === "bad" ? VIEW3D.bad : VIEW3D.good) },
@@ -2028,15 +2038,15 @@ function createViewer3D(container, mode, opts = {}) {
     mat.onBeforeCompile = (shader) => {
       Object.assign(shader.uniforms, fiberUniforms, motionUniforms);
       shader.vertexShader = shader.vertexShader
-        .replace("#include <common>", "#include <common>\nattribute vec4 fib;\nattribute float act;\nattribute float cloth;\nattribute vec4 aux;\nvarying vec4 vFib;\nvarying float vAct;\nvarying float vWorldY;\nvarying float vCloth;\nvarying vec4 vAux;\nvarying vec3 vObjP;" + MOTION_VERT_DECL)
+        .replace("#include <common>", "#include <common>\nattribute vec4 fib;\nattribute vec2 act;\nattribute float cloth;\nattribute vec4 aux;\nvarying vec4 vFib;\nvarying vec2 vAct;\nvarying float vWorldY;\nvarying float vCloth;\nvarying vec4 vAux;\nvarying vec3 vObjP;" + MOTION_VERT_DECL)
         .replace("#include <skinning_vertex>", "#include <skinning_vertex>\n" + MOTION_VERT)
         .replace("#include <begin_vertex>", "#include <begin_vertex>\nvFib = fib; vAct = act; vCloth = cloth; vAux = aux; vObjP = position;")
         .replace("#include <project_vertex>", "#include <project_vertex>\nvWorldY = (modelMatrix * vec4(transformed, 1.0)).y;");
       shader.fragmentShader = shader.fragmentShader
         .replace("#include <common>", `#include <common>
-          varying vec4 vFib; varying float vAct; varying float vWorldY; varying float vCloth; varying vec4 vAux; varying vec3 vObjP;
+          varying vec4 vFib; varying vec2 vAct; varying float vWorldY; varying float vCloth; varying vec4 vAux; varying vec3 vObjP;
           uniform float uTime, uEffort, uActScale, uRim, uScanY, uFiber, uMap, uClothOn;
-          uniform vec3 uActColor, uCompColor, uRimColor, uScanColor, uHairTie;
+          uniform vec3 uActColor, uSecColor, uCompColor, uRimColor, uScanColor, uHairTie;
           ${SKIN_GLSL}`)
         .replace("#include <normal_fragment_maps>", `#include <normal_fragment_maps>
           // Crisp clothing and hair edges at the mask's 0.5 crossing.
@@ -2060,7 +2070,7 @@ function createViewer3D(container, mode, opts = {}) {
           float hairV = atan(hq.z, hq.y) * 40.0;
           {
             // Skin: a very fine, irregular surface (no pores); fabric: soft folds plus a knit; hair: strands.
-            float skinH = (vn3(vObjP * 0.9) * 0.6 + vn3(vObjP * 2.3) * 0.4) * 0.05 * detail + vn3(vObjP * 7.0) * 0.012 * fine;
+            float skinH = (vn3(vObjP * 0.9) * 0.6 + vn3(vObjP * 2.3) * 0.4) * 0.022 * detail + vn3(vObjP * 7.0) * 0.008 * fine; // (round 7: halved; it read as a pitted surface up close)
             vec3 q = vObjP;
             float fold = sin(q.y * 0.75 + 2.2 * sin(q.x * 0.21 + q.z * 0.17)) * (0.6 + 0.4 * sin(q.x * 0.09 - q.z * 0.13 + q.y * 0.05));
             fold += 0.45 * sin(q.y * 1.5 + q.z * 0.4 + 1.3 * sin(q.x * 0.33));
@@ -2096,7 +2106,7 @@ function createViewer3D(container, mode, opts = {}) {
             // Subtle colour variation: slightly warmer over the trunk's broad areas, cooler at the
             // extremities, a faint large-scale blush; nothing that reads as dirt.
             float tint = vn3(vObjP * 0.07);
-            diffuseColor.rgb *= mix(vec3(1.035, 0.995, 0.975), vec3(0.975, 0.995, 1.03), tint);
+            diffuseColor.rgb *= mix(vec3(1.04, 1.0, 0.965), vec3(0.99, 0.995, 1.01), tint);
             diffuseColor.rgb *= (1.0 + 0.05 * belly) * (1.0 - 0.12 * sep * (1.0 - clothM)) * (0.985 + 0.03 * mottle);
             // Roughness: satin skin (never glossy), varied at two scales so highlights break up
             // naturally; a little smoother over taut bellies, drier in the creases.
@@ -2114,15 +2124,27 @@ function createViewer3D(container, mode, opts = {}) {
             diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.0085, 0.009, 0.011) * (0.85 + 0.3 * strand), hairM);
             roughnessFactor = mix(roughnessFactor, 0.42 + 0.16 * strand, hairM);
             float bare = (1.0 - clothM) * (1.0 - hairM);
-            float a = clamp(abs(vAct) * uEffort * uActScale, 0.0, 1.0) * uMap;
-            vec3 actColor = vAct < 0.0 ? uCompColor : uActColor;
+            // vAct: x = activation level, y = role (1 main mover, 0 helper, -1 taking over in a
+            // mistake). Main movers: the full teal; helpers: a paler, cooler aqua, weaker; the two
+            // blend only across the narrow band where a main mover meets a helper.
+            float a = clamp(abs(vAct.x) * uEffort * uActScale, 0.0, 1.0) * uMap;
+            float prim = smoothstep(0.25, 0.85, vAct.y), comp = 1.0 - smoothstep(-0.75, -0.35, vAct.y);
+            vec3 actColor = mix(mix(uSecColor, uActColor, prim), uCompColor, comp);
+            float roleK = mix(mix(0.6, 1.0, prim), 1.0, comp);
             float inside = belly * (1.0 - 0.6 * sep) * bare;
             if (a > 0.001) {
-              // Activation travels along the fibers toward the attachment as broad, slow swells.
+              // Activation travels along the fibers toward the attachment as broad, slow swells
+              // (main movers only). The colour tints the lit surface, so the muscle's form and its
+              // shading stay readable under it, with a modest glow on top (never a flat sticker).
               float travel = 0.5 + 0.5 * sin(vFib.x * 0.11 - uTime * 2.2);
-              diffuseColor.rgb = mix(diffuseColor.rgb, actColor * 0.32, 0.4 * a * inside);
-              float glow = a * inside * (0.55 + 0.45 * ndv) * (0.8 + 0.2 * travel);
-              totalEmissiveRadiance += actColor * glow * 0.22;
+              diffuseColor.rgb = mix(diffuseColor.rgb, actColor * 0.62, 0.72 * a * inside * roleK);
+              float glow = a * inside * (0.45 + 0.55 * ndv) * (0.85 + 0.15 * travel * prim);
+              totalEmissiveRadiance += actColor * glow * 0.12 * roleK;
+              // Under clothing (glutes under the shorts, chest under the bra) the worked muscle shows
+              // as a quieter tint in the fabric, inside the same borders.
+              float under = a * smoothstep(0.0, 0.55, vFib.z) * clothM * (1.0 - hairM); // (no grooves in the fabric)
+              diffuseColor.rgb = mix(diffuseColor.rgb, actColor * 0.2, 0.6 * under * roleK);
+              totalEmissiveRadiance += actColor * under * 0.035 * roleK;
             }
             // Illustrative fiber-direction overlay: short broken strands along each muscle's fibers.
             // Muscles that are not worked show them only faintly (fiber mode); worked and focused
@@ -2733,7 +2755,7 @@ function createViewer3D(container, mode, opts = {}) {
   }
   function lerp2(a, b, t) {
     const p = lerpPose(a, b, t);
-    ["twist", "roll", "shrug", "wrist", "flat", "sup", "prot", "lift"].forEach((k) => { if (a[k] != null || b[k] != null) p[k] = (a[k] || 0) + ((b[k] || 0) - (a[k] || 0)) * t; });
+    ["twist", "roll", "shrug", "wrist", "flat", "sup", "prot", "lift", "heel", "kneeOutR", "kneeOutL"].forEach((k) => { if (a[k] != null || b[k] != null) p[k] = (a[k] || 0) + ((b[k] || 0) - (a[k] || 0)) * t; });
     // 2D foot targets (see pose): only when both ends give one.
     ["ankR", "ankL", "toeR", "toeL", "pole"].forEach((k) => { if (a[k] && b[k]) p[k] = a[k].map((v, i) => v + (b[k][i] - v) * t); else delete p[k]; });
     if (a.arm2 || b.arm2) {
@@ -2752,7 +2774,7 @@ function createViewer3D(container, mode, opts = {}) {
     Object.keys(ref).forEach((k) => { q[k] = P.reduce((sum, _, i) => sum + w[i] * (J[i][k] == null ? ref[k] : unwrap(J[i][k], ref[k])), 0); });
     const out = fromJoints(q, base);
     const num = (get) => P.reduce((sum, p, i) => sum + w[i] * (get(p) ?? get(P[1]) ?? 0), 0);
-    ["x", "y", "bend", "abd", "gz", "legAbd", "kneeOut", "twist", "roll", "shrug", "wrist", "flat", "sup", "prot", "lift"].forEach((k) => {
+    ["x", "y", "bend", "abd", "gz", "legAbd", "kneeOut", "twist", "roll", "shrug", "wrist", "flat", "sup", "prot", "lift", "heel", "kneeOutR", "kneeOutL"].forEach((k) => {
       if (P.some((p) => p[k] != null)) out[k] = num((p) => p[k]); });
     if (base.arm2) out.arm2 = { ua: num((p) => (p.arm2 || p).ua), fa: num((p) => (p.arm2 || p).fa), abd: num((p) => (p.arm2 || p).abd) };
     // A foot target never dips below the lower of the two keys it travels between (2D y points
@@ -2784,6 +2806,13 @@ function createViewer3D(container, mode, opts = {}) {
     // A planted ankle stays where the start pose put it: the joint-angle blend between keys can
     // otherwise drift a foot that is not the anchor (a rear foot on a bench) mid-rep.
     const A = to3(pl.a2 || ank2(j, s, p)).add(pl.delta);
+    // Round 7 (CORE): p.heel (deg) lifts the heel about the ball of the foot (weight onto the toes,
+    // a squat mistake); only poses that set it change.
+    if (p.heel) {
+      const hr = (p.heel * Math.PI) / 180, f = new THREE.Vector3(Math.cos(pl.yaw), 0, -Math.sin(pl.yaw));
+      A.addScaledVector(f, 19.5 - (19.5 * Math.cos(hr) - 4.6 * Math.sin(hr))).add(new THREE.Vector3(0, 19.5 * Math.sin(hr) + 4.6 * Math.cos(hr) - 4.6, 0));
+      footDir += p.heel;
+    }
     const kneeFK = endOf(th, 42), toA = A.clone().sub(hip3);
     // Soft reach near full extension (see solveArm): the knee never snaps straight-to-bent.
     const rawL = toA.length(), softL = rawL > 83.4 ? 84 - 0.6 * Math.exp(-(rawL - 83.4) / 0.6) : rawL;
@@ -2803,6 +2832,13 @@ function createViewer3D(container, mode, opts = {}) {
     }
     if (w.lengthSq() < 1e-4) w = new THREE.Vector3(1, 0, 0).sub(u.clone().multiplyScalar(u.x));
     w.normalize();
+    // Round 7 (CORE): knees in / out on a planted leg. A tracking knee (set stance) used to ignore
+    // pose kneeOut, so a knees-caving mistake never showed; now the pose's change from the
+    // exercise's own kneeOut turns the knee about the hip-ankle line, plus kneeOutR / kneeOutL for
+    // one leg (a lunge's front knee caving in). Unchanged when a pose sets none of these.
+    const koSide = (side > 0 ? p.kneeOutR : p.kneeOutL) || 0;
+    const koAll = pl.track && p.kneeOut != null ? p.kneeOut - (fig3.kneeOut || 0) : 0;
+    if (koSide || koAll) w.applyAxisAngle(u, (side * (koSide + koAll) * Math.PI) / 180);
     const h = Math.sqrt(Math.max(0, 42 * 42 - (d / 2) * (d / 2)));
     const K = hip3.clone().addScaledVector(u, d / 2).addScaledVector(w, h);
     const rot = (g, from, to) => g.quaternion.premultiply(new THREE.Quaternion().setFromUnitVectors(from.normalize(), to.normalize()));
@@ -2931,6 +2967,11 @@ function createViewer3D(container, mode, opts = {}) {
         if (r2 > 0) drop = Math.max(drop, h.y - A.y - Math.sqrt(r2));
       });
       if (drop > 0) Object.keys(j).forEach((k) => { if (Array.isArray(j[k]) && !/^(ankle|toe)/.test(k)) j[k] = [j[k][0], j[k][1] + drop]; });
+    }
+    // Heels up (p.heel, see plantLeg): the body rises with the ankles.
+    if (cur.plant && p.heel) {
+      const hr = (p.heel * Math.PI) / 180, rise = 19.5 * Math.sin(hr) + 4.6 * Math.cos(hr) - 4.6;
+      Object.keys(j).forEach((k) => { if (Array.isArray(j[k]) && !/^(ankle|toe)/.test(k)) j[k] = [j[k][0], j[k][1] - rise]; });
     }
     const hip = to3(j.hip), shoulderC = to3(j.shoulder), mid = to3(j.spineMid);
     const lowerA = Math.atan2(mid.x - hip.x, mid.y - hip.y) * 180 / Math.PI;
@@ -3397,7 +3438,7 @@ function createViewer3D(container, mode, opts = {}) {
   // take over glow amber. focusId (a picked muscle) shows just that muscle.
   function levelOf(id) {
     const err = form && form.error;
-    let lv = ex.primary.includes(id) ? 1 : ex.secondary.includes(id) ? 0.42 : 0;
+    let lv = ex.primary.includes(id) ? 1 : ex.secondary.includes(id) ? 0.62 : 0;
     if (mode === "bad" && err) {
       lv *= err.type === "activation" ? 0.4 : 0.75;
       if ((err.compensate || []).includes(id)) lv = -0.9;
@@ -3405,16 +3446,22 @@ function createViewer3D(container, mode, opts = {}) {
     if (focusId) return id === focusId ? (lv < 0 ? lv : Math.max(lv, 0.8)) : lv * 0.12;
     return lv;
   }
+  // Role of a muscle in this exercise for the shader: 1 main mover, 0 helper, -1 taking over.
+  function roleCode(id) {
+    const err = form && form.error;
+    if (mode === "bad" && err && (err.compensate || []).includes(id)) return -1;
+    return ex.primary.includes(id) ? 1 : 0;
+  }
   function setActivation() {
     const skin = new THREE.Color(VIEW3D.skin), c = new THREE.Color();
     body.skinList.forEach((m) => {
       const colors = m.geometry.attributes.color, act = m.geometry.attributes.act, w = m.userData.weights, tone = m.userData.tone;
-      const ids = Object.keys(w).map((id) => [w[id], levelOf(id)]).filter(([, lv]) => lv !== 0);
+      const ids = Object.keys(w).map((id) => [w[id], levelOf(id), roleCode(id)]).filter(([, lv]) => lv !== 0);
       c.copy(skin).multiplyScalar(tone);
       for (let i = 0; i < colors.count; i++) {
-        let a = 0;
-        ids.forEach(([wt, lv]) => { const v = wt[i] * lv; if (Math.abs(v) > Math.abs(a)) a = v; });
-        act.setX(i, a);
+        let a = 0, r = 0;
+        ids.forEach(([wt, lv, rc]) => { const v = wt[i] * lv; if (Math.abs(v) > Math.abs(a)) { a = v; r = rc; } });
+        act.setXY(i, a, r);
         colors.setXYZ(i, c.r, c.g, c.b);
       }
       colors.needsUpdate = true; act.needsUpdate = true;
@@ -3902,6 +3949,24 @@ function createViewer3D(container, mode, opts = {}) {
     get muscleIds() { const ids = new Set(); (body.skinList || []).forEach((m) => Object.keys((m.userData && m.userData.weights) || {}).forEach((k) => ids.add(k))); return [...ids]; },
     // Show one muscle on its own (null for all the exercise's muscles).
     focusMuscle(id) { focusId = id || null; if (ex) setActivation(); },
+    // Legend for the muscle highlight, in the colours the shader draws (BODY). Default: one entry per
+    // role this exercise shows, [{ id: "primary"|"secondary"|"compensate", role, label, color, soft,
+    // muscles: [muscle ids], items: [{ id, label, role, color }] }]; legend("muscles") gives the flat
+    // per-muscle list [{ id, label, role, color }]. Roles: primary = main movers (full teal),
+    // secondary = helpers (paler aqua, weaker), compensate = taking over in the mistake example (amber).
+    legend(kind) {
+      if (!ex) return [];
+      const hex = (c) => "#" + new THREE.Color(c).getHexString(), bad = mode === "bad", err = form && form.error;
+      const comp = bad && err ? (err.compensate || []) : [];
+      const name = (id) => (typeof MUSCLES !== "undefined" && MUSCLES[id]) || (typeof MUSCLE_INFO !== "undefined" && MUSCLE_INFO[id] && MUSCLE_INFO[id].name) || id;
+      const groups = [
+        { id: "primary", role: "primary", label: "Primary", color: hex(bad ? VIEW3D.activeBad : VIEW3D.active), soft: false, muscles: ex.primary.filter((m) => !comp.includes(m)) },
+        { id: "secondary", role: "secondary", label: "Secondary", color: hex(bad ? VIEW3D.secondaryBad : VIEW3D.secondary), soft: true, muscles: (ex.secondary || []).filter((m) => !comp.includes(m)) },
+        { id: "compensate", role: "compensate", label: "Taking over in this mistake", color: hex(VIEW3D.compensate), soft: false, muscles: comp }
+      ].filter((g) => g.muscles.length);
+      groups.forEach((g) => { g.items = g.muscles.map((m) => ({ id: m, label: name(m), role: g.role, color: g.color })); });
+      return kind === "muscles" ? groups.flatMap((g) => g.items) : groups;
+    },
     // Fiber detail: show each working muscle's fiber direction clearly (off: only a faint hint).
     setFibers(on) { fibersOn = !!on; },
     // Clothing (BODY): "on" (shorts; sports bra for her) or "off" to inspect the anatomy underneath.
@@ -3946,13 +4011,29 @@ function createViewer3D(container, mode, opts = {}) {
       if (disposed) return;
       disposed = true; cancelAnimationFrame(raf); if (ro) ro.disconnect();
       play.cbs = [];
+      // Shared (cross-viewer) geometries, materials and their textures: three keeps each renderer's
+      // GPU copy in WeakMaps keyed by the shared object, which would keep this disposed renderer,
+      // its canvas and the whole viewer alive. Collect them now, release them after the renderer.
+      const shared = new Set();
+      const addMat = (m) => { if (!m || shared.has(m)) return; shared.add(m); Object.values(m).forEach((t) => { if (t && t.isTexture) shared.add(t); }); };
+      try {
+        Object.values(GYM3D.materials()).forEach(addMat);
+        scene.traverse((o) => {
+          if (o.geometry && GYM3D.isShared(o.geometry)) shared.add(o.geometry);
+          (Array.isArray(o.material) ? o.material : o.material ? [o.material] : []).forEach((m) => { if (GYM3D.isShared(m)) addMat(m); });
+        });
+      } catch (e) {}
       try {
         clearFeedback(); clearEquipment();
         KEEP.clear(); disposeTree(scene, false);
         if (scene.environment) scene.environment.dispose();
         if (key.shadow && key.shadow.map) key.shadow.map.dispose();
       } catch (e) {}
-      renderer.dispose(); if (renderer.forceContextLoss) renderer.forceContextLoss();
+      // Before renderer.dispose(), which forgets the renderer's bookkeeping for them. (A viewer
+      // still open elsewhere re-uploads these on its next frame.)
+      shared.forEach((x) => { try { x.dispatchEvent({ type: "dispose" }); } catch (e) {} });
+      renderer.dispose();
+      if (renderer.forceContextLoss) renderer.forceContextLoss();
       el.remove(); hud.remove();
     }
   };

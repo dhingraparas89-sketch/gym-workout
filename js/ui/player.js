@@ -48,7 +48,7 @@ function playerMarkup(opts) {
   return `${playback}
     <div class="cam" role="group" aria-label="Camera">
       <span class="cam-label">View</span>
-      ${cams.map((c) => `<button type="button" class="cam-btn" data-cam="${c}">${CAMERA_PRESETS[c] || c}</button>`).join("")}
+      ${cams.map((c) => `<button type="button" class="cam-btn" data-cam="${c}" aria-pressed="false" aria-label="${CAMERA_PRESETS[c] || c} view">${CAMERA_PRESETS[c] || c}</button>`).join("")}
       <button type="button" class="cam-btn" data-cam="reset" title="Back to the default view">${ICON.rotate}Reset camera</button>
       <span class="cam-zoom">
         <button type="button" class="cam-btn cam-ico" data-turn="-1" aria-label="Turn the athlete left" title="Turn left">${ICON.turnL}</button>
@@ -141,6 +141,9 @@ function mountPlayer(host, viewers, opts = {}) {
       all((v) => v.setSpeed(x)); setSpeedUI(x);
     }
   };
+  // The named view last chosen is shown as pressed until the camera is turned another way.
+  const markView = (id) => host.querySelectorAll("[data-cam]").forEach((b) => { if (b.dataset.cam !== "reset") b.setAttribute("aria-pressed", String(b.dataset.cam === id)); });
+  if (opts.keys) opts.keys.addEventListener("pointerdown", (e) => { if (e.target.closest && e.target.closest(".fig-slot")) markView(null); });
   host.addEventListener("click", (e) => {
     if (!lead()) return;
     const b = e.target.closest("[data-pb]");
@@ -148,9 +151,9 @@ function mountPlayer(host, viewers, opts = {}) {
     const s = e.target.closest("[data-speed]");
     if (s) { const x = +s.dataset.speed; all((v) => v.setSpeed(x)); setSpeedUI(x); return; }
     const c = e.target.closest("[data-cam]");
-    if (c) { all((v) => v.setView(c.dataset.cam)); return; }
+    if (c) { all((v) => v.setView(c.dataset.cam)); markView(c.dataset.cam); return; }
     const tn = e.target.closest("[data-turn]");
-    if (tn) { all((v) => v.rotateBy && v.rotateBy(+tn.dataset.turn * Math.PI / 8)); return; }
+    if (tn) { all((v) => v.rotateBy && v.rotateBy(+tn.dataset.turn * Math.PI / 8)); markView(null); return; }
     const z = e.target.closest("[data-zoom]");
     if (z) all((v) => v.zoomBy && v.zoomBy(+z.dataset.zoom));
   });

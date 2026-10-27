@@ -620,3 +620,180 @@
     ex.phaseTimeline = tp.segs.map(([end], i) => { const ph = { label: L5[i], t0: s, t1: end }; s = end; return ph; });
   });
 })();
+
+// ---------- Round 7 (LOWER-MOTION): legs, calves, glutes, core and full-body demos ----------
+// Overrides on top of the round-5 data above. Pose angles are side-view bone directions
+// (js/figure.js); toeR / toeL are 2D targets for the tip of the toes on the sole (foot IK), so a
+// foot stays exactly where a key puts it. animation.tempo segments end on key `at` values where the
+// body really stops (bottom of a dip, a landing), so the motion eases into each of those points.
+(() => {
+  const byName = (n) => EXERCISES.find((e) => e.name === n);
+  const L7 = {};
+  // Jump squat: the sole tip (anchor "ball") stays on its spot from the dip through take-off and
+  // landing, so the feet no longer slide; quick dip, fast drive, short flight, soft landing.
+  L7["Jump squat"] = (ex) => {
+    const T = { x: 119.5, y: 193, anchor: "ball" };
+    const f = ex.figure3d;
+    f.a = { ...f.a, ...T };
+    f.b = { ...f.b, ...T, y: 175 };
+    // Smooth path through the keys: with linear keys the arm swing stopped dead at the 0.76 key.
+    f.keysEase = "spline";
+    ex.animation.tempo = { ms: 3000, segs: [[0.08, 0, 0], [0.3, 0, 0.42, "ecc"], [0.46, 0.42, 1], [0.62, 1, 0.42], [0.76, 0.42, 0], [1, 0, 0]] };
+    ex.phaseTimeline = [{ label: "Stand", t0: 0, t1: 0.08 }, { label: "Load", t0: 0.08, t1: 0.3 }, { label: "Jump", t0: 0.3, t1: 0.46 },
+      { label: "Land soft", t0: 0.46, t1: 0.62 }, { label: "Stand up", t0: 0.62, t1: 0.76 }, { label: "Reset", t0: 0.76, t1: 1 }];
+  };
+  // Burpee: the body stops where a real burpee stops (hands down in the squat, the plank after the
+  // hop back, the bottom of the push-up) instead of sweeping through every phase in 1.5 s.
+  L7["Burpee"] = (ex) => {
+    ex.animation.tempo = { ms: 5600, segs: [[0.06, 0, 0], [0.2, 0, 0.3], [0.3, 0.3, 0.62, "con"], [0.44, 0.62, 1, "ecc"], [0.48, 1, 1],
+      [0.6, 1, 0.62, "con"], [0.7, 0.62, 0.3, "con"], [0.86, 0.3, 0], [1, 0, 0]] };
+    ex.phaseTimeline = [{ label: "Stand", t0: 0, t1: 0.06 }, { label: "Squat, hands down", t0: 0.06, t1: 0.2 }, { label: "Hop back to plank", t0: 0.2, t1: 0.3 },
+      { label: "Chest down", t0: 0.3, t1: 0.48 }, { label: "Press up", t0: 0.48, t1: 0.6 }, { label: "Hop feet in", t0: 0.6, t1: 0.7 },
+      { label: "Stand", t0: 0.7, t1: 0.86 }, { label: "Reset", t0: 0.86, t1: 1 }];
+  };
+  // Mountain climber: a running scissor. One knee drives in while the other leg goes back, the
+  // feet pass each other just off the floor, and each foot eases to a stop at both ends of its
+  // stroke (no 8 cm one-frame reversal, no pause with a knee held in).
+  L7["Mountain climber"] = (ex) => {
+    const MC = { anchor: "hand", x: 130, y: 187, foot: 165, shin: 74, thigh: 74, torso: 74, neck: 78, ua: 180, fa: 180, t2: 254, s2: 254, f2: 165 };
+    const BACK = [-2.4, 187.1], IN = [64, 182];
+    Object.assign(ex.figure3d, {
+      keysEase: "spline",
+      a: { ...MC, thigh: -45, shin: 95, foot: 150, toeR: IN, toeL: BACK },
+      keys: [{ at: 0.5, thigh: 20, shin: 85, foot: 158, t2: 200, s2: 265, f2: 158, toeR: [27, 176], toeL: [27, 176] }],
+      b: { ...MC, t2: 135, s2: 275, f2: 150, toeR: BACK, toeL: IN }
+    });
+    // Mistake: hips piked above the shoulders the whole time (feet a little closer so they reach).
+    const PB = [8, 187.1];
+    ex.bad3d = { a: { torso: 98, neck: 102, toeL: PB }, keys: [{ torso: 98, neck: 102 }], b: { torso: 98, neck: 102, toeR: PB } };
+    ex.animation.tempo = { ms: 1600, segs: [[0.5, 0, 1], [1, 1, 0]] };
+    ex.phaseTimeline = [{ label: "Right knee in", t0: 0, t1: 0.08 }, { label: "Switch", t0: 0.08, t1: 0.42 }, { label: "Left knee in", t0: 0.42, t1: 0.58 },
+      { label: "Switch", t0: 0.58, t1: 0.92 }, { label: "Right knee in", t0: 0.92, t1: 1 }];
+  };
+  // Box jump: dip, jump, land soft on the box, stand tall, then STEP down (one foot, then the
+  // other) to the start spot, as the cues say; it used to jump backwards off the box. The hips
+  // follow an explicit path (anchor "hip") and both feet are placed by toe targets, so the feet
+  // never slide and clear the box edge.
+  L7["Box jump"] = (ex) => {
+    const H = (at, x, y, o) => ({ at, anchor: "hip", x, y, ...o });
+    const F0 = [138, 193], BX = [183.5, 143];
+    const k = [
+      H(0.12, 101.1, 129.2, { foot: 90, shin: 28, thigh: -62, torso: 46, neck: 36, ua: 215, fa: 210, t2: 118, s2: 208, f2: 90, toeR: F0, toeL: F0 }),
+      H(0.24, 124, 96, { foot: 130, shin: 6, thigh: -12, torso: 16, neck: 12, ua: 40, fa: 30, t2: 168, s2: 186, f2: 130, toeR: F0, toeL: F0 }),
+      H(0.31, 129, 76, { foot: 120, shin: 50, thigh: -65, torso: 22, neck: 14, ua: 60, fa: 40, t2: 115, s2: 230, f2: 120, toeR: [148.3, 136.6], toeL: [148.3, 136.6] }),
+      H(0.37, 140, 74, { foot: 100, shin: 20, thigh: -78, torso: 30, neck: 20, ua: 85, fa: 65, t2: 102, s2: 200, f2: 100, toeR: [184.7, 132.5], toeL: [184.7, 132.5] }),
+      H(0.45, 145.5, 90.2, { foot: 90, shin: 32, thigh: -76, torso: 40, neck: 26, ua: 110, fa: 90, t2: 104, s2: 212, f2: 90, toeR: BX, toeL: BX }),
+      H(0.55, 164, 52, { foot: 90, shin: 0, thigh: 0, torso: 2, neck: 0, ua: 180, fa: 180, t2: 180, s2: 180, f2: 90, toeR: BX, toeL: BX }),
+      H(0.66, 141, 97, { foot: 90, shin: 46, thigh: -80, torso: 42, neck: 30, ua: 160, fa: 150, t2: 170, s2: 196, f2: 118, toeR: BX, toeL: F0 }),
+      H(0.75, 124, 103, { foot: 90, shin: 40, thigh: -60, torso: 22, neck: 14, ua: 175, fa: 170, t2: 180, s2: 182, f2: 90, toeR: BX, toeL: F0 }),
+      H(0.83, 121, 102, { foot: 95, shin: 60, thigh: -80, torso: 12, neck: 8, ua: 178, fa: 175, t2: 180, s2: 182, f2: 90, toeR: [160, 134], toeL: F0 }),
+      H(0.91, 119.5, 102, { foot: 110, shin: 20, thigh: -30, torso: 6, neck: 4, ua: 180, fa: 178, t2: 180, s2: 181, f2: 90, toeR: [143, 146], toeL: F0 })
+    ];
+    const A = { anchor: "hip", x: 118.5, y: 102, foot: 90, shin: 0, thigh: 0, torso: 0, neck: 0, ua: 180, fa: 180, t2: 180, s2: 180, f2: 90, toeR: F0, toeL: F0 };
+    // kneeFK: the knees bend the way the pose bends them, so the mistake's knees-in shows.
+    Object.assign(ex.figure3d, { keysEase: "spline", kneeFK: true, box: { at: 0.55 }, a: { ...A }, keys: k, b: { ...A } });
+    ex.bad3d = { keys: [{}, {}, {}, {}, { kneeOut: -16 }, { kneeOut: -6 }] };
+    ex.animation.tempo = { ms: 5600, segs: [[0.06, 0, 0], [0.18, 0, 0.12, "ecc"], [0.36, 0.12, 0.45], [0.43, 0.45, 0.55, "con"], [0.48, 0.55, 0.55],
+      [0.6, 0.55, 0.66, "ecc"], [0.68, 0.66, 0.75], [0.82, 0.75, 1], [1, 1, 1]] };
+    ex.phaseTimeline = [{ label: "Stand", t0: 0, t1: 0.06 }, { label: "Load", t0: 0.06, t1: 0.18 }, { label: "Jump and land", t0: 0.18, t1: 0.36 },
+      { label: "Stand tall on the box", t0: 0.36, t1: 0.48 }, { label: "Step down", t0: 0.48, t1: 0.82 }, { label: "Reset", t0: 0.82, t1: 1 }];
+  };
+  // Kettlebell swing: a real hike (the bell goes back between the thighs, behind the knees), the
+  // hips snap to standing while the bell is still at thigh height, then the bell floats to chest
+  // height on straight arms; quick drive, short float, the bell falls back into the hinge.
+  L7["Kettlebell swing"] = (ex) => {
+    const f = ex.figure3d;
+    // Knees track over the feet (they caved in to touch each other) and the stance is a little
+    // wider than the hips, so the hiked bell passes between the legs.
+    f.a = { ...f.a, ua: 222, fa: 222, kneeOut: 18 };
+    f.legAbd = 20;
+    f.keysEase = "spline";
+    f.keys = [{ at: 0.45, shin: 0, thigh: 0, torso: -1, neck: 0, ua: 150, fa: 150 }];
+    ex.bad3d = { ...(ex.bad3d || {}), keys: [{ shin: 26, thigh: -48, torso: 22, neck: 18, ua: 140, fa: 140 }] };
+    // Mistake: squatting the bell and lifting it with the arms (front delts) instead of the hip snap.
+    ex.bad = { ...ex.bad, cue: "Squatting the swing: the knees bend deep, the hips stay low and the arms lift the bell, so the quads and shoulders work instead of a hip snap." };
+    const F = typeof FORM !== "undefined" && FORM[ex.name];
+    if (F && F.error) Object.assign(F.error, {
+      detail: "Your knees bend deep and the hips sink, then the arms raise the bell; the glutes and hamstrings never snap the hips and the shoulders and lower back take the load.",
+      fix: "Push the hips back with only soft knees, let the bell go between the thighs, then snap the hips forward and let the bell float on loose, straight arms." });
+    ex.animation.tempo = { ms: 1800, segs: [[0.4, 0, 1, "con"], [0.46, 1, 1], [1, 1, 0]] };
+    ex.phaseTimeline = [{ label: "Hike", t0: 0, t1: 0.06 }, { label: "Hip snap", t0: 0.06, t1: 0.4 }, { label: "Float", t0: 0.4, t1: 0.46 },
+      { label: "Drop and hinge", t0: 0.46, t1: 1 }];
+  };
+  // Rising onto the toes: pivot about the tip of the toes on the sole (anchor "ball"), not the
+  // "toe" point 14 cm along the foot, which slid the soles 4-7 cm as the ankle pointed.
+  const onBall = (x, y) => (ex) => { const f = ex.figure3d; f.a = { ...f.a, anchor: "ball", x, y }; f.b = { ...f.b, anchor: "ball", x, y }; };
+  // Standing calf raise mistake: the classic bounce. Soft knees and half reps: the heels never
+  // sink into the stretch and never reach full height (played at double speed: tempo error).
+  L7["Standing calf raise"] = (ex) => {
+    ex.bad = { ...ex.bad, highlight: ["foot", "knee"],
+      cue: "Short, bouncing reps on soft knees: the heels never sink below the step or rise to full height, so the calves work through a fraction of their range." };
+    ex.bad3d = { a: { foot: 121, shin: 12, thigh: -4, torso: 4 }, b: { foot: 134, shin: 9, thigh: -2, torso: 3 } };
+    const F = typeof FORM !== "undefined" && FORM[ex.name];
+    if (F && F.error) Object.assign(F.error, { title: "Bouncing half reps",
+      detail: "Your heels never drop below the step or rise all the way, and the knees bend to bounce the weight; the Achilles tendon's stretch reflex does the work, not the calves.",
+      fix: "Keep the knees still, lower the heels into a full stretch and pause, then rise as high as you can and pause again." });
+  };
+  // Farmer's carry: the scene has no travelling root, so the walk is shown as marching in place.
+  // Each foot lifts and sets down on its own spot (toe targets), the hips stay level and the
+  // dumbbells still; before, the planted foot slid about 17 cm per step.
+  L7["Farmer's carry"] = (ex) => {
+    const F0 = [119.5, 193], UP = [127, 183];
+    const S = { anchor: "hip", x: 100, y: 102, foot: 90, shin: 0, thigh: 0, torso: 0, neck: 0, ua: 180, fa: 180, t2: 180, s2: 180, f2: 90, toeR: F0, toeL: F0 };
+    Object.assign(ex.figure3d, { keysEase: "spline", a: { ...S },
+      keys: [{ at: 0.25, y: 101.4, thigh: -22, shin: 8, foot: 100, toeR: UP }, { at: 0.5 }, { at: 0.75, y: 101.4, t2: 158, s2: 188, f2: 100, toeL: UP }],
+      b: { ...S } });
+    ex.animation.tempo = { ms: 2400, segs: [[0.25, 0, 0.25], [0.5, 0.25, 0.5], [0.75, 0.5, 0.75], [1, 0.75, 1]] };
+    ex.phaseTimeline = [{ label: "Right step", t0: 0, t1: 0.5 }, { label: "Left step", t0: 0.5, t1: 1 }];
+    ex.demoNote = "Walking is shown as marching in place (the scene has no forward travel); posture, grip and hip level match a real carry.";
+  };
+  // Hanging leg raise mistake: kipping. The whole body swings back like a pendulum, then the legs
+  // are flung forward with the trunk leaning back and still only reach half height.
+  L7["Hanging leg raise"] = (ex) => {
+    ex.bad3d = { a: { shin: 12, thigh: 12, torso: 12, neck: 12, ua: 12, fa: 12, bend: -5 },
+      b: { thigh: -52, shin: -30, torso: -14, neck: -10, ua: -10, fa: -10, bend: 2 } };
+    // Good rep: nearly straight legs rise above hip height while the pelvis curls up (it stopped
+    // with the thighs level and the knees bent ~70 degrees, which is a knee raise).
+    ex.figure3d.a = { ...ex.figure.a };
+    ex.figure3d.b = { ...ex.figure.b, shin: -84, thigh: -98, torso: -12, bend: 6, neck: -4, foot: 30 };
+    ex.bad = { ...ex.bad, cue: "Kipping: the body swings back and the legs are flung up on the rebound, only to half height, so momentum and the hip flexors do the lifting instead of the abs." };
+    const F = typeof FORM !== "undefined" && FORM[ex.name];
+    if (F && F.error) Object.assign(F.error, { title: "Swinging (kipping) the legs up",
+      detail: "Your body swings back and the legs are thrown up on the rebound, reaching only half height; momentum and the hip flexors lift them while the abs barely work and the lower back gets yanked.",
+      fix: "Start from a still hang with the shoulders engaged, then raise the legs slowly and curl the pelvis up; if you start to swing, pause until it stops." });
+  };
+  // Cable crunch: the tower was close enough that the curled head and neck passed into its
+  // uprights; the lifter now kneels a little further back from it.
+  L7["Cable crunch"] = (ex) => { ex.figure3d.tower = { ...ex.figure3d.tower, dx: 92 }; };
+  // Bird dog: both arms used to reach forward (the default flat-hand IK drove both hands from the
+  // reaching arm's angles), leaving the trunk on the knees alone. Now only the left hand is
+  // IK-pinned to its start spot on the mat; the right arm reaches on its own angles.
+  L7["Bird dog"] = (ex) => { ex.figure3d.ik = { fixed: true, only: "L", grip: 21, pole: [-0.5, -1, 0.7] }; };
+  // Dead bug: opposite arm and leg. The right arm reaches overhead while the LEFT leg extends;
+  // the left arm and right knee stay up (before, the right arm and right leg moved and the left
+  // arm copied the right one, so both arms went overhead).
+  L7["Dead bug"] = (ex) => {
+    const f = ex.figure3d, A = ex.figure.a, B = ex.figure.b;
+    f.a = { ...A, arm2: { ua: 0, fa: 0 } };
+    f.b = { ...A, ua: B.ua, fa: B.fa, t2: 80, s2: 80, f2: 40, arm2: { ua: 0, fa: 0 } };
+    ex.bad3d = { b: { bend: -10, torso: -84 } };
+  };
+  L7["Sissy squat"] = onBall(114.5, 194.6);
+  L7["Single-leg calf raise"] = onBall(118, 193);
+  Object.keys(L7).forEach((n) => { const ex = byName(n); if (ex) { ex.animation = ex.animation || {}; L7[n](ex); } });
+  // Demonstration status after the round-7 re-check (contact audit + right/three-quarter contact
+  // sheets of both athletes). null = ready (no known defect); otherwise the note names what is left.
+  const DEMO7 = {
+    "Mountain climber": null, "Leg press": null, "Leg press calf raise": null, "Cable crunch": null, "Bird dog": null,
+    "Box jump": ["beta", "The arm swing at take-off is very quick and the hands turn about 27 degrees as the arms swing up."],
+    "Jump squat": ["beta", "The feet draw about 6 cm closer together (side to side) at the bottom of the squat, and the arm swing is very quick."],
+    "Burpee": ["beta", "The hands shift about 5 cm on the floor between the squat and the plank."],
+    "Kettlebell swing": ["beta", "The bell overlaps the inner thigh by about 4 cm as it passes between the legs in the hike."],
+    "Sissy squat": ["beta", "The supporting hand is turned about 35 degrees across the upright."]
+  };
+  Object.keys(DEMO7).forEach((n) => {
+    const ex = byName(n); if (!ex) return;
+    const d = DEMO7[n];
+    if (d) { ex.demo = d[0]; ex.demoNote = d[1]; } else { ex.demo = "ready"; delete ex.demoNote; }
+  });
+})();

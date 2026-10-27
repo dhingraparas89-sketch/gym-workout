@@ -47,8 +47,31 @@ const ICON = {
   loop: svgIcon("M17 4l3 3-3 3M20 7H8a4 4 0 0 0-4 4v1M7 20l-3-3 3-3M4 17h12a4 4 0 0 0 4-4v-1"),
   turnL: svgIcon("M9 7H5V3M5.6 7A8 8 0 1 1 4 12"),
   turnR: svgIcon("M15 7h4V3M18.4 7A8 8 0 1 0 20 12"),
-  cube: svgIcon("M12 3l8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12L4 7.5")
+  cube: svgIcon("M12 3l8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12v9M12 12L4 7.5"),
+  shield: svgIcon("M12 3l7 3v5.5c0 4.3-2.9 7.9-7 9.5-4.1-1.6-7-5.2-7-9.5V6z")
 };
+
+// Per-exercise safety notes and why/fix text for each common mistake (data/library/v7-guidance.js).
+// Mistakes match by wording: exact first, else the guidance entry sharing the most words.
+function guidanceOf(ex) {
+  const G = typeof V7_GUIDANCE !== "undefined" ? V7_GUIDANCE : {};
+  return G[ex.id] || G[ex.slug] || null;
+}
+function mistakeGuides(ex) {
+  const g = guidanceOf(ex), list = (g && g.m) || [];
+  const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9° ]+/g, " ").replace(/\s+/g, " ").trim();
+  const words = (s) => new Set(norm(s).split(" ").filter((w) => w.length > 3));
+  return (ex.mistakes || []).map((m) => {
+    const title = String(m).replace(/\.\s*$/, "");
+    let hit = list.find((x) => norm(x[0]) === norm(m));
+    if (!hit && list.length) {
+      const w = words(m);
+      let best = 0;
+      list.forEach((x) => { const o = [...words(x[0])].filter((t) => w.has(t)).length / Math.max(1, Math.min(w.size, words(x[0]).size)); if (o > best) { best = o; hit = o >= 0.6 ? x : hit; } });
+    }
+    return { title, why: hit ? hit[1] : "", fix: hit ? hit[2] : "" };
+  });
+}
 const ERROR_TYPES = { posture: "Posture", alignment: "Joint alignment", range: "Range of motion", tempo: "Tempo", activation: "Muscle engagement" };
 
 // ---------- Catalog ----------

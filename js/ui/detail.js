@@ -62,9 +62,50 @@ function mountStageViewer(ctx, slot, mode, ex, athlete) {
   const load = mk("v3-loading", `<span class="spin" aria-hidden="true"></span><span>Loading 3D model…</span>`);
   load.setAttribute("role", "status");
   slot.appendChild(load);
-  const off = v.onFrame((f) => { if (f.ready) { load.classList.add("is-done"); setTimeout(() => load.remove(), 400); off(); fitStage(slot, v); } });
-  ctx.onCleanup(off);
+  // Slow devices: say it is still loading; if the model never arrives, say so and offer a retry.
+  let slowT = setTimeout(() => { const s = load.querySelector("span:last-child"); if (s) s.textContent = "Still loading the 3D model… this can take a while on slower devices."; }, 15000);
+  let failT = setTimeout(() => stageError(ctx, slot, "The 3D model did not finish loading."), 60000);
+  const off = v.onFrame((f) => { if (f.ready) { clearTimeout(slowT); clearTimeout(failT); load.classList.add("is-done"); setTimeout(() => load.remove(), 400); off(); fitStage(slot, v); } });
+  // The graphics context can be lost (GPU reset, too many 3D views in other tabs).
+  const canvas = slot.querySelector("canvas");
+  const lost = (e) => { if (canvas && canvas.isConnected) { e.preventDefault(); stageError(ctx, slot, "The 3D view stopped because the graphics context was lost."); } };
+  if (canvas) canvas.addEventListener("webglcontextlost", lost);
+  ctx.onCleanup(() => { off(); clearTimeout(slowT); clearTimeout(failT); if (canvas) canvas.removeEventListener("webglcontextlost", lost); });
   return v;
+}
+
+// An error over the 3D stage with a retry (re-renders the page, which builds a fresh viewer).
+function stageError(ctx, slot, msg) {
+  if (!slot.isConnected || slot.querySelector(".v3-error")) return;
+  slot.querySelectorAll(".v3-loading").forEach((n) => n.remove());
+  const n = mk("v3-unavailable v3-error", `${ICON.warn}<b>3D demonstration unavailable</b><p>${esc(msg)} The instructions, cues and muscles on this page still apply.</p><button type="button" class="btn btn-ghost btn-sm">${ICON.restart}Try again</button>`);
+  n.setAttribute("role", "alert");
+  n.querySelector("button").addEventListener("click", () => ctx.rerender());
+  slot.appendChild(n);
+}
+
+// Legend for the muscle highlighting on the 3D model. Colors come from the viewer's palette (VIEW3D):
+// primary movers in the full activation color, secondary movers in the softer mix the shader
+// draws (about 42%), and in the mistake example the muscles that take over in amber. A viewer that
+// offers legend() ([{ label, color, muscles?, soft? }]) is used instead.
+function stageLegend(ex, v, mode, f, focus) {
+  const P = typeof VIEW3D !== "undefined" ? VIEW3D : {};
+  const base = P.skin || "#53575e", act = (mode === "bad" ? P.activeBad : P.active) || "#3cc9ad";
+  let items = null;
+  if (v && typeof v.legend === "function") {
+    try { const L = v.legend(); if (Array.isArray(L) && L.length) items = L.map((x) => ({ label: x.label || x.name || "", color: x.color || act, soft: !!x.soft, names: (x.muscles || []).map((m) => muscleName(m)) })); } catch (e) { items = null; }
+  }
+  if (!items) {
+    const names = (ids) => (ids || []).map((m) => muscleName(m));
+    items = [{ label: "Primary", color: act, names: names(ex.primary) }];
+    if ((ex.secondary || []).length) items.push({ label: "Secondary", color: `color-mix(in srgb, ${act} 42%, ${base})`, names: names(ex.secondary) });
+    const comp = mode === "bad" && f && f.error && f.error.compensate;
+    if (comp && comp.length) items.push({ label: "Taking over in this mistake", color: P.compensate || "#e0913f", names: names(comp) });
+  }
+  const sw = (c, soft) => `<i class="lg-sw${soft ? " is-soft" : ""}" style="background:${esc(c)}"></i>`;
+  return items.map((i) => `<span class="lg-item">${sw(i.color, i.soft)}<b>${esc(i.label)}</b>${i.names.length ? `<span>${esc(i.names.join(", "))}</span>` : ""}</span>`).join("")
+    + (focus ? `<span class="lg-focus">Showing ${esc(muscleName(focus))} only</span>` : "")
+    + `<span class="lg-note">Estimated involvement, not measured</span>`;
 }
 
 // On a phone, a wide scene (a bench, a rower) in a tall stage leaves empty space above and below
@@ -97,6 +138,8 @@ function renderDetail(ex, ctx) {
   const alts = alternativesOf(ex);
   const stab = stabilizersOf(ex);
   const secondary = namesOf(ex, "secondary");
+  const guide = guidanceOf(ex), mistakes = mistakeGuides(ex);
+  const equipTips = (typeof V7_EQUIP_TIPS !== "undefined" && V7_EQUIP_TIPS[ex.equip]) || [];
   wrap.innerHTML = `
     <nav class="crumbs" aria-label="Breadcrumb"><a href="#/library">${ICON.back}Exercise Library</a>${cat ? `<span>/</span><a href="#/library?cat=${cat}">${esc(LIB_CAT_NAME[cat])}</a>` : ""}<span>/</span><span class="crumb-here">Exercise Studio</span></nav>
     <div class="dx">
@@ -120,6 +163,7 @@ function renderDetail(ex, ctx) {
         <figure class="stage">
           <div class="fig-slot"></div>
         </figure>
+        <div class="stage-legend" role="group" aria-label="Muscle highlight legend"></div>
         <div class="stage-caption" aria-live="polite"></div>
         <div class="player-host"></div>
       </section>
@@ -151,9 +195,19 @@ function renderDetail(ex, ctx) {
           <p class="card-hint">Select a muscle to isolate it on the model. Percentages are estimates for comparison, not measurements.</p>
         </section>
 
+        ${(ex.cues || []).length ? `<section class="panel"><header class="panel-head"><h2>${ICON.check}Key cues</h2></header><ul class="cue-checks">${ex.cues.map((c) => `<li>${ICON.check}<span>${esc(c)}</span></li>`).join("")}</ul></section>` : ""}
+        ${mistakes.length ? `<section class="panel mistakes-panel"><header class="panel-head"><h2>${ICON.warn}Common mistakes</h2></header>
+          <ol class="mk-list">${mistakes.map((m) => `<li class="mk"><p class="mk-title">${esc(m.title)}</p>${m.why ? `<p class="mk-why"><b>Why it matters</b>${esc(m.why)}</p>` : ""}${m.fix ? `<p class="mk-fix"><b>${ICON.check}How to fix it</b>${esc(m.fix)}</p>` : ""}</li>`).join("")}</ol></section>` : ""}
+
         <div class="two-col">
-          ${(ex.cues || []).length ? `<section class="panel"><header class="panel-head"><h2>${ICON.check}Corrective cues</h2></header><ul class="cues-list">${ex.cues.map((c) => `<li>${esc(c)}</li>`).join("")}</ul></section>` : ""}
-          ${(ex.mistakes || []).length ? `<section class="panel"><header class="panel-head"><h2>${ICON.warn}Common mistakes</h2></header><ul class="mistakes-list">${ex.mistakes.map((c) => `<li>${esc(c)}</li>`).join("")}</ul></section>` : ""}
+          <section class="panel safety-panel"><header class="panel-head"><h2>${ICON.shield}Safety</h2></header>
+            ${guide && guide.s && guide.s.length ? `<ul class="safe-list">${guide.s.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>` : ""}
+            <p class="safe-general">${esc(typeof V7_SAFETY_GENERAL !== "undefined" ? V7_SAFETY_GENERAL : "General guidance, not medical advice. Stop if you feel sharp or sudden pain.")}</p>
+          </section>
+          <section class="panel equip-panel"><header class="panel-head"><h2>${ICON.dumbbell}Equipment</h2></header>
+            <p class="equip-name">${esc(ex.setup || ex.equipment || "—")}</p>
+            ${equipTips.length ? `<ul class="safe-list">${equipTips.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>` : ""}
+          </section>
         </div>
 
         ${alts.length ? `<section class="panel"><header class="panel-head"><h2>${ICON.compare}Alternatives</h2><span class="panel-sub">${ex.alternatives && ex.alternatives.length ? "" : "Same main muscles"}</span></header><div class="alt-list"></div></section>` : ""}
@@ -165,22 +219,37 @@ function renderDetail(ex, ctx) {
       </section>
     </div>
     <section class="block dx-form">
-      <header class="block-head"><h2>Form feedback</h2><a class="more" href="#/form/${ex.slug}">Correct and mistake side by side ${ICON.arrow}</a></header>
+      <header class="block-head"><h2>Correct vs common mistake</h2><a class="more" href="#/form/${ex.slug}">Both played side by side ${ICON.arrow}</a></header>
+      ${f ? `<div class="cmp-tiles" role="group" aria-label="Show on the 3D model">
+        <button type="button" class="cmp-tile is-good" data-show="good" aria-pressed="true"><span class="cmp-fig"></span><span class="cmp-lab">${ICON.check}Correct technique</span></button>
+        <button type="button" class="cmp-tile is-bad" data-show="bad" aria-pressed="false"><span class="cmp-fig"></span><span class="cmp-lab">${ICON.cross}Common mistake<small>Instructional example of a common mistake: ${esc(f.error.title.toLowerCase())}</small></span></button>
+      </div>` : ""}
       ${formFeedback(ex, { compact: false, paths: false, demo: "Show this mistake on the model" })}
     </section>`;
 
   const altBox = wrap.querySelector(".alt-list");
   if (altBox) alts.forEach((a) => altBox.appendChild(exRow(a, `<span class="ex-mini-tag">${esc(EQUIP_NAME[a.equip] || a.equipment || "")}</span>`)));
 
-  const slot = wrap.querySelector(".fig-slot"), caption = wrap.querySelector(".stage-caption");
+  wrap.querySelectorAll(".cmp-tile").forEach((b) => { const n = b.querySelector(".cmp-fig"); if (n) n.appendChild(figureNode(ex, b.dataset.show)); });
+
+  const slot = wrap.querySelector(".fig-slot"), caption = wrap.querySelector(".stage-caption"), legendEl = wrap.querySelector(".stage-legend");
+  // Muscle highlight legend for this exercise, in the colors the 3D model uses for the current
+  // demonstration (viewer.legend() when the viewer provides one).
+  const setLegend = () => {
+    if (!legendEl) return;
+    legendEl.hidden = !viewer || st.display === "surface";
+    if (legendEl.hidden) return;
+    legendEl.innerHTML = stageLegend(ex, viewer, st.mode, f, st.focus);
+  };
   const setCaption = () => {
     const beta = ex.demo === "beta" ? `<span class="beta-note">${ICON.info}Preview animation: the demonstration is still approximate.${ex.demoNote ? " " + esc(ex.demoNote) : ""}</span>` : "";
     if (st.mode === "bad" && f) {
-      caption.innerHTML = `<span class="cap-kind is-bad">${ICON.warn}Common mistake</span><span>${esc(f.error.title)}. Instructional example, with the recommended form as a faint outline.</span>
+      caption.innerHTML = `<span class="cap-kind is-bad">${ICON.warn}Common mistake</span><span>${esc(f.error.title)}. Instructional example of a common mistake, with the recommended form as a faint outline.</span>
         <span class="cap-legend"><span><i class="ln ln-bad"></i>Common mistake path</span><span><i class="ln ln-good"></i>Recommended path</span></span>${beta}`;
     } else {
       caption.innerHTML = `<span class="cap-kind is-good">${ICON.check}Correct technique</span><span>Reference movement.${st.display === "fiber" ? " Illustrative fiber-direction overlay." : ""}</span>${beta}`;
     }
+    setLegend();
   };
 
   let viewer = mountStageViewer(ctx, slot, "good", ex, st.athlete);
@@ -208,6 +277,7 @@ function renderDetail(ex, ctx) {
     const keep = player.state();
     st.mode = mode;
     wrap.querySelectorAll("[data-tab]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === mode)));
+    wrap.querySelectorAll("[data-show]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.show === mode)));
     if (viewer) ctx.dropViewer(viewer);
     viewer = mountStageViewer(ctx, slot, mode, ex, st.athlete);
     prepare(viewer);
@@ -219,6 +289,7 @@ function renderDetail(ex, ctx) {
 
   const focus = (id) => {
     st.focus = id;
+    setLegend();
     if (viewer) viewer.focusMuscle(id);
     wrap.querySelectorAll("[data-focus]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.focus === id)));
   };
@@ -226,6 +297,12 @@ function renderDetail(ex, ctx) {
   wrap.addEventListener("click", (e) => {
     const tb = e.target.closest("button[data-tab]");
     if (tb) { setTab(tb.dataset.tab); return; }
+    const sh = e.target.closest("[data-show]");
+    if (sh) {
+      setTab(sh.dataset.show);
+      wrap.querySelector(".dx-stage").scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
     if (e.target.closest("[data-demo]")) {
       setTab("bad");
       wrap.querySelector(".dx-stage").scrollIntoView({ behavior: "smooth", block: "start" });
