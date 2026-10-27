@@ -1,0 +1,18 @@
+assets/body-mesh.js — license and provenance
+
+The athletes' base meshes are derived from the MakeHuman 1.1 base mesh ("hm08", makehuman/data/3dobjs/base.obj)
+and MakeHuman macro targets (makehuman/data/targets/macrodetails/...), fetched from
+https://github.com/makehumancommunity/makehuman (master).
+
+The MakeHuman project released these assets under CC0 1.0 Universal (public domain dedication):
+"These assets have been released under CC0 1.0 Universal ... to the fullest extent possible, it is the
+intention of the MakeHuman project that anyone can do whatever they want with it." (MakeHuman LICENSE.md,
+section C; full text in LICENSE.ASSETS.md of that repository; https://creativecommons.org/publicdomain/zero/1.0/).
+Original copyright holders at the time of the CC0 release: Data Collection AB, Joel Palmius, Jonas Hauquier
+(original copyright Manuel Bastioni, 2014).
+
+Changes made here (tools/build-body-mesh.js): targets applied for a young adult male and female, helper
+geometry removed, face features and ears removed and the surface faired (faceless), nipples and groin
+smoothed, skin weights computed for this site's skeleton, and the mesh moved onto that skeleton's rest pose.
+No MakeHuman code is included or run by the site. Muscle relief, the muscle map and fiber directions are
+added procedurally at runtime (js/figure3d.js), not part of the MakeHuman asset.
