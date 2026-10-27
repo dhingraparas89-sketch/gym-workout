@@ -221,9 +221,13 @@
     // Pad support: a plate under the pad, a post down to the floor frame.
     const under = face.clone().addScaledVector(n, -7.6);
     P.box(plen - 10, 0.8, 30, M.graphite, under, null, new THREE.Quaternion().setFromUnitVectors(V(1, 0, 0), d));
-    const postX = under.x + 4, ry = fy + 1.5 + 3.75;
-    P.beam(V(postX, ry + 3.75, 0), V(postX, under.y - 0.5, 0), 7.5, 7.5, V(0, 0, 1), { caps: false });
-    P.holes(V(postX - 3.77, ry + 14, 0), V(0, 1, 0), Math.max(1, Math.floor((under.y - ry - 26) / 5)), 5, V(-1, 0, 0), 0.8);
+    // The post stays clear of the belly (at least 6 cm in front of the trunk) and meets the
+    // underside of the sloping pad where it stands.
+    let trunkX = -Infinity; S.forEach((s) => { trunkX = Math.max(trunkX, s.J.pelvis.x + 22); });
+    const postX = Math.max(under.x + 4, Math.min(trunkX + 6, under.x + d.x * (plen / 2 - 8))), ry = fy + 1.5 + 3.75;
+    const postTop = under.y + (d.y * (postX - under.x)) / (d.x || 1) - 0.5;
+    P.beam(V(postX, ry + 3.75, 0), V(postX, postTop, 0), 7.5, 7.5, V(0, 0, 1), { caps: false });
+    P.holes(V(postX - 3.77, ry + 14, 0), V(0, 1, 0), Math.max(1, Math.floor((postTop - ry - 26) / 5)), 5, V(-1, 0, 0), 0.8);
     // Bar catch (two hooks) at the far bottom edge of the pad.
     const lip = face.clone().addScaledVector(d, plen / 2 - 1);
     [-1, 1].forEach((s) => {

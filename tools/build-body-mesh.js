@@ -77,13 +77,19 @@ const LOCAL = (o) => ({
   "armslegs/{s}-upperarm-shoulder-muscle-incr.target": o.delt, "armslegs/{s}-upperarm-muscle-incr.target": o.arm, "armslegs/{s}-lowerarm-muscle-incr.target": o.fore,
   "armslegs/{s}-upperleg-muscle-incr.target": o.thigh, "armslegs/{s}-lowerleg-muscle-incr.target": o.calf,
   "armslegs/{s}-upperarm-fat-decr.target": o.lean, "armslegs/{s}-lowerarm-fat-decr.target": o.lean, "armslegs/{s}-upperleg-fat-decr.target": o.lean, "armslegs/{s}-lowerleg-fat-decr.target": o.lean,
-  "stomach/stomach-pregnant-decr.target": o.belly, "buttocks/buttocks-volume-incr.target": o.glute || 0
+  "stomach/stomach-pregnant-decr.target": o.belly, "buttocks/buttocks-volume-incr.target": o.glute || 0,
+  // Round 7 (female shape): pelvis width and depth, thigh breadth.
+  "hip/hip-scale-horiz-incr.target": o.hipW || 0, "hip/hip-scale-depth-incr.target": o.hipD || 0,
+  "armslegs/{s}-upperleg-scale-horiz-incr.target": o.thighW || 0, "armslegs/{s}-upperleg-scale-depth-incr.target": o.thighD || 0
 });
 const BODIES = {
   male: { sex: "male", muscle: 1.3, weight: 0.1, height: 0.5, prop: 0.5,
     local: LOCAL({ pec: 0.55, lat: 0.6, vshape: 0.25, delt: 0.6, arm: 0.5, fore: 0.45, thigh: 0.4, calf: 0.45, lean: 0.6, belly: 0.5 }) },
   female: { sex: "female", muscle: 0.95, weight: 0.3, height: 0.5, prop: 0.5,
-    local: LOCAL({ pec: 0.15, lat: 0.35, vshape: 0.1, delt: 0.3, arm: 0.3, fore: 0.2, thigh: 0.45, calf: 0.4, lean: 0.55, belly: 0.45, glute: 0.35 }) }
+    // Round 7: fuller hips and glutes and stronger thighs (the user's reference: an athletic woman,
+    // not a slim mannequin); the waist stays where it was, so the waist-to-hip line is natural.
+    local: LOCAL({ pec: 0.15, lat: 0.35, vshape: 0.1, delt: 0.3, arm: 0.3, fore: 0.2, thigh: +(process.env.F_THIGH || 0.75), calf: 0.5, lean: 0.55, belly: 0.45,
+      glute: +(process.env.F_GLUTE || 0.85), hipW: +(process.env.F_HIPW || 0.65), hipD: +(process.env.F_HIPD || 0.3), thighW: +(process.env.F_THW || 0.3), thighD: +(process.env.F_THD || 0.2) }) }
 };
 if (process.env.NOLOCAL) Object.values(BODIES).forEach((b) => { b.local = {}; });
 function makeBody(b) {

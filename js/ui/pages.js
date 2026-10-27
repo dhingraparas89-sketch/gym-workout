@@ -177,7 +177,10 @@ function renderLibrary(r, ctx) {
         ${sel("muscle", "Target muscle", [], muscleOpts)}
       </div>
     </div>
-    <div class="lib-status"><p class="count" aria-live="polite"></p><span class="active-chips"></span><button type="button" class="reset" hidden>Reset filters</button></div>
+    <div class="lib-status"><p class="count" aria-live="polite"></p><span class="active-chips"></span><button type="button" class="reset" hidden>Reset filters</button>
+      <div class="seg seg-athlete lib-model" role="radiogroup" aria-label="Demonstration model on exercise pages" title="Athlete shown on exercise pages"><span class="seg-label">Model</span>
+        ${["male", "female"].map((a) => `<button type="button" role="radio" data-lib-athlete="${a}" aria-checked="${(Store.athlete() || "male") === a}">${a === "male" ? "Male" : "Female"}</button>`).join("")}
+      </div></div>
     <div class="lib-results"></div>
     ${hidden ? `<p class="lib-hidden">${ICON.info}${hidden} more ${hidden === 1 ? "exercise is" : "exercises are"} in progress and will appear here when their demonstrations are ready.</p>` : ""}`;
   const results = page.querySelector(".lib-results"), count = page.querySelector(".count"), reset = page.querySelector(".reset"), chips = page.querySelector(".active-chips");
@@ -211,6 +214,8 @@ function renderLibrary(r, ctx) {
       page.querySelectorAll(`[data-k="${b.dataset.k}"]`).forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.v === f[b.dataset.k])));
       sync(); draw(); return;
     }
+    const la = e.target.closest("[data-lib-athlete]");
+    if (la) { Store.setAthlete(la.dataset.libAthlete); page.querySelectorAll("[data-lib-athlete]").forEach((x) => x.setAttribute("aria-checked", String(x === la))); return; }
     if (e.target.closest("[data-clear]")) { f.muscle = ""; const s = page.querySelector('select[data-f="muscle"]'); if (s) s.value = ""; sync(); draw(); return; }
     if (e.target.closest(".reset, .reset-2")) { resetAll(); sync(); draw(); return; }
     if (e.target.closest(".search-clear")) {

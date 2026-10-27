@@ -45,7 +45,9 @@
     return { update(f) {
       if (mode === "both") {
         const m = mid(f.grip.R, f.grip.L), z = f.grip.R.clone().sub(f.grip.L).normalize();
-        const y = f.J.elbow.clone().sub(f.J.hand).normalize();
+        // Hang along the forearm in the body's mid-plane (J holds the right arm only; its inward
+        // slant to the joined hands used to swing the bell out beside the left knee).
+        const y = f.J.elbow.clone().sub(f.J.hand).setZ(0).normalize();
         bells[0].position.copy(m); bells[0].quaternion.copy(basis(y, z));
       } else ["R", "L"].forEach((s, i) => { bells[i].position.copy(f.grip[s]); bells[i].quaternion.copy(basis(V(0, 1, 0), f.axis[s])); });
     } };
@@ -60,7 +62,9 @@
     [x0 + 4, x1 - 4].forEach((x) => [-1, 1].forEach((s) => P.foot(x, s * (w / 2 - 4), 5, 5)));
   }
   K.v3PlyoBox = { build(ctx) {
-    const last = ctx.S.length - 1, fb = boundsAt(ctx, last, isFoot);
+    // fig.box.at: the rep moment (pose blend t) when the feet stand on the box; default the end pose.
+    const last = ctx.S.length - 1, bt = ctx.fig.box && ctx.fig.box.at;
+    const fb = boundsAt(ctx, bt != null ? Math.round(bt * last) : last, isFoot);
     const top = fb.min.y - 0.2;
     plyoBox(ctx.P, fb.min.x - 10, fb.max.x + 16, top);
     return { update() {} };
@@ -172,9 +176,12 @@
     const pivX = J.shoulder.x + (rev ? 6 : -4);
     const H = pivY - fy + 10;
     P.beam(V(colX, fy + 9, 0), V(colX, fy + H, 0), 9, 9, V(0, 0, 1), { caps: [false, true] });
-    P.beam(V(colX - 40, fy + 5.25, 0), V(Math.max(colX, sx1) + 30, fy + 5.25, 0), 7.5, 7.5, V(0, 1, 0));
+    // The front foot (stabilizer) sits clear of the toes so the planted feet never stand on it.
+    let toeX = -Infinity; S.forEach((s) => { toeX = Math.max(toeX, s.J.toe.x); });
+    const frontX = Math.max(Math.max(colX, sx1) + 24, toeX + 24); // J.toe is mid-foot (10 cm along it)
+    P.beam(V(colX - 40, fy + 5.25, 0), V(frontX + 6, fy + 5.25, 0), 7.5, 7.5, V(0, 1, 0));
     P.stabilizer(V(colX - 34, fy, 0), V(0, 0, 1), 60);
-    P.stabilizer(V(Math.max(colX, sx1) + 24, fy, 0), V(0, 0, 1), 56);
+    P.stabilizer(V(frontX, fy, 0), V(0, 0, 1), 56);
     P.beam(V(colX, fy + H - 4, 0), V(pivX, pivY + 6, 0), 7.5, 7.5, V(0, 0, 1), { caps: false });
     P.beam(V(pivX, pivY + 6, -half - 6), V(pivX, pivY + 6, half + 6), 7.5, 7.5, V(1, 0, 0));
     P.beam(padBack.clone().addScaledVector(d, -len / 2 + 8), V(colX, padBack.y - len * 0.2, 0), 5, 5, V(0, 0, 1), { caps: false });
@@ -208,9 +215,9 @@
       const THREE = T(), P = ctx.P, M = P.M, fy = P.floorY, S = ctx.S, J = S[0].J;
       const dl = J.pelvis.clone().sub(J.ankle).setZ(0).normalize(), nUp = V(-dl.y, dl.x, 0); // nUp: from the front of the legs toward their back
       // Thigh pads under the front of the upper thighs, just below the hip crease.
-      const padC = J.pelvis.clone().addScaledVector(dl, -15); padC.z = 0;
+      const padC = J.pelvis.clone().addScaledVector(dl, -18); padC.z = 0;
       const probe = padC.clone().addScaledVector(nUp, -40);
-      const gap = ctx.gap(probe, nUp, dl, 22, 30, (b) => b.startsWith("thigh"));
+      const gap = ctx.gap(probe, nUp, dl, 22, 30, (b) => b.startsWith("thigh") || b === "lowerTorso");
       const face = probe.clone().addScaledVector(nUp, (isFinite(gap) ? gap : 30) - 0.4);
       [1, -1].forEach((s) => P.pad(face.clone().add(V(0, 0, s * 9.5)), dl, 26, 17, 8, nUp));
       // Foot plate under the soles (perpendicular to the legs).
@@ -232,10 +239,11 @@
       // Frame: a spine beam under the pads and the plate, two legs and a floor base.
       const under = face.clone().addScaledVector(nUp, -9.5);
       const tail = plat.localToWorld(V(-14, -6, 0)); tail.z = 0;
-      P.beam(tail, under.clone().addScaledVector(dl, 10), 7.5, 7.5, V(0, 0, 1));
+      P.beam(tail, under.clone().addScaledVector(dl, -13), 7.5, 7.5, V(0, 0, 1));
       P.beam(V(rc.x, rc.y, 0), rc.clone().addScaledVector(nUp, -14), 4, 4, V(0, 0, 1), { caps: false });
-      const fr = under.clone().addScaledVector(dl, 4), bk = tail.clone();
-      P.beam(V(fr.x + 6, fy + 9, 0), fr, 7.5, 7.5, V(0, 0, 1), { caps: false });
+      // The front leg slopes back under the pads, clear of the trunk as it hangs down at the bottom.
+      const fr = under.clone().addScaledVector(dl, -17), bk = tail.clone();
+      P.beam(V(fr.x - 14, fy + 9, 0), fr, 7.5, 7.5, V(0, 0, 1), { caps: false });
       P.beam(V(bk.x - 4, fy + 9, 0), bk, 7.5, 7.5, V(0, 0, 1), { caps: false });
       P.beam(V(bk.x - 14, fy + 5.25, 0), V(fr.x + 22, fy + 5.25, 0), 7.5, 7.5, V(0, 1, 0));
       P.stabilizer(V(bk.x - 8, fy, 0), V(0, 0, 1), 60); P.stabilizer(V(fr.x + 16, fy, 0), V(0, 0, 1), 60);

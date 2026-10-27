@@ -522,7 +522,7 @@ const GYM3D = (() => {
   // soft, physically plausible reflections. It is symmetric about the vertical axis, so the
   // reflections look the same from every camera angle; the direct lights turn with the camera.
   const STUDIO = {
-    floor: 0x212327,    // the cyclorama's base tone (sRGB); vertex colors shade it into a pool of light
+    floor: 0x1d1e21,    // the cyclorama's base tone (sRGB); vertex colors shade it into a pool of light (round 7: a darker gym floor, like the reference)
     pool: 260,          // radius (cm) of the brighter floor pool around the athlete
     exposure: 1.0,
     tone: "aces",       // ACES filmic (contrast, deep fabric blacks); "agx" lifts and greys the black fabric
@@ -557,13 +557,15 @@ const GYM3D = (() => {
   // - a top light for the shoulders and traps, and a faint sky/ground fill.
   function lights(scene) {
     const THREE = T();
-    const hemi = new THREE.HemisphereLight(0xe8eef6, 0x3a3c40, 0.35); scene.add(hemi);
-    const key = new THREE.DirectionalLight(0xfff3e8, 3.0);
+    // (round 7: less flat ambient and fill, so contours and the floor's contact shadows read; the
+    // key a touch lower so the lighter, warmer skin keeps its highlights.)
+    const hemi = new THREE.HemisphereLight(0xe8eef6, 0x34363a, 0.26); scene.add(hemi);
+    const key = new THREE.DirectionalLight(0xfff1e4, 2.8);
     key.position.set(150, 250, 250); key.castShadow = true;
     key.shadow.mapSize.set(2048, 2048); key.shadow.bias = -0.00015; key.shadow.normalBias = 0.35;
     Object.assign(key.shadow.camera, { left: -170, right: 170, top: 170, bottom: -170, near: 50, far: 900 });
     scene.add(key); scene.add(key.target);
-    const fill = new THREE.DirectionalLight(0xdfe8f4, 0.7); fill.position.set(-280, 60, 200); scene.add(fill);
+    const fill = new THREE.DirectionalLight(0xdfe8f4, 0.55); fill.position.set(-280, 60, 200); scene.add(fill);
     const rim = new THREE.DirectionalLight(0xf1f6ff, 4.2); rim.position.set(-260, 150, -220); scene.add(rim);
     const rim2 = new THREE.DirectionalLight(0xfff4ea, 3.6); rim2.position.set(260, 130, -220); scene.add(rim2);
     const top = new THREE.DirectionalLight(0xffffff, 0.45); top.position.set(0, 400, -60); scene.add(top);
@@ -592,7 +594,7 @@ const GYM3D = (() => {
       const r = Math.hypot(pos.getX(i), pos.getZ(i)), y = pos.getY(i);
       // Linear-light factors: 1 in the pool, about 0.2 at the wall's foot, 0.12 high on the wall.
       const pool = 1 - sm(STUDIO.pool * 0.35, STUDIO.pool * 2.2, r);
-      const k = (0.32 + 0.68 * pool) * (1 - 0.5 * sm(0, 900, y));
+      const k = (0.22 + 0.52 * pool) * (1 - 0.55 * sm(0, 900, y));
       col[i * 3] = k * 0.97; col[i * 3 + 1] = k * 0.985; col[i * 3 + 2] = k;
     }
     geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
@@ -1225,9 +1227,11 @@ GYM3D.kits = (() => {
       P.beam(V(Math.min(hip.x - 40, rail0.x) - 6, fy + 5.25, s * 36), V(Math.max(rail1.x, rail0.x) + 10, fy + 5.25, s * 36), 7.5, 6, V(0, 1, 0));
       P.foot(Math.min(hip.x - 40, rail0.x) - 3, s * 36, 7, 7); P.foot(Math.max(rail1.x, rail0.x) + 7, s * 36, 7, 7);
       // Grab handles by the seat, where the hands are.
-      const h = S[0].grip[s > 0 ? "R" : "L"];
-      P.rod(V(h.x - 9, h.y, h.z), V(h.x + 9, h.y, h.z), 1.6, M.grip);
-      P.beam(V(h.x + 9, fy + 9, h.z), V(h.x + 9, h.y, h.z), 4, 4, V(0, 0, 1), { caps: [false, true] });
+      // The handle runs along the fist's own grip axis (knuckles along the handle, not across it).
+      const h = S[0].grip[s > 0 ? "R" : "L"], ax = S[0].axis[s > 0 ? "R" : "L"].clone().normalize();
+      const e0 = h.clone().addScaledVector(ax, -6), e1 = h.clone().addScaledVector(ax, 6), lo = e0.y < e1.y ? e0 : e1;
+      P.rod(e0, e1, 1.6, M.grip);
+      P.beam(V(lo.x, fy + 9, lo.z), lo, 4, 4, V(0, 0, 1), { caps: [false, true] });
     });
     P.beam(V(hip.x + 4, fy + 9, 0), V(hip.x + 4, seatTop - 9, 0), 7.5, 6, V(0, 0, 1), { caps: false });
     const bsup = face.clone().addScaledVector(n, -10);
@@ -1328,9 +1332,15 @@ GYM3D.kits = (() => {
       if (y0 == null) {
         y0 = top;
         // Handle bar across the front at the hands (in the carriage's frame).
-        const m0 = mid(g0.R, g0.L);
-        P.rod(V(m0.x, m0.y - y0, -22), V(m0.x, m0.y - y0, 22), 1.6, M.grip, hand);
-        [1, -1].forEach((s) => P.beam(V(cx + 8, 3, s * 22), V(m0.x, m0.y - y0, s * 22), 3.5, 3.5, V(0, 0, 1), { parent: hand, caps: false }));
+        // One short handle in each fist, along the fist's grip axis (knuckles along the handle),
+        // on an arm from the carriage.
+        [1, -1].forEach((s) => {
+          const g = g0[s > 0 ? "R" : "L"], ax = S[0].axis[s > 0 ? "R" : "L"].clone().normalize();
+          const c = V(g.x, g.y - y0, g.z), e0 = c.clone().addScaledVector(ax, -5.5), e1 = c.clone().addScaledVector(ax, 5.5);
+          P.rod(e0, e1, 1.6, M.grip, hand);
+          const out = Math.abs(e0.z) > Math.abs(e1.z) ? e0 : e1;
+          P.beam(V(cx + 8, 3, s * 22), V(out.x, out.y, s * Math.max(Math.abs(out.z), 13)), 3.5, 3.5, V(0, 0, 1), { parent: hand, caps: false });
+        });
       }
       car.position.y = top - 0.4;
       const L = run.update(st.g.localToWorld(st.attach.clone().add(st.moving.position)), [{ C: p1.g.position.clone(), n: V(0, 0, 1), r: 4.6, pulley: p1 }, { C: p2.g.position.clone(), n: V(0, 0, 1), r: 4.6, pulley: p2 }], V(rx, car.position.y - 4, 0)).length;
